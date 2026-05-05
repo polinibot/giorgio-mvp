@@ -1255,6 +1255,48 @@ function App() {
           )}
 
           <form ref={formRef} onSubmit={handleSubmit(onSubmit)} className="form" noValidate>
+            {/* Foto */}
+            <div className="section photo-upload-section">
+              <h2>📷 Foto</h2>
+              {formPhotos.length > 0 && (
+                <div className="photo-preview-grid">
+                  {formPhotos.map((item) => (
+                    <div key={item.id} className="photo-preview-item">
+                      <img src={item.preview} alt="Preview" />
+                      <button
+                        className="photo-remove-btn"
+                        type="button"
+                        onClick={() => removeFormPhoto(item.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {formPhotoUploadProgress && (
+                <div className="upload-progress">
+                  <span className="loading-spinner sm"></span>
+                  {formPhotoUploadProgress}
+                </div>
+              )}
+              <input
+                type="file"
+                ref={formFileInputRef}
+                className="photo-file-input"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                onChange={(e) => { if (e.target.files.length) addFormPhotos(Array.from(e.target.files)); e.target.value = ''; }}
+              />
+              <button
+                className="photo-upload-btn"
+                type="button"
+                onClick={() => formFileInputRef.current?.click()}
+              >
+                📷 Aggiungi foto
+              </button>
+            </div>
+
             {/* Dati cliente */}
             <div className="section">
               <h2>👤 Dati Cliente</h2>
@@ -1305,16 +1347,14 @@ function App() {
               </div>
 
               {watch('customer_type') === 'azienda' && (
-                <div className="form-group">
-                  <label>
-                    <input type="checkbox" {...register('billing_to_complete')} />
-                    Dati fatturazione da completare
-                  </label>
-                </div>
+                <label className="inline-checkbox">
+                  <input type="checkbox" {...register('billing_to_complete')} />
+                  Dati fatturazione da completare
+                </label>
               )}
 
               {watch('billing_to_complete') && watch('customer_type') === 'azienda' && (
-                <>
+                <div className="revealed-fields">
                   <div className="form-group">
                     <label htmlFor="company_name">Ragione Sociale</label>
                     <input
@@ -1369,50 +1409,8 @@ function App() {
                       placeholder="20100"
                     />
                   </div>
-                </>
-              )}
-            </div>
-
-            {/* Foto */}
-            <div className="section photo-upload-section">
-              <h2>📷 Foto</h2>
-              {formPhotos.length > 0 && (
-                <div className="photo-preview-grid">
-                  {formPhotos.map((item) => (
-                    <div key={item.id} className="photo-preview-item">
-                      <img src={item.preview} alt="Preview" />
-                      <button
-                        className="photo-remove-btn"
-                        type="button"
-                        onClick={() => removeFormPhoto(item.id)}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
                 </div>
               )}
-              {formPhotoUploadProgress && (
-                <div className="upload-progress">
-                  <span className="loading-spinner sm"></span>
-                  {formPhotoUploadProgress}
-                </div>
-              )}
-              <input
-                type="file"
-                ref={formFileInputRef}
-                className="photo-file-input"
-                accept="image/jpeg,image/png,image/webp"
-                multiple
-                onChange={(e) => { if (e.target.files.length) addFormPhotos(Array.from(e.target.files)); e.target.value = ''; }}
-              />
-              <button
-                className="photo-upload-btn"
-                type="button"
-                onClick={() => formFileInputRef.current?.click()}
-              >
-                📷 Aggiungi foto
-              </button>
             </div>
 
             {/* Appuntamento */}
@@ -1543,7 +1541,7 @@ function App() {
                       />
                     </div>
                     <div className="form-group">
-                      <label>
+                      <label className="inline-checkbox">
                         <input
                           type="checkbox"
                           checked={sections[context]?.waste_apply || false}
@@ -1552,12 +1550,14 @@ function App() {
                         Applica smaltimento rifiuti
                       </label>
                       {sections[context]?.waste_apply && (
-                        <input
-                          type="number" step="0.1"
-                          value={sections[context]?.waste_percentage || 2}
-                          onChange={(e) => updateSection(context, 'waste_percentage', parseFloat(e.target.value) || 2)}
-                          className="input" placeholder="2" min="0" max="100"
-                        />
+                        <div className="revealed-fields">
+                          <input
+                            type="number" step="0.1"
+                            value={sections[context]?.waste_percentage || 2}
+                            onChange={(e) => updateSection(context, 'waste_percentage', parseFloat(e.target.value) || 2)}
+                            className="input" placeholder="Percentuale smaltimento %" min="0" max="100"
+                          />
+                        </div>
                       )}
                     </div>
                   </>

@@ -642,7 +642,11 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 12px;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
 }
 
 label {
@@ -717,6 +721,48 @@ label {
 .checkbox-label input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* --- Inline checkbox (inside section) --- */
+.inline-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 400;
+  text-transform: none;
+  padding: 10px 14px;
+  border-radius: var(--radius-input);
+  transition: background-color 0.15s ease;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  margin-top: 8px;
+}
+
+.inline-checkbox:hover {
+  background-color: rgba(79, 140, 255, 0.06);
+  border-color: rgba(79, 140, 255, 0.2);
+}
+
+.inline-checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* --- Revealed fields (billing, waste %, etc.) --- */
+.revealed-fields {
+  animation: revealFields 0.3s ease-out;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.revealed-fields .form-group:first-child {
+  margin-top: 12px;
 }
 
 /* --- Checkboxes --- */
@@ -1372,6 +1418,19 @@ label {
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+@keyframes revealFields {
+  from {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    max-height: 500px;
+    transform: translateY(0);
+  }
 }
 
 @keyframes successPulse {
