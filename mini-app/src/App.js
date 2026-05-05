@@ -211,12 +211,36 @@ function App() {
   const [parts, setParts] = useState({});
   const [formPhotos, setFormPhotos] = useState([]);
   const [formPhotoUploadProgress, setFormPhotoUploadProgress] = useState('');
+  const [existingPhotos, setExistingPhotos] = useState([]);
   const formFileInputRef = useRef(null);
 
   const slowTimerRef = useRef(null);
   const toastIdRef = useRef(0);
   const formRef = useRef(null);
   const searchTimerRef = useRef(null);
+
+  /** Normalize sections data: ensure description_rows is always an array */
+  const normalizeSections = (rawSections) => {
+    if (!rawSections || !Array.isArray(rawSections)) return {};
+    const result = {};
+    rawSections.forEach(s => {
+      result[s.context] = {
+        ...s,
+        description_rows: Array.isArray(s.description_rows)
+          ? (s.description_rows.length > 0 ? s.description_rows : [''])
+          : typeof s.description_rows === 'string'
+            ? (s.description_rows.trim() ? s.description_rows.split('\n') : [''])
+            : [''],
+        man_hours: s.man_hours || '',
+        mac_hours: s.mac_hours || '',
+        materials_amount: s.materials_amount || '',
+        waste_apply: s.waste_apply || false,
+        waste_percentage: s.waste_percentage || 2,
+        notes: s.notes || '',
+      };
+    });
+    return result;
+  };
 
   const normalizeContexts = (contexts) => {
     if (Array.isArray(contexts)) return contexts;
@@ -247,6 +271,7 @@ function App() {
     setCurrentView(view);
     if (opts.practiceId) setSelectedPracticeId(opts.practiceId);
     if (opts.editingPractice) setEditingPractice(opts.editingPractice);
+    if (opts.existingPhotos) setExistingPhotos(opts.existingPhotos);
   }, [currentView]);
 
   const navigateBack = useCallback(() => {
@@ -260,6 +285,7 @@ function App() {
     setSections({});
     setParts({});
     setFormPhotos([]);
+    setExistingPhotos([]);
     setFormPhotoUploadProgress('');
   }, [navigationStack]);
 
@@ -571,9 +597,7 @@ function App() {
         }
 
         if (!isDraft && response.data.data.sections) {
-          const sectionsData = {};
-          response.data.data.sections.forEach(s => { sectionsData[s.context] = s; });
-          setSections(sectionsData);
+          setSections(normalizeSections(response.data.data.sections));
         }
 
         if (!isDraft && response.data.data.parts) {
@@ -583,6 +607,11 @@ function App() {
             partsData[p.context].push({ name: p.name || '', quantity: p.quantity || '' });
           });
           setParts(partsData);
+        }
+
+        // Load existing photos
+        if (response.data.data.photos) {
+          setExistingPhotos(response.data.data.photos);
         }
       }
     } catch (err) {
@@ -617,9 +646,7 @@ function App() {
       if (p.appointment_date) setValue('appointment_date', new Date(p.appointment_date));
       setSelectedContexts(normalizeContexts(p.contexts));
       if (p.sections) {
-        const sd = {};
-        (Array.isArray(p.sections) ? p.sections : []).forEach(s => { sd[s.context] = s; });
-        setSections(sd);
+        setSections(normalizeSections(Array.isArray(p.sections) ? p.sections : []));
       }
       if (p.parts) {
         const pd = {};
@@ -690,19 +717,34 @@ function App() {
   };
 
   const updateSection = (context, field, value) => {
-    setSections(prev => ({ ...prev, [context]: { ...prev[context], [field]: value } }));
+    setSections(prev => {
+      const current = prev[context] || {};
+      return { ...prev, [context]: { ...current, [field]: value } };
+    });
   };
 
   const addDescriptionRow = (context) => {
-    setSections(prev => ({ ...prev, [context]: { ...prev[context], description_rows: [...prev[context].description_rows, ''] } }));
+    setSections(prev => {
+      const current = prev[context] || {};
+      const rows = Array.isArray(current.description_rows) ? current.description_rows : [''];
+      return { ...prev, [context]: { ...current, description_rows: [...rows, ''] } };
+    });
   };
 
   const removeDescriptionRow = (context, index) => {
-    setSections(prev => ({ ...prev, [context]: { ...prev[context], description_rows: prev[context].description_rows.filter((_, i) => i !== index) } }));
+    setSections(prev => {
+      const current = prev[context] || {};
+      const rows = Array.isArray(current.description_rows) ? current.description_rows : [''];
+      return { ...prev, [context]: { ...current, description_rows: rows.filter((_, i) => i !== index) } };
+    });
   };
 
   const updateDescriptionRow = (context, index, value) => {
-    setSections(prev => ({ ...prev, [context]: { ...prev[context], description_rows: prev[context].description_rows.map((row, i) => i === index ? value : row) } }));
+    setSections(prev => {
+      const current = prev[context] || {};
+      const rows = Array.isArray(current.description_rows) ? current.description_rows : [''];
+      return { ...prev, [context]: { ...current, description_rows: rows.map((row, i) => i === index ? value : row) } };
+    });
   };
 
   // --- Parts ---
@@ -910,6 +952,7 @@ function App() {
     setValue('internal_notes', '');
     setValue('billing_to_complete', false);
     setFormPhotos([]);
+    setExistingPhotos([]);
     setFormPhotoUploadProgress('');
     setLoading(false);
   };
@@ -1181,7 +1224,7 @@ function App() {
             <button
               className="button-submit"
               type="button"
-              onClick={() => navigateTo('form', { editingPractice: practice })}
+              onClick={() => navigateTo('form', { editingPractice: practice, existingPhotos: photos })}
             >
               ✏️ Modifica
             </button>
@@ -1257,7 +1300,36 @@ function App() {
           <form ref={formRef} onSubmit={handleSubmit(onSubmit)} className="form" noValidate>
             {/* Foto */}
             <div className="section photo-upload-section">
-              <h2>📷 Foto</h2>
+              <h2>📷 Foto{existingPhotos.length > 0 ? ` (${existingPhotos.length} esistenti${formPhotos.length > 0 ? ` + ${formPhotos.length} nuove` : ''})` : ''}</h2>
+
+              {/* Existing photos from server */}
+              {existingPhotos.length > 0 && (
+                <div className="photo-preview-grid" style={{ marginBottom: formPhotos.length > 0 ? 12 : 0 }}>
+                  {existingPhotos.map((photo, i) => (
+                    <div key={photo.id || `existing-${i}`} className="photo-preview-item">
+                      <img src={photo.thumbnail || photo.url} alt={`Foto ${i + 1}`} />
+                      <button
+                        className="photo-remove-btn"
+                        type="button"
+                        onClick={() => {
+                          setExistingPhotos(prev => prev.filter(p => p.id !== photo.id));
+                          // Delete from server if practice exists
+                          if (practice?.id && photo.id) {
+                            fetch(`${API_BASE_URL}/api/practices/${practice.id}/photos/${photo.id}`, {
+                              method: 'DELETE',
+                              headers: { 'X-Telegram-Init-Data': initData }
+                            }).catch(() => {});
+                          }
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Newly added photos */}
               {formPhotos.length > 0 && (
                 <div className="photo-preview-grid">
                   {formPhotos.map((item) => (
