@@ -46,13 +46,19 @@ function App() {
   const { register, control, handleSubmit, setValue, watch, formState: { errors } } = useForm();
 
   const loadPractice = useCallback(async (practiceId, currentInitData) => {
+    const fullUrl = `${API_BASE_URL}/mini-app/data?practice_id=${practiceId}`;
     setDebugInfo(prev => ({
       ...prev,
       phase: 'loading_practice',
       practiceId,
-      hasInitData: !!currentInitData
+      hasInitData: !!currentInitData,
+      apiUrl: fullUrl,
+      apiBaseUrl: API_BASE_URL
     }));
     try {
+      console.log('Chiamata API a:', fullUrl);
+      console.log('InitData:', currentInitData ? 'presente' : 'mancante');
+      
       const response = await axios.get(`${API_BASE_URL}/mini-app/data`, {
         params: { practice_id: practiceId },
         headers: { 'X-Telegram-Init-Data': currentInitData },
@@ -336,6 +342,8 @@ function App() {
           <div><strong>InitData:</strong> {debugInfo.hasInitData ? 'presente' : 'assente'}</div>
           <div><strong>Practice ID:</strong> {debugInfo.practiceId || '-'}</div>
           <div><strong>Plate:</strong> {debugInfo.plate || '-'}</div>
+          {debugInfo.apiUrl && <div><strong>API URL:</strong> {debugInfo.apiUrl}</div>}
+          {debugInfo.apiBaseUrl && <div><strong>API Base:</strong> {debugInfo.apiBaseUrl}</div>}
           {debugInfo.lastError && <div><strong>Errore:</strong> {debugInfo.lastError}</div>}
         </div>
         

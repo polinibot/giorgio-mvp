@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import datetime
 import os
 
 from config import settings
@@ -92,6 +93,12 @@ def validate_telegram_init_data(
 async def root():
     """Health check"""
     return {"status": "ok", "service": "giorgio-api"}
+
+
+@app.get("/test-connection")
+async def test_connection():
+    """Test endpoint per verificare connessione da Vercel"""
+    return {"status": "ok", "message": "Connection successful", "timestamp": str(datetime.utcnow())}
 
 
 @app.get("/mini-app/data")
