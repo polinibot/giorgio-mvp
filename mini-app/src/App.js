@@ -165,6 +165,9 @@ const CONTEXT_COLORS = {
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
+// Form fields that are actually sent to the backend
+const FORM_FIELDS = ['plate_confirmed', 'phone', 'customer_name', 'customer_type', 'billing_to_complete', 'appointment_date', 'appointment_time', 'practice_type', 'internal_notes'];
+
 // --- Main App ---
 
 function App() {
@@ -287,6 +290,8 @@ function App() {
     setFormPhotos([]);
     setExistingPhotos([]);
     setFormPhotoUploadProgress('');
+    setPractice(null);
+    setError('');
   }, [navigationStack]);
 
   // --- Telegram BackButton ---
@@ -346,7 +351,7 @@ function App() {
         });
       }
       if (draft.selectedContexts) setSelectedContexts(draft.selectedContexts);
-      if (draft.sections) setSections(draft.sections);
+      if (draft.sections) setSections(normalizeSections(Object.values(draft.sections)));
       if (draft.parts) setParts(draft.parts);
       return true;
     } catch (_) { return false; }
@@ -590,10 +595,14 @@ function App() {
           setValue('plate_confirmed', practiceData.plate_confirmed || plateFromUrl || '');
         } else {
           setSelectedContexts(normalizeContexts(practiceData.contexts));
-          Object.keys(practiceData).forEach(key => {
-            if (key !== 'contexts' && key !== 'appointment_date') setValue(key, practiceData[key]);
+          // Only set form-relevant fields, not internal DB fields
+          FORM_FIELDS.forEach(key => {
+            if (key === 'appointment_date' && practiceData[key]) {
+              setValue(key, new Date(practiceData[key]));
+            } else if (key !== 'appointment_date') {
+              if (practiceData[key] !== undefined) setValue(key, practiceData[key]);
+            }
           });
-          if (practiceData.appointment_date) setValue('appointment_date', new Date(practiceData.appointment_date));
         }
 
         if (!isDraft && response.data.data.sections) {
@@ -645,6 +654,7 @@ function App() {
       setValue('billing_to_complete', p.billing_to_complete || false);
       if (p.appointment_date) setValue('appointment_date', new Date(p.appointment_date));
       setSelectedContexts(normalizeContexts(p.contexts));
+      setError('');
       if (p.sections) {
         setSections(normalizeSections(Array.isArray(p.sections) ? p.sections : []));
       }
@@ -652,7 +662,7 @@ function App() {
         const pd = {};
         (Array.isArray(p.parts) ? p.parts : []).forEach(pt => {
           if (!pd[pt.context]) pd[pt.context] = [];
-          pd[pt.context].push({ name: pt.name || '', quantity: pt.quantity || '' });
+          pd[pt.context].push({ name: pt.name || '', quantity: pt.quantity || '', _key: Date.now() + Math.random() });
         });
         setParts(pd);
       }
@@ -686,7 +696,6 @@ function App() {
           if (plate) setValue('plate_confirmed', plate);
           const hadDraft = editingPractice ? false : restoreDraft();
           if (hadDraft) setShowDraftBanner(true);
-          if (plate) setValue('plate_confirmed', plate);
           setSelectedContexts(prev => prev.length ? prev : []);
           setLoading(false);
         }
@@ -751,7 +760,7 @@ function App() {
   const getPartsForContext = (context) => parts[context] || [];
 
   const addPart = (context) => {
-    setParts(prev => ({ ...prev, [context]: [...(prev[context] || []), { name: '', quantity: '' }] }));
+    setParts(prev => ({ ...prev, [context]: [...(prev[context] || []), { name: '', quantity: '', _key: Date.now() + Math.random() }] }));
   };
 
   const removePart = (context, index) => {
@@ -841,9 +850,16 @@ function App() {
 
     try {
       const payload = {
-        ...data,
+        plate_confirmed: data.plate_confirmed,
+        phone: data.phone,
+        customer_name: data.customer_name,
+        customer_type: data.customer_type,
+        billing_to_complete: data.billing_to_complete || false,
+        appointment_date: data.appointment_date.toISOString().split('T')[0],
+        appointment_time: data.appointment_time,
+        practice_type: data.practice_type,
         contexts: selectedContexts,
-        appointment_date: data.appointment_date.toISOString().split('T')[0]
+        internal_notes: data.internal_notes || null,
       };
 
       let response;
@@ -977,6 +993,7 @@ function App() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const minAppointmentDate = practice ? null : today;
 
   // ==================== RENDER ====================
 
@@ -1312,14 +1329,21 @@ function App() {
                         className="photo-remove-btn"
                         type="button"
                         onClick={() => {
-                          setExistingPhotos(prev => prev.filter(p => p.id !== photo.id));
-                          // Delete from server if practice exists
-                          if (practice?.id && photo.id) {
-                            fetch(`${API_BASE_URL}/api/practices/${practice.id}/photos/${photo.id}`, {
-                              method: 'DELETE',
-                              headers: { 'X-Telegram-Init-Data': initData }
-                            }).catch(() => {});
-                          }
+                          setConfirmModal({
+                            title: '🗑 Eliminare questa foto?',
+                            message: 'La foto verrà rimossa definitivamente.',
+                            onConfirm: () => {
+                              setConfirmModal(null);
+                              setExistingPhotos(prev => prev.filter(p => p.id !== photo.id));
+                              if (practice?.id && photo.id) {
+                                fetch(`${API_BASE_URL}/api/practices/${practice.id}/photos/${photo.id}`, {
+                                  method: 'DELETE',
+                                  headers: { 'X-Telegram-Init-Data': initData }
+                                }).catch(() => {});
+                              }
+                            },
+                            onCancel: () => setConfirmModal(null)
+                          });
                         }}
                       >
                         ✕
@@ -1502,7 +1526,7 @@ function App() {
                       className={`input ${fieldErrors.appointment_date ? 'input-error' : ''}`}
                       dateFormat="dd/MM/yyyy"
                       placeholderText="GG/MM/AAAA"
-                      minDate={today}
+                      minDate={minAppointmentDate}
                     />
                   )}
                 />
@@ -1564,7 +1588,7 @@ function App() {
                 <div className="form-group">
                   <label>Righe Descrittive*</label>
                   {sections[context]?.description_rows?.map((row, index) => (
-                    <div key={index} className="description-row">
+                    <div key={`${context}-row-${index}-${sections[context].description_rows.length}`} className="description-row">
                       <input
                         type="text"
                         value={row}
@@ -1652,7 +1676,7 @@ function App() {
                   <div className="form-group">
                     <label>Pezzi / ricambi</label>
                     {getPartsForContext(context).map((part, index) => (
-                      <div key={index} className="description-row">
+                      <div key={part._key || index} className="description-row">
                         <input
                           type="text" value={part.name}
                           onChange={(e) => updatePart(context, index, 'name', e.target.value)}
