@@ -64,6 +64,7 @@ class TelegramBot:
                 return
             
             try:
+                progress_message = await message.answer("🔄 Analizzo la foto, attendi un attimo...")
                 # Scarica la foto
                 photo = message.photo[-1]  # Prendi la risoluzione più alta
                 file_info = await self.bot.get_file(photo.file_id)
@@ -126,6 +127,7 @@ class TelegramBot:
                         ocr_result,
                         local_path
                     )
+                    await progress_message.delete()
                 finally:
                     db.close()
                     

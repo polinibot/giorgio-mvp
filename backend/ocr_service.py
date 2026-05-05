@@ -1,5 +1,6 @@
 import re
 import pytesseract
+import requests
 from PIL import Image, ImageEnhance, ImageFilter
 from typing import Optional
 from config import settings
@@ -22,6 +23,8 @@ class OCRService:
         r'^[A-Z]{2}[0-9]{3}[A-Z]{1}$',  # Personalizzate: AB123C
     ]
     
+    PLATE_RECOGNIZER_API_URL = "https://api.platerecognizer.com/v1/plate-reader/"
+    
     @staticmethod
     def extract_plate_from_image(image_path: str) -> OCRResult:
         """
@@ -34,6 +37,10 @@ class OCRService:
             OCRResult con targa rilevata e confidenza
         """
         try:
+            api_result = OCRService._extract_with_plate_recognizer(image_path)
+            if api_result and api_result.plate:
+                return api_result
+
             image = Image.open(image_path)
             candidates = OCRService._preprocess_images(image)
             configs = [
@@ -76,6 +83,43 @@ class OCRService:
         except Exception as e:
             print(f"Errore OCR: {e}")
             return OCRResult("", 0.0)
+    
+    @staticmethod
+    def _extract_with_plate_recognizer(image_path: str) -> Optional[OCRResult]:
+        token = settings.plate_recognizer_token.strip()
+        if not token:
+            return None
+
+        try:
+            with open(image_path, "rb") as image_file:
+                response = requests.post(
+                    OCRService.PLATE_RECOGNIZER_API_URL,
+                    files={"upload": image_file},
+                    headers={"Authorization": f"Token {token}"},
+                    timeout=30,
+                )
+
+            if not response.ok:
+                print(f"Plate Recognizer error: {response.status_code} {response.text}")
+                return None
+
+            data = response.json()
+            results = data.get("results", [])
+            if not results:
+                return None
+
+            best_result = max(results, key=lambda item: item.get("score", 0))
+            plate = re.sub(r'[^A-Z0-9]', '', best_result.get("plate", "").upper())
+            confidence = float(best_result.get("score", 0))
+
+            extracted_plate = OCRService._extract_plate_from_text(plate)
+            if not extracted_plate:
+                return None
+
+            return OCRResult(extracted_plate, confidence)
+        except Exception as e:
+            print(f"Errore Plate Recognizer: {e}")
+            return None
     
     @staticmethod
     def _preprocess_images(image: Image.Image):
