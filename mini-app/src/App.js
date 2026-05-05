@@ -188,6 +188,9 @@ function App() {
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [deletingPhotoId, setDeletingPhotoId] = useState(null);
+  const detailFileInputRef = useRef(null);
 
   // Form state
   const [loading, setLoading] = useState(true);
@@ -202,6 +205,9 @@ function App() {
   const [selectedContexts, setSelectedContexts] = useState([]);
   const [sections, setSections] = useState({});
   const [parts, setParts] = useState({});
+  const [formPhotos, setFormPhotos] = useState([]);
+  const [formPhotoUploadProgress, setFormPhotoUploadProgress] = useState('');
+  const formFileInputRef = useRef(null);
 
   const slowTimerRef = useRef(null);
   const toastIdRef = useRef(0);
@@ -389,6 +395,128 @@ function App() {
       loadDetail(selectedPracticeId);
     }
   }, [currentView, selectedPracticeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Photo upload (detail view) ---
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+  const validateFile = useCallback((file) => {
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      addToast('Tipo file non supportato. Usa JPG, PNG o WebP.', 'error');
+      return false;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      addToast('File troppo grande. Massimo 10MB.', 'error');
+      return false;
+    }
+    return true;
+  }, [addToast]);
+
+  const uploadPhotoToDetail = useCallback(async (file) => {
+    if (!detailData?.id || !validateFile(file)) return;
+    setUploadingPhoto(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE_URL}/api/practices/${detailData.id}/photos`, {
+        method: 'POST',
+        headers: { 'X-Telegram-Init-Data': initData },
+        body: formData
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      const json = await res.json();
+      if (json.success) {
+        setDetailData(prev => ({ ...prev, photos: [...(prev.photos || []), json.data] }));
+        addToast('Foto caricata con successo!', 'success');
+      } else {
+        throw new Error(json.detail || 'Upload failed');
+      }
+    } catch (err) {
+      addToast('Errore durante il caricamento della foto.', 'error');
+    } finally {
+      setUploadingPhoto(false);
+      if (detailFileInputRef.current) detailFileInputRef.current.value = '';
+    }
+  }, [detailData, initData, addToast, validateFile]);
+
+  const deletePhoto = useCallback((photoId) => {
+    if (!detailData?.id) return;
+    setConfirmModal({
+      title: '🗑 Eliminare questa foto?',
+      message: 'La foto verrà rimossa definitivamente.',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setDeletingPhotoId(photoId);
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/practices/${detailData.id}/photos/${photoId}`, {
+            method: 'DELETE',
+            headers: { 'X-Telegram-Init-Data': initData }
+          });
+          if (!res.ok) throw new Error('Delete failed');
+          setDetailData(prev => ({ ...prev, photos: (prev.photos || []).filter(p => p.id !== photoId) }));
+          addToast('Foto eliminata.', 'success');
+        } catch (err) {
+          addToast('Errore durante l\'eliminazione della foto.', 'error');
+        } finally {
+          setDeletingPhotoId(null);
+        }
+      },
+      onCancel: () => setConfirmModal(null)
+    });
+  }, [detailData, initData, addToast]);
+
+  // --- Form photo queue ---
+  const addFormPhotos = useCallback((files) => {
+    const validFiles = [];
+    for (const file of files) {
+      if (!ACCEPTED_TYPES.includes(file.type)) {
+        addToast(`${file.name}: tipo non supportato.`, 'error');
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        addToast(`${file.name}: troppo grande (max 10MB).`, 'error');
+        continue;
+      }
+      validFiles.push({ file, preview: URL.createObjectURL(file), id: Date.now() + Math.random() });
+    }
+    setFormPhotos(prev => [...prev, ...validFiles]);
+  }, [addToast]);
+
+  const removeFormPhoto = useCallback((id) => {
+    setFormPhotos(prev => {
+      const item = prev.find(p => p.id === id);
+      if (item) URL.revokeObjectURL(item.preview);
+      return prev.filter(p => p.id !== id);
+    });
+  }, []);
+
+  const uploadQueuedPhotos = useCallback(async (practiceId) => {
+    if (formPhotos.length === 0) return;
+    let successCount = 0;
+    let failCount = 0;
+    for (let i = 0; i < formPhotos.length; i++) {
+      setFormPhotoUploadProgress(`Caricamento foto ${i + 1}/${formPhotos.length}...`);
+      try {
+        const fd = new FormData();
+        fd.append('file', formPhotos[i].file);
+        const res = await fetch(`${API_BASE_URL}/api/practices/${practiceId}/photos`, {
+          method: 'POST',
+          headers: { 'X-Telegram-Init-Data': initData },
+          body: fd
+        });
+        if (res.ok) successCount++;
+        else failCount++;
+      } catch {
+        failCount++;
+      }
+    }
+    setFormPhotoUploadProgress('');
+    if (successCount > 0) addToast(`${successCount} foto caricate con successo!`, 'success');
+    if (failCount > 0) addToast(`${failCount} foto non caricate.`, 'error');
+    // Cleanup previews
+    formPhotos.forEach(p => URL.revokeObjectURL(p.preview));
+    setFormPhotos([]);
+  }, [formPhotos, initData, addToast]);
 
   // --- Toggle sync ---
   const toggleSync = useCallback(async (id, currentSynced) => {
@@ -721,6 +849,12 @@ function App() {
         }
 
         clearDraft();
+
+        // Upload queued photos after practice creation
+        if (formPhotos.length > 0 && practiceId) {
+          await uploadQueuedPhotos(practiceId);
+        }
+
         addToast(practice ? 'Pratica aggiornata con successo!' : 'Pratica creata con successo!', 'success');
 
         if (startedFromBot && !practice) {
@@ -762,6 +896,8 @@ function App() {
     setValue('practice_type', 'preventivo');
     setValue('internal_notes', '');
     setValue('billing_to_complete', false);
+    setFormPhotos([]);
+    setFormPhotoUploadProgress('');
     setLoading(false);
   };
 
@@ -975,18 +1111,48 @@ function App() {
           )}
 
           {/* Photos */}
-          {photos.length > 0 && (
-            <div className="section">
-              <h2>📷 Foto ({photos.length})</h2>
+          <div className="section">
+            <h2>📷 Foto ({photos.length})</h2>
+            {photos.length > 0 ? (
               <div className="photo-grid">
                 {photos.map((photo, i) => (
-                  <div key={i} className="photo-thumb" onClick={() => setLightboxPhoto(photo.url || photo)}>
-                    <img src={photo.thumbnail || photo.url || photo} alt={`Foto ${i + 1}`} />
+                  <div key={photo.id || i} className="photo-thumb-wrapper">
+                    <img
+                      src={photo.thumbnail || photo.url || photo}
+                      alt={`Foto ${i + 1}`}
+                      onClick={() => setLightboxPhoto(photo.url || photo)}
+                    />
+                    <button
+                      className="photo-remove-btn"
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); deletePhoto(photo.id); }}
+                      disabled={deletingPhotoId === photo.id}
+                    >
+                      ✕
+                    </button>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="photo-empty-state">Nessuna foto. Aggiungi la prima foto.</div>
+            )}
+            <input
+              type="file"
+              ref={detailFileInputRef}
+              className="photo-file-input"
+              accept="image/jpeg,image/png,image/webp"
+              capture="environment"
+              onChange={(e) => { if (e.target.files[0]) uploadPhotoToDetail(e.target.files[0]); }}
+            />
+            <button
+              className="photo-upload-btn"
+              type="button"
+              disabled={uploadingPhoto}
+              onClick={() => detailFileInputRef.current?.click()}
+            >
+              {uploadingPhoto ? <><span className="loading-spinner sm"></span> Caricamento...</> : '📷 Aggiungi foto'}
+            </button>
+          </div>
 
           {/* Notes */}
           {(d.internal_notes || d.notes) && (
@@ -1316,6 +1482,48 @@ function App() {
                 rows="3"
                 placeholder="Note interne per la pratica..."
               />
+            </div>
+
+            {/* Foto */}
+            <div className="section photo-upload-section">
+              <h2>📷 Foto</h2>
+              {formPhotos.length > 0 && (
+                <div className="photo-preview-grid">
+                  {formPhotos.map((item) => (
+                    <div key={item.id} className="photo-preview-item">
+                      <img src={item.preview} alt="Preview" />
+                      <button
+                        className="photo-remove-btn"
+                        type="button"
+                        onClick={() => removeFormPhoto(item.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {formPhotoUploadProgress && (
+                <div className="upload-progress">
+                  <span className="loading-spinner sm"></span>
+                  {formPhotoUploadProgress}
+                </div>
+              )}
+              <input
+                type="file"
+                ref={formFileInputRef}
+                className="photo-file-input"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                onChange={(e) => { if (e.target.files.length) addFormPhotos(Array.from(e.target.files)); e.target.value = ''; }}
+              />
+              <button
+                className="photo-upload-btn"
+                type="button"
+                onClick={() => formFileInputRef.current?.click()}
+              >
+                📷 Aggiungi foto
+              </button>
             </div>
 
             <button

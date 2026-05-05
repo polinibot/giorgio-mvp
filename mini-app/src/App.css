@@ -1381,6 +1381,177 @@ label {
 }
 
 /* =============================================
+   Photo Upload Styles
+   ============================================= */
+
+/* --- Photo upload section --- */
+.photo-upload-section {
+  background-color: var(--bg-card);
+  border-radius: var(--radius-card);
+  padding: 20px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-card);
+}
+
+/* --- Upload button --- */
+.photo-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(79, 140, 255, 0.1);
+  color: var(--accent);
+  border: 1.5px solid rgba(79, 140, 255, 0.3);
+  border-radius: var(--radius-button);
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  min-height: 44px;
+  margin-top: 12px;
+}
+
+.photo-upload-btn:hover:not(:disabled) {
+  background: rgba(79, 140, 255, 0.18);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+
+.photo-upload-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.photo-upload-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.photo-upload-btn .loading-spinner {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+/* --- Hidden file input --- */
+.photo-file-input {
+  display: none;
+}
+
+/* --- Photo preview grid --- */
+.photo-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* --- Photo preview item --- */
+.photo-preview-item {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  transition: all var(--transition);
+}
+
+.photo-preview-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-preview-item:hover {
+  border-color: var(--accent);
+}
+
+/* --- Photo remove button --- */
+.photo-remove-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  z-index: 2;
+}
+
+.photo-remove-btn:hover {
+  background: var(--danger);
+  transform: scale(1.1);
+}
+
+/* --- Upload progress --- */
+.upload-progress {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.upload-progress-bar {
+  width: 100%;
+  height: 3px;
+  background: rgba(79, 140, 255, 0.15);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.upload-progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* --- Photo empty state --- */
+.photo-empty-state {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-style: italic;
+}
+
+/* --- Photo thumb with delete overlay --- */
+.photo-thumb-wrapper {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  transition: all var(--transition);
+  cursor: pointer;
+}
+
+.photo-thumb-wrapper:hover {
+  border-color: var(--accent);
+  transform: scale(1.03);
+}
+
+.photo-thumb-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* =============================================
    Responsive – Mobile Fine-tuning
    ============================================= */
 @media (max-width: 428px) {
@@ -1445,7 +1616,8 @@ label {
     padding: 6px 10px;
     font-size: 12px;
   }
-  .photo-grid {
+  .photo-grid,
+  .photo-preview-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
