@@ -29,6 +29,19 @@ function App() {
   
   // Stato per le sezioni dinamiche
   const [sections, setSections] = useState({});
+
+  const normalizeContexts = (contexts) => {
+    if (Array.isArray(contexts)) {
+      return contexts;
+    }
+    if (typeof contexts === 'string') {
+      return contexts
+        .split(',')
+        .map((context) => context.trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
   
   const { register, control, handleSubmit, setValue, watch, formState: { errors } } = useForm();
 
@@ -47,7 +60,7 @@ function App() {
       if (response.data.success) {
         const practiceData = response.data.data.practice;
         setPractice(practiceData);
-        setSelectedContexts(practiceData.contexts || []);
+        setSelectedContexts(normalizeContexts(practiceData.contexts));
         
         // Popola form
         Object.keys(practiceData).forEach(key => {
@@ -148,6 +161,7 @@ function App() {
           ...prev,
           phase: 'empty_form'
         }));
+        setSelectedContexts([]);
         setLoading(false);
       }
     } else {
