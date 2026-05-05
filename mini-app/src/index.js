@@ -27,9 +27,7 @@ window.addEventListener('unhandledrejection', (event) => {
 try {
   const root = ReactDOM.createRoot(document.getElementById('root'));
   root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
+    <App />
   );
 } catch (error) {
   renderFatalError(error?.message || 'Errore sconosciuto in fase di bootstrap');
