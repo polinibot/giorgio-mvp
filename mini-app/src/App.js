@@ -682,7 +682,7 @@ function App() {
     if (!sections[context]) {
       setSections(prev => ({
         ...prev,
-        [context]: { description_rows: [''], man_hours: '', mac_hours: '', materials_amount: '', waste_apply: false, waste_percentage: 2 }
+        [context]: { description_rows: [''], man_hours: '', mac_hours: '', materials_amount: '', waste_apply: false, waste_percentage: 2, notes: '' }
       }));
     }
   };
@@ -1567,7 +1567,8 @@ function App() {
                     id={`notes_${context}`}
                     value={sections[context]?.notes || ''}
                     onChange={(e) => updateSection(context, 'notes', e.target.value)}
-                    className="input"
+                    className="textarea"
+                    rows="3"
                     placeholder="Note per questo reparto..."
                     aria-label={`Note interne ${context}`}
                   />
