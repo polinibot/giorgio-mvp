@@ -1,5 +1,7 @@
 import logging
 import os
+import uuid
+import shutil
 import json as _json
 import asyncio
 import traceback
@@ -7,7 +9,7 @@ from datetime import datetime, timezone, date
 from enum import Enum
 from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Request, status, Header
+from fastapi import FastAPI, Depends, HTTPException, Request, status, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError as PydanticValidationError
@@ -36,6 +38,7 @@ from models import (
 )
 from security import SecurityService
 from ocr_service import OCRService
+from cloudinary_service import cloudinary_service
 
 logger = logging.getLogger(__name__)
 
@@ -350,11 +353,26 @@ async def get_practice_detail(
         success=True,
         data={
             "practice": serialize(practice),
-            "photos": [serialize(ph) for ph in photos],
+            "photos": [_serialize_photo(ph) for ph in photos],
             "sections": [serialize(s) for s in sections],
             "parts": [serialize(p) for p in parts],
         },
     )
+
+
+def _get_thumbnail_url(storage_path: str) -> str:
+    """Generate a 400px thumbnail URL from a Cloudinary storage_path."""
+    if storage_path and '/upload/' in storage_path:
+        return storage_path.replace('/upload/', '/upload/c_scale,w_400/')
+    return storage_path or ""
+
+
+def _serialize_photo(photo) -> dict:
+    """Serialize a PracticePhoto with url and thumbnail fields."""
+    data = serialize(photo)
+    data["url"] = data.get("storage_path", "")
+    data["thumbnail"] = _get_thumbnail_url(data.get("storage_path", ""))
+    return data
 
 
 @app.patch("/api/practices/{practice_id}/sync")
@@ -391,6 +409,137 @@ async def toggle_practice_sync(
         )
 
 
+# --- Photo Upload/Delete Endpoints ---
+
+ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+@app.post("/api/practices/{practice_id}/photos")
+@limiter.limit("10/minute")
+async def upload_practice_photo(
+    request: Request,
+    practice_id: int,
+    file: UploadFile = File(...),
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Upload a photo for a practice via multipart form."""
+    # Validate practice ownership
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    # Validate content type
+    if file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Tipo file non valido. Ammessi: JPEG, PNG, WebP",
+        )
+
+    # Read file and validate size
+    file_content = await file.read()
+    if len(file_content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File troppo grande. Massimo 10MB",
+        )
+
+    # Generate unique file ID
+    generated_file_id = str(uuid.uuid4())
+    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "jpg"
+    temp_filename = f"{generated_file_id}.{ext}"
+    temp_path = os.path.join("storage", "photos", temp_filename)
+
+    try:
+        # Save temporarily
+        os.makedirs("storage/photos", exist_ok=True)
+        with open(temp_path, "wb") as f:
+            f.write(file_content)
+
+        # Upload to Cloudinary
+        secure_url, metadata = cloudinary_service.upload_practice_photo(
+            temp_path, practice_id, generated_file_id
+        )
+
+        # Create DB record
+        photo = PracticePhoto(
+            practice_id=practice_id,
+            telegram_file_id=generated_file_id,
+            storage_path=secure_url,
+            ocr_result=None,
+            ocr_confidence=None,
+        )
+        db.add(photo)
+        db.commit()
+        db.refresh(photo)
+
+        logger.info("Photo %d uploaded for practice %d by user %d", photo.id, practice_id, user_data["id"])
+
+        return APIResponse(success=True, data=_serialize_photo(photo))
+
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        logger.error("Error uploading photo for practice %d: %s", practice_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Errore upload foto",
+        )
+    finally:
+        # Clean up temp file
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                logger.warning("Failed to remove temp file: %s", temp_path)
+
+
+@app.delete("/api/practices/{practice_id}/photos/{photo_id}")
+@limiter.limit("60/minute")
+async def delete_practice_photo(
+    request: Request,
+    practice_id: int,
+    photo_id: int,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a photo from a practice."""
+    # Validate practice ownership
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    # Validate photo belongs to practice
+    photo = db.query(PracticePhoto).filter(
+        PracticePhoto.id == photo_id,
+        PracticePhoto.practice_id == practice_id,
+    ).first()
+    if not photo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Foto non trovata")
+
+    try:
+        db.delete(photo)
+        db.commit()
+        logger.info("Photo %d deleted from practice %d by user %d", photo_id, practice_id, user_data["id"])
+        return APIResponse(success=True, data={"message": "Foto eliminata"})
+    except Exception as e:
+        db.rollback()
+        logger.error("Error deleting photo %d from practice %d: %s", photo_id, practice_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Errore eliminazione foto",
+        )
+
+
 # --- Practice Endpoints ---
 
 @app.get("/mini-app/data")
@@ -419,7 +568,7 @@ async def get_mini_app_data(
             success=True,
             data={
                 "practice": serialize(practice),
-                "photos": [serialize(p) for p in photos],
+                "photos": [_serialize_photo(p) for p in photos],
                 "sections": [serialize(s) for s in sections],
                 "parts": [serialize(p) for p in parts],
             },
