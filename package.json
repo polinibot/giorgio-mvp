@@ -1,38 +1,11 @@
 {
-  "name": "giorgio-mini-app",
+  "name": "giorgio-backend",
   "version": "1.0.0",
-  "private": true,
-  "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
-    "react-hook-form": "^7.45.4",
-    "axios": "^1.5.0",
-    "react-datepicker": "^4.16.0",
-    "date-fns": "^2.30.0"
-  },
+  "description": "Backend API per Giorgio Bot Telegram",
+  "main": "main.py",
   "scripts": {
-    "start": "react-scripts start",
-    "build": "cd mini-app && npm run build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "start": "uvicorn main:app --host 0.0.0.0 --port 8000"
   },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  }
+  "keywords": ["telegram", "bot", "fastapi", "ocr"],
+  "author": "Polini Officina"
 }
