@@ -272,12 +272,12 @@ function App() {
       if (practice) {
         // Aggiorna pratica esistente
         response = await axios.put(`${API_BASE_URL}/practices/${practice.id}`, payload, {
-          params: { init_data: initData }
+          headers: { 'X-Telegram-Init-Data': initData }
         });
       } else {
         // Crea nuova pratica
         response = await axios.post(`${API_BASE_URL}/practices`, payload, {
-          params: { init_data: initData }
+          headers: { 'X-Telegram-Init-Data': initData }
         });
       }
 
@@ -289,7 +289,7 @@ function App() {
           const section = sections[context];
           if (section && section.description_rows.some(row => row.trim())) {
             await axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, section, {
-              params: { init_data: initData }
+              headers: { 'X-Telegram-Init-Data': initData }
             });
           }
         }

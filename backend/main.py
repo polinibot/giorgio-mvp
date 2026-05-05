@@ -97,7 +97,6 @@ async def root():
 @app.get("/mini-app/data")
 async def get_mini_app_data(
     practice_id: Optional[int] = None,
-    init_data: str = None,
     user_data: dict = Depends(validate_telegram_init_data),
     db: Session = Depends(get_db)
 ):
@@ -149,7 +148,6 @@ async def get_mini_app_data(
 @app.post("/practices")
 async def create_practice(
     practice_data: PracticeCreate,
-    init_data: str = None,
     user_data: dict = Depends(validate_telegram_init_data),
     db: Session = Depends(get_db)
 ):
@@ -252,7 +250,6 @@ async def create_practice(
 async def update_practice(
     practice_id: int,
     practice_data: PracticeUpdate,
-    init_data: str = None,
     user_data: dict = Depends(validate_telegram_init_data),
     db: Session = Depends(get_db)
 ):
@@ -305,7 +302,6 @@ async def update_practice(
 @app.delete("/practices/{practice_id}")
 async def delete_practice(
     practice_id: int,
-    init_data: str = None,
     user_data: dict = Depends(validate_telegram_init_data),
     db: Session = Depends(get_db)
 ):
@@ -343,7 +339,6 @@ async def delete_practice(
 @app.get("/practices/{practice_id}/summary")
 async def get_practice_summary(
     practice_id: int,
-    init_data: str = None,
     user_data: dict = Depends(validate_telegram_init_data),
     db: Session = Depends(get_db)
 ):
@@ -410,7 +405,6 @@ async def get_practice_summary(
 async def create_section(
     practice_id: int,
     section_data: dict,
-    init_data: str = None,
     user_data: dict = Depends(validate_telegram_init_data),
     db: Session = Depends(get_db)
 ):
