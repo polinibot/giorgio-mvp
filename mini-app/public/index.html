@@ -8,6 +8,21 @@
     <meta name="description" content="Mini App Giorgio per inserimento pratiche meccanico" />
     <title>Giorgio - Pratica Meccanico</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script>
+      setTimeout(function () {
+        try {
+          if (!window.__GiorgioAppMounted) {
+            var status = document.getElementById('bootstrap-status');
+            if (status) {
+              status.innerHTML = '⚠️ Mini App non caricata.<br>Il JavaScript non ha completato l\'avvio.';
+              status.style.background = '#fee2e2';
+              status.style.borderColor = '#fca5a5';
+              status.style.color = '#991b1b';
+            }
+          }
+        } catch (e) {}
+      }, 4000);
+    </script>
   </head>
   <body>
     <noscript>È necessario abilitare JavaScript per eseguire questa applicazione.</noscript>

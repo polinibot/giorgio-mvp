@@ -29,10 +29,12 @@ try {
   if (bootstrapStatus) {
     bootstrapStatus.textContent = 'Caricamento interfaccia...';
   }
+  window.__GiorgioAppMounted = false;
   const root = ReactDOM.createRoot(document.getElementById('root'));
   root.render(
     <App />
   );
+  window.__GiorgioAppMounted = true;
   if (bootstrapStatus) {
     bootstrapStatus.textContent = 'Interfaccia caricata.';
     setTimeout(() => {
