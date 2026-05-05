@@ -161,6 +161,10 @@ const CONTEXT_COLORS = {
   revisione: { bg: 'rgba(74, 222, 128, 0.15)', color: '#4ade80', border: 'rgba(74, 222, 128, 0.3)' },
 };
 
+// File upload constants
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
 // --- Main App ---
 
 function App() {
@@ -403,8 +407,6 @@ function App() {
   }, [currentView, selectedPracticeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Photo upload (detail view) ---
-  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-  const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
   const validateFile = useCallback((file) => {
     if (!ACCEPTED_TYPES.includes(file.type)) {
