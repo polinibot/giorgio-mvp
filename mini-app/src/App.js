@@ -315,8 +315,8 @@ function App() {
       setDebugInfo(prev => ({ ...prev, phase: 'telegram_detected', hasTelegram: true }));
       webApp.ready();
       webApp.expand();
-      webApp.setHeaderColor('#ffffff');
-      webApp.setBackgroundColor('#f8fafc');
+      webApp.setHeaderColor('#0f0f1a');
+      webApp.setBackgroundColor('#0f0f1a');
 
       const currentInitData = webApp.initData;
       setInitData(currentInitData);
@@ -945,7 +945,7 @@ function App() {
             disabled={saving}
             className={`button-submit ${saving ? 'btn-loading' : ''}`}
           >
-            {saving ? 'Salvataggio in corso...' : (practice ? 'Aggiorna Pratica' : 'Crea Pratica')}
+            {saving ? 'Salvataggio in corso...' : (practice ? '✓ Aggiorna' : '✓ Salva')}
           </button>
 
           {practice && practice.id && (
@@ -953,11 +953,10 @@ function App() {
               type="button"
               onClick={deletePractice}
               disabled={saving}
-              className="button-remove"
-              style={{ marginTop: '12px', width: '100%', minHeight: '48px', borderRadius: '12px', fontSize: '15px' }}
-              aria-label="Cancella pratica"
+              className="button-delete"
+              aria-label="Elimina pratica"
             >
-              🗑 Cancella pratica
+              🗑 Elimina
             </button>
           )}
         </form>
