@@ -46,16 +46,24 @@ function classifyError(err) {
   return detail || 'Errore sconosciuto. Riprova.';
 }
 
-/** Italian phone validation: 10 digits or +39 prefix */
+/** Italian phone validation */
 function isValidItalianPhone(val) {
   const cleaned = val.replace(/[\s.()-]/g, '');
   return /^(\+39)?3\d{8,9}$/.test(cleaned) || /^0\d{5,10}$/.test(cleaned);
 }
 
-/** Italian license plate: 2 letters + 3 digits + 2 letters */
+/** Italian license plate */
 function isValidItalianPlate(val) {
   const cleaned = val.replace(/[\s-]/g, '').toUpperCase();
   return /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(cleaned);
+}
+
+/** Format date to DD/MM/YYYY */
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 // --- Sub-components ---
@@ -94,6 +102,18 @@ function ConfirmModal({ title, message, onConfirm, onCancel }) {
   );
 }
 
+/** Lightbox for full-size photo */
+function Lightbox({ src, onClose }) {
+  return (
+    <div className="lightbox-overlay" onClick={onClose}>
+      <div className="lightbox-content" onClick={e => e.stopPropagation()}>
+        <button className="lightbox-close" onClick={onClose} type="button">✕</button>
+        <img src={src} alt="Foto pratica" className="lightbox-img" />
+      </div>
+    </div>
+  );
+}
+
 /** Skeleton loading placeholder */
 function SkeletonLoader() {
   return (
@@ -110,27 +130,75 @@ function SkeletonLoader() {
   );
 }
 
+/** Dashboard skeleton */
+function DashboardSkeleton() {
+  return (
+    <div className="container">
+      <div className="stats-row">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="stat-card skeleton-stat">
+            <div className="skeleton skeleton-line" style={{ width: '40%', height: '24px' }} />
+            <div className="skeleton skeleton-line" style={{ width: '70%', height: '12px', marginTop: '8px' }} />
+          </div>
+        ))}
+      </div>
+      <div className="skeleton skeleton-input" style={{ marginBottom: '12px' }} />
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} className="skeleton-section" style={{ marginBottom: '12px' }}>
+          <div className="skeleton skeleton-line" style={{ width: '45%' }} />
+          <div className="skeleton skeleton-line" style={{ width: '65%', marginTop: '8px' }} />
+          <div className="skeleton skeleton-line short" style={{ marginTop: '8px' }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Context badge colors
+const CONTEXT_COLORS = {
+  officina: { bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)' },
+  carrozzeria: { bg: 'rgba(251, 146, 60, 0.15)', color: '#fb923c', border: 'rgba(251, 146, 60, 0.3)' },
+  revisione: { bg: 'rgba(74, 222, 128, 0.15)', color: '#4ade80', border: 'rgba(74, 222, 128, 0.3)' },
+};
+
 // --- Main App ---
 
 function App() {
+  // Navigation state
+  const [currentView, setCurrentView] = useState('dashboard');
+  const [selectedPracticeId, setSelectedPracticeId] = useState(null);
+  const [editingPractice, setEditingPractice] = useState(null);
+  const [navigationStack, setNavigationStack] = useState([]);
+
+  // Shared state
+  const [initData, setInitData] = useState('');
+  const [toasts, setToasts] = useState([]);
+  const [confirmModal, setConfirmModal] = useState(null);
+
+  const [startedFromBot, setStartedFromBot] = useState(false);
+
+  // Dashboard state
+  const [practices, setPractices] = useState([]);
+  const [stats, setStats] = useState({ total: 0, this_month: 0, pending_sync: 0 });
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilters, setActiveFilters] = useState({ officina: false, carrozzeria: false, revisione: false, synced: null });
+
+  // Detail state
+  const [detailData, setDetailData] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [lightboxPhoto, setLightboxPhoto] = useState(null);
+
+  // Form state
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [practice, setPractice] = useState(null);
   const [error, setError] = useState('');
   const [successDone, setSuccessDone] = useState(false);
-  const [initData, setInitData] = useState('');
-  const [urlPlate, setUrlPlate] = useState('');
+
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [slowRequest, setSlowRequest] = useState(false);
-  const [toasts, setToasts] = useState([]);
-  const [confirmModal, setConfirmModal] = useState(null);
   const [fieldErrors, setFieldErrors] = useState({});
-
-  const [debugInfo, setDebugInfo] = useState({
-    phase: 'init', practiceId: '', plate: '',
-    hasTelegram: false, hasInitData: false, lastError: ''
-  });
-
   const [selectedContexts, setSelectedContexts] = useState([]);
   const [sections, setSections] = useState({});
   const [parts, setParts] = useState({});
@@ -138,6 +206,7 @@ function App() {
   const slowTimerRef = useRef(null);
   const toastIdRef = useRef(0);
   const formRef = useRef(null);
+  const searchTimerRef = useRef(null);
 
   const normalizeContexts = (contexts) => {
     if (Array.isArray(contexts)) return contexts;
@@ -162,6 +231,36 @@ function App() {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 350);
   }, []);
 
+  // --- Navigation helpers ---
+  const navigateTo = useCallback((view, opts = {}) => {
+    setNavigationStack(prev => [...prev, currentView]);
+    setCurrentView(view);
+    if (opts.practiceId) setSelectedPracticeId(opts.practiceId);
+    if (opts.editingPractice) setEditingPractice(opts.editingPractice);
+  }, [currentView]);
+
+  const navigateBack = useCallback(() => {
+    const prev = navigationStack[navigationStack.length - 1] || 'dashboard';
+    setNavigationStack(s => s.slice(0, -1));
+    setCurrentView(prev);
+    setSelectedPracticeId(null);
+    setEditingPractice(null);
+  }, [navigationStack]);
+
+  // --- Telegram BackButton ---
+  useEffect(() => {
+    if (!window.Telegram?.WebApp?.BackButton) return;
+    const bb = window.Telegram.WebApp.BackButton;
+    if (currentView === 'dashboard') {
+      bb.hide();
+    } else {
+      bb.show();
+      const handler = () => navigateBack();
+      bb.onClick(handler);
+      return () => bb.offClick(handler);
+    }
+  }, [currentView, navigateBack]);
+
   // --- Slow request indicator ---
   const startSlowTimer = useCallback(() => {
     slowTimerRef.current = setTimeout(() => setSlowRequest(true), 10000);
@@ -174,18 +273,13 @@ function App() {
 
   // --- localStorage draft ---
   const saveDraft = useCallback(() => {
+    if (currentView !== 'form') return;
     try {
       const data = getValues();
-      const draft = {
-        formData: data,
-        selectedContexts,
-        sections,
-        parts,
-        timestamp: Date.now()
-      };
+      const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now() };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
-    } catch (_) { /* storage full or private mode */ }
-  }, [getValues, selectedContexts, sections, parts]);
+    } catch (_) {}
+  }, [getValues, selectedContexts, sections, parts, currentView]);
 
   const clearDraft = useCallback(() => {
     try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
@@ -196,7 +290,6 @@ function App() {
       const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
       if (!raw) return false;
       const draft = JSON.parse(raw);
-      // Only restore if less than 24h old
       if (Date.now() - draft.timestamp > 24 * 60 * 60 * 1000) {
         localStorage.removeItem(DRAFT_STORAGE_KEY);
         return false;
@@ -217,19 +310,101 @@ function App() {
     } catch (_) { return false; }
   }, [setValue]);
 
-  // Save draft on data change (debounced via effect)
+  // Save draft on data change (debounced)
   const watchedValues = watch();
   useEffect(() => {
-    if (!loading && !successDone) {
+    if (currentView === 'form' && !loading && !successDone) {
       const timer = setTimeout(() => saveDraft(), 500);
       return () => clearTimeout(timer);
     }
-  }, [watchedValues, selectedContexts, sections, parts, loading, successDone, saveDraft]);
+  }, [watchedValues, selectedContexts, sections, parts, loading, successDone, saveDraft, currentView]);
 
-  // --- Load practice ---
+  // --- API helpers ---
+  const getHeaders = useCallback(() => ({ 'X-Telegram-Init-Data': initData }), [initData]);
+
+  // --- Dashboard: Load practices ---
+  const loadDashboard = useCallback(async (search = '', filters = {}) => {
+    if (!initData) return;
+    setDashboardLoading(true);
+    try {
+      const params = {};
+      if (search) params.search = search;
+      const contextFilters = Object.entries(filters).filter(([k, v]) => v === true && k !== 'synced').map(([k]) => k);
+      if (contextFilters.length) params.context = contextFilters.join(',');
+      if (filters.synced === true) params.synced = 'true';
+      if (filters.synced === false) params.synced = 'false';
+      params.sort = 'date_desc';
+
+      const [practicesRes, statsRes] = await Promise.all([
+        fetchWithRetry(() => axios.get(`${API_BASE_URL}/api/practices`, { params, headers: getHeaders(), timeout: 15000 })),
+        fetchWithRetry(() => axios.get(`${API_BASE_URL}/api/practices/stats`, { headers: getHeaders(), timeout: 15000 }))
+      ]);
+
+      setPractices(practicesRes.data?.data || practicesRes.data || []);
+      setStats(statsRes.data?.data || statsRes.data || { total: 0, this_month: 0, pending_sync: 0 });
+    } catch (err) {
+      addToast(classifyError(err), 'error');
+    } finally {
+      setDashboardLoading(false);
+    }
+  }, [initData, getHeaders, addToast]);
+
+  // Load dashboard on view mount
+  useEffect(() => {
+    if (currentView === 'dashboard' && initData) {
+      loadDashboard(searchQuery, activeFilters);
+    }
+  }, [currentView, initData]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounced search
+  useEffect(() => {
+    if (currentView !== 'dashboard') return;
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      loadDashboard(searchQuery, activeFilters);
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchQuery, activeFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Detail: Load practice ---
+  const loadDetail = useCallback(async (id) => {
+    if (!initData || !id) return;
+    setDetailLoading(true);
+    setDetailData(null);
+    try {
+      const res = await fetchWithRetry(() =>
+        axios.get(`${API_BASE_URL}/api/practices/${id}`, { headers: getHeaders(), timeout: 15000 })
+      );
+      setDetailData(res.data?.data || res.data);
+    } catch (err) {
+      addToast(classifyError(err), 'error');
+      navigateBack();
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [initData, getHeaders, addToast, navigateBack]);
+
+  useEffect(() => {
+    if (currentView === 'detail' && selectedPracticeId) {
+      loadDetail(selectedPracticeId);
+    }
+  }, [currentView, selectedPracticeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Toggle sync ---
+  const toggleSync = useCallback(async (id, currentSynced) => {
+    try {
+      await fetchWithRetry(() =>
+        axios.patch(`${API_BASE_URL}/api/practices/${id}/sync`, { synced: !currentSynced }, { headers: getHeaders(), timeout: 10000 })
+      );
+      setDetailData(prev => prev ? { ...prev, synced: !currentSynced } : prev);
+      addToast(currentSynced ? 'Pratica segnata come non sincronizzata' : 'Pratica segnata come sincronizzata', 'success');
+    } catch (err) {
+      addToast(classifyError(err), 'error');
+    }
+  }, [getHeaders, addToast]);
+
+  // --- Form: Load practice for editing ---
   const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '') => {
-    const fullUrl = `${API_BASE_URL}/mini-app/data?practice_id=${practiceId}`;
-    setDebugInfo(prev => ({ ...prev, phase: 'loading_practice', practiceId, hasInitData: !!currentInitData, apiUrl: fullUrl, apiBaseUrl: API_BASE_URL }));
     startSlowTimer();
     try {
       const response = await fetchWithRetry(() =>
@@ -270,8 +445,6 @@ function App() {
           });
           setParts(partsData);
         }
-
-        setDebugInfo(prev => ({ ...prev, phase: 'practice_loaded' }));
       }
     } catch (err) {
       const status = err.response?.status;
@@ -280,10 +453,8 @@ function App() {
         setSelectedContexts([]);
         setError('');
         if (plateFromUrl) setValue('plate_confirmed', plateFromUrl);
-        setDebugInfo(prev => ({ ...prev, phase: 'practice_not_found_404', lastError: '' }));
       } else {
         setError(classifyError(err));
-        setDebugInfo(prev => ({ ...prev, phase: 'load_practice_error', lastError: err.message }));
       }
     } finally {
       clearSlowTimer();
@@ -291,28 +462,42 @@ function App() {
     }
   }, [setValue, startSlowTimer, clearSlowTimer]);
 
-  // Global JS error handler
+  // Pre-fill form when editing from detail
   useEffect(() => {
-    const handleError = (event) => {
-      setError(`Errore JavaScript: ${event.message}`);
-      setDebugInfo(prev => ({ ...prev, phase: 'js_error', lastError: event.message }));
-    };
-    window.addEventListener('error', handleError);
-    return () => window.removeEventListener('error', handleError);
-  }, []);
-
-  // Prefill plate from URL after load
-  useEffect(() => {
-    if (!loading && debugInfo.phase === 'practice_not_found_404' && urlPlate) {
-      setValue('plate_confirmed', urlPlate);
+    if (currentView === 'form' && editingPractice) {
+      setPractice(editingPractice);
+      const p = editingPractice;
+      setValue('plate_confirmed', p.plate_confirmed || p.plate || '');
+      setValue('phone', p.phone || '');
+      setValue('customer_name', p.customer_name || '');
+      setValue('customer_type', p.customer_type || 'privato');
+      setValue('appointment_time', p.appointment_time || '');
+      setValue('practice_type', p.practice_type || 'preventivo');
+      setValue('internal_notes', p.internal_notes || p.notes || '');
+      setValue('billing_to_complete', p.billing_to_complete || false);
+      if (p.appointment_date) setValue('appointment_date', new Date(p.appointment_date));
+      setSelectedContexts(normalizeContexts(p.contexts));
+      if (p.sections) {
+        const sd = {};
+        (Array.isArray(p.sections) ? p.sections : []).forEach(s => { sd[s.context] = s; });
+        setSections(sd);
+      }
+      if (p.parts) {
+        const pd = {};
+        (Array.isArray(p.parts) ? p.parts : []).forEach(pt => {
+          if (!pd[pt.context]) pd[pt.context] = [];
+          pd[pt.context].push({ name: pt.name || '', quantity: pt.quantity || '' });
+        });
+        setParts(pd);
+      }
+      setLoading(false);
     }
-  }, [loading, debugInfo.phase, urlPlate, setValue]);
+  }, [currentView, editingPractice, setValue]);
 
   // Telegram WebApp init
   useEffect(() => {
     if (window.Telegram && window.Telegram.WebApp) {
       const webApp = window.Telegram.WebApp;
-      setDebugInfo(prev => ({ ...prev, phase: 'telegram_detected', hasTelegram: true }));
       webApp.ready();
       webApp.expand();
       webApp.setHeaderColor('#0f0f1a');
@@ -324,24 +509,28 @@ function App() {
       const urlParams = new URLSearchParams(window.location.search);
       const practiceId = urlParams.get('practice_id');
       const plate = urlParams.get('plate');
-      setUrlPlate(plate || '');
-      setDebugInfo(prev => ({ ...prev, phase: 'telegram_ready', practiceId: practiceId || '', plate: plate || '', hasInitData: !!currentInitData }));
 
-      if (practiceId) {
-        loadPractice(practiceId, currentInitData, plate || '');
+      if (practiceId || plate) {
+        // Opened from bot with params -> show form
+        setStartedFromBot(true);
+        setCurrentView('form');
+        if (practiceId) {
+          loadPractice(practiceId, currentInitData, plate || '');
+        } else {
+          if (plate) setValue('plate_confirmed', plate);
+          const hadDraft = restoreDraft();
+          if (hadDraft) setShowDraftBanner(true);
+          if (plate) setValue('plate_confirmed', plate);
+          setSelectedContexts(prev => prev.length ? prev : []);
+          setLoading(false);
+        }
       } else {
-        // No existing practice — try restoring draft
-        if (plate) setValue('plate_confirmed', plate);
-        const hadDraft = restoreDraft();
-        if (hadDraft) setShowDraftBanner(true);
-        if (plate) setValue('plate_confirmed', plate); // override draft plate with URL
-        setDebugInfo(prev => ({ ...prev, phase: plate ? 'plate_prefilled' : 'empty_form' }));
-        setSelectedContexts(prev => prev.length ? prev : []);
+        // Opened from menu -> show dashboard
+        setCurrentView('dashboard');
         setLoading(false);
       }
     } else {
       setError('Mini App deve essere eseguita in Telegram');
-      setDebugInfo(prev => ({ ...prev, phase: 'telegram_missing', lastError: 'window.Telegram.WebApp non disponibile' }));
       setLoading(false);
     }
   }, [loadPractice, setValue, restoreDraft]);
@@ -392,27 +581,27 @@ function App() {
     setParts(prev => ({ ...prev, [context]: (prev[context] || []).map((p, i) => i === index ? { ...p, [field]: value } : p) }));
   };
 
-  // --- Delete practice (with custom modal) ---
-  const deletePractice = () => {
-    if (!practice || !practice.id) return;
+  // --- Delete practice ---
+  const deletePractice = (practiceToDelete) => {
+    const p = practiceToDelete || practice;
+    if (!p || !p.id) return;
     setConfirmModal({
       title: '🗑 Cancellare pratica?',
-      message: 'Questa operazione non è reversibile dall\'app. Vuoi procedere?',
+      message: 'Questa operazione non è reversibile. Vuoi procedere?',
       onConfirm: async () => {
         setConfirmModal(null);
         setSaving(true);
         startSlowTimer();
         try {
           await fetchWithRetry(() =>
-            axios.delete(`${API_BASE_URL}/practices/${practice.id}`, {
-              headers: { 'X-Telegram-Init-Data': initData }
-            })
+            axios.delete(`${API_BASE_URL}/practices/${p.id}`, { headers: getHeaders() })
           );
           clearDraft();
           addToast('Pratica cancellata con successo', 'success');
-          setTimeout(() => {
-            if (window.Telegram && window.Telegram.WebApp) window.Telegram.WebApp.close();
-          }, 2000);
+          setCurrentView('dashboard');
+          setNavigationStack([]);
+          setSelectedPracticeId(null);
+          setDetailData(null);
         } catch (err) {
           addToast(classifyError(err), 'error');
         } finally {
@@ -427,30 +616,21 @@ function App() {
   // --- Client-side validation ---
   const validateFields = (data) => {
     const errs = {};
-
-    // Customer name
     const name = (data.customer_name || '').trim();
     if (!name) errs.customer_name = 'Nome obbligatorio';
     else if (name.length < 2) errs.customer_name = 'Nome troppo corto (min 2 caratteri)';
     else if (name.length > 100) errs.customer_name = 'Nome troppo lungo (max 100 caratteri)';
 
-    // Plate
     const plate = (data.plate_confirmed || '').trim();
     if (!plate) errs.plate_confirmed = 'Targa obbligatoria';
     else if (!isValidItalianPlate(plate)) errs.plate_confirmed = 'Formato targa non valido (es. AB123CD)';
 
-    // Phone
     const phone = (data.phone || '').trim();
     if (!phone) errs.phone = 'Telefono obbligatorio';
     else if (!isValidItalianPhone(phone)) errs.phone = 'Numero di telefono italiano non valido';
 
-    // Date
     if (!data.appointment_date) errs.appointment_date = 'Data obbligatoria';
-
-    // Time
     if (!data.appointment_time) errs.appointment_time = 'Ora obbligatoria';
-
-    // Contexts
     if (selectedContexts.length === 0) errs.contexts = 'Seleziona almeno un contesto';
 
     return errs;
@@ -465,7 +645,6 @@ function App() {
 
   // --- Submit ---
   const onSubmit = async (data) => {
-    // Client-side validation
     const validationErrors = validateFields(data);
     if (Object.keys(validationErrors).length > 0) {
       setFieldErrors(validationErrors);
@@ -473,7 +652,6 @@ function App() {
       return;
     }
     setFieldErrors({});
-
     setSaving(true);
     setError('');
     startSlowTimer();
@@ -488,15 +666,11 @@ function App() {
       let response;
       if (practice) {
         response = await fetchWithRetry(() =>
-          axios.put(`${API_BASE_URL}/practices/${practice.id}`, payload, {
-            headers: { 'X-Telegram-Init-Data': initData }
-          })
+          axios.put(`${API_BASE_URL}/practices/${practice.id}`, payload, { headers: getHeaders() })
         );
       } else {
         response = await fetchWithRetry(() =>
-          axios.post(`${API_BASE_URL}/practices`, payload, {
-            headers: { 'X-Telegram-Init-Data': initData }
-          })
+          axios.post(`${API_BASE_URL}/practices`, payload, { headers: getHeaders() })
         );
       }
 
@@ -507,17 +681,15 @@ function App() {
         // Save sections
         for (const context of selectedContexts) {
           const section = sections[context];
-          if (section && section.description_rows.some(row => row.trim())) {
+          if (section && section.description_rows?.some(row => row.trim())) {
             const sectionPayload = { ...section, context };
             await fetchWithRetry(() =>
-              axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, sectionPayload, {
-                headers: { 'X-Telegram-Init-Data': initData }
-              })
+              axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, sectionPayload, { headers: getHeaders() })
             );
           }
         }
 
-        // Save parts — try bulk endpoint first, fallback to individual
+        // Save parts — try bulk first
         const allParts = [];
         for (const context of selectedContexts) {
           const list = (parts[context] || []).filter(p => (p.name || '').trim());
@@ -530,36 +702,37 @@ function App() {
         if (allParts.length > 0 || selectedContexts.length > 0) {
           try {
             await fetchWithRetry(() =>
-              axios.post(`${API_BASE_URL}/practices/${practiceId}/parts/bulk`, { parts: allParts }, {
-                headers: { 'X-Telegram-Init-Data': initData }
-              }), { maxRetries: 1 }
+              axios.post(`${API_BASE_URL}/practices/${practiceId}/parts/bulk`, { parts: allParts }, { headers: getHeaders() }), { maxRetries: 1 }
             );
             bulkSuccess = true;
           } catch (bulkErr) {
-            if (bulkErr.response?.status === 404) {
-              bulkSuccess = false; // fallback
-            } else {
-              throw bulkErr;
-            }
+            if (bulkErr.response?.status === 404) bulkSuccess = false;
+            else throw bulkErr;
           }
         }
 
         if (!bulkSuccess) {
-          // Fallback: delete-all + individual POSTs
           try {
-            await axios.delete(`${API_BASE_URL}/practices/${practiceId}/parts`, {
-              headers: { 'X-Telegram-Init-Data': initData }
-            });
+            await axios.delete(`${API_BASE_URL}/practices/${practiceId}/parts`, { headers: getHeaders() });
           } catch (_) {}
           for (const p of allParts) {
-            await axios.post(`${API_BASE_URL}/practices/${practiceId}/parts`, p, {
-              headers: { 'X-Telegram-Init-Data': initData }
-            });
+            await axios.post(`${API_BASE_URL}/practices/${practiceId}/parts`, p, { headers: getHeaders() });
           }
         }
 
         clearDraft();
-        setSuccessDone(true);
+        addToast(practice ? 'Pratica aggiornata con successo!' : 'Pratica creata con successo!', 'success');
+
+        if (startedFromBot && !practice) {
+          // Created from bot startapp
+          setSuccessDone(true);
+        } else {
+          // Navigate back to dashboard
+          setCurrentView('dashboard');
+          setNavigationStack([]);
+          setEditingPractice(null);
+          setPractice(null);
+        }
       }
     } catch (err) {
       setError(classifyError(err));
@@ -570,16 +743,16 @@ function App() {
     }
   };
 
-  // --- Create another practice ---
-  const handleCreateAnother = () => {
-    setSuccessDone(false);
+  // --- Reset form for new practice ---
+  const resetFormForNew = () => {
     setPractice(null);
+    setEditingPractice(null);
     setSelectedContexts([]);
     setSections({});
     setParts({});
     setError('');
     setFieldErrors({});
-    // Reset form values
+    setSuccessDone(false);
     setValue('plate_confirmed', '');
     setValue('phone', '');
     setValue('customer_name', '');
@@ -589,45 +762,19 @@ function App() {
     setValue('practice_type', 'preventivo');
     setValue('internal_notes', '');
     setValue('billing_to_complete', false);
+    setLoading(false);
   };
 
-  // --- Render: Loading ---
-  if (loading) {
-    return (
-      <div className="App">
-        <SkeletonLoader />
-        {slowRequest && (
-          <div className="slow-request-warning">⏳ La richiesta sta impiegando più del previsto...</div>
-        )}
-      </div>
-    );
-  }
-
-  // --- Render: Success ---
-  if (successDone) {
-    return (
-      <div className="App">
-        <Toast toasts={toasts} removeToast={removeToast} />
-        <div className="container">
-          <div className="success-screen">
-            <div className="success-icon">✅</div>
-            <h2>Pratica salvata!</h2>
-            <p>La pratica è stata salvata con successo.</p>
-            <button className="button-submit" onClick={handleCreateAnother} type="button">
-              ➕ Crea un'altra pratica
-            </button>
-            <button
-              className="btn-secondary"
-              onClick={() => { if (window.Telegram && window.Telegram.WebApp) window.Telegram.WebApp.close(); }}
-              type="button"
-            >
-              Chiudi Mini App
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // --- Filter toggle ---
+  const toggleFilter = (key) => {
+    setActiveFilters(prev => {
+      if (key === 'synced') {
+        const next = prev.synced === null ? false : prev.synced === false ? true : null;
+        return { ...prev, synced: next };
+      }
+      return { ...prev, [key]: !prev[key] };
+    });
+  };
 
   // Helper for field error display
   const renderFieldError = (name) => {
@@ -638,6 +785,572 @@ function App() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  // ==================== RENDER ====================
+
+  // --- Dashboard View ---
+  const renderDashboard = () => (
+    <div className="view-dashboard view-enter">
+      <div className="container">
+        <h1>🔧 Giorgio</h1>
+
+        {/* Stats */}
+        <div className="stats-row">
+          <div className="stat-card">
+            <div className="stat-number">{stats.total}</div>
+            <div className="stat-label">Totale</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-number">{stats.this_month}</div>
+            <div className="stat-label">Questo mese</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-number">{stats.pending_sync}</div>
+            <div className="stat-label">Da sincr.</div>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div className="search-bar">
+          <span className="search-icon">🔍</span>
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Cerca targa, cliente..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button className="search-clear" onClick={() => setSearchQuery('')} type="button">✕</button>
+          )}
+        </div>
+
+        {/* Filter chips */}
+        <div className="filter-chips">
+          {['officina', 'carrozzeria', 'revisione'].map(ctx => (
+            <button
+              key={ctx}
+              type="button"
+              className={`filter-chip ${activeFilters[ctx] ? 'filter-chip-active' : ''}`}
+              style={activeFilters[ctx] ? { background: CONTEXT_COLORS[ctx].bg, borderColor: CONTEXT_COLORS[ctx].border, color: CONTEXT_COLORS[ctx].color } : {}}
+              onClick={() => toggleFilter(ctx)}
+            >
+              {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`filter-chip ${activeFilters.synced !== null ? 'filter-chip-active' : ''}`}
+            onClick={() => toggleFilter('synced')}
+          >
+            {activeFilters.synced === null ? 'Sincr.' : activeFilters.synced ? '🟢 Sincr.' : '🔴 Non sincr.'}
+          </button>
+        </div>
+
+        {/* Practice list */}
+        {dashboardLoading ? (
+          <DashboardSkeleton />
+        ) : practices.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">📋</div>
+            <h3>Nessuna pratica trovata</h3>
+            <p>Prova a modificare i filtri o crea una nuova pratica.</p>
+          </div>
+        ) : (
+          <div className="practice-list">
+            {practices.map(p => (
+              <div
+                key={p.id}
+                className="practice-card"
+                onClick={() => navigateTo('detail', { practiceId: p.id })}
+              >
+                <div className="practice-card-header">
+                  <span className="practice-plate">{p.plate_confirmed || p.plate || '—'}</span>
+                  <span className={`sync-dot ${p.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
+                </div>
+                <div className="practice-card-customer">{p.customer_name || '—'}</div>
+                <div className="practice-card-footer">
+                  <span className="practice-card-date">📅 {formatDate(p.appointment_date || p.created_at)}</span>
+                  <div className="practice-card-badges">
+                    {normalizeContexts(p.contexts).map(ctx => (
+                      <span key={ctx} className="context-badge" style={{ background: CONTEXT_COLORS[ctx]?.bg, color: CONTEXT_COLORS[ctx]?.color, borderColor: CONTEXT_COLORS[ctx]?.border }}>
+                        {ctx.charAt(0).toUpperCase() + ctx.slice(1).substring(0, 4)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* FAB */}
+      <button
+        className="fab"
+        type="button"
+        onClick={() => { resetFormForNew(); navigateTo('form'); }}
+        aria-label="Nuova pratica"
+      >
+        +
+      </button>
+    </div>
+  );
+
+  // --- Detail View ---
+  const renderDetail = () => {
+    if (detailLoading || !detailData) {
+      return (
+        <div className="view-detail view-enter">
+          <div className="container">
+            <button className="back-button" onClick={navigateBack} type="button">← Indietro</button>
+            <SkeletonLoader />
+          </div>
+        </div>
+      );
+    }
+
+    const d = detailData;
+    const photos = d.photos || [];
+    const dSections = d.sections || [];
+    const dParts = d.parts || [];
+
+    return (
+      <div className="view-detail view-enter">
+        <div className="container">
+          <button className="back-button" onClick={navigateBack} type="button">← Indietro</button>
+
+          {/* Header info */}
+          <div className="detail-header section">
+            <div className="detail-plate">{d.plate_confirmed || d.plate || '—'}</div>
+            <div className="detail-customer">{d.customer_name || '—'}</div>
+            {d.phone && <div className="detail-phone">📞 {d.phone}</div>}
+            <div className="detail-date">📅 {formatDate(d.appointment_date || d.created_at)}</div>
+          </div>
+
+          {/* Sync status */}
+          <div className="section detail-sync-section" onClick={() => toggleSync(d.id, d.synced)}>
+            <div className="detail-sync-label">Stato sincronizzazione</div>
+            <div className={`detail-sync-toggle ${d.synced ? 'synced' : 'not-synced'}`}>
+              <span className={`sync-dot ${d.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
+              {d.synced ? 'Sincronizzata' : 'Non sincronizzata'}
+            </div>
+          </div>
+
+          {/* Sections */}
+          {dSections.length > 0 && (
+            <div className="section">
+              <h2>📋 Sezioni</h2>
+              {dSections.map((s, i) => (
+                <div key={i} className="detail-section-item">
+                  <span className="context-badge" style={{ background: CONTEXT_COLORS[s.context]?.bg, color: CONTEXT_COLORS[s.context]?.color, borderColor: CONTEXT_COLORS[s.context]?.border }}>
+                    {s.context?.charAt(0).toUpperCase() + s.context?.slice(1)}
+                  </span>
+                  <div className="detail-section-hours">
+                    {s.man_hours ? `Ore MAN: ${s.man_hours}` : ''}
+                    {s.man_hours && s.mac_hours ? ' | ' : ''}
+                    {s.mac_hours ? `Ore MAC: ${s.mac_hours}` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Parts */}
+          {dParts.length > 0 && (
+            <div className="section">
+              <h2>🔩 Ricambi</h2>
+              {dParts.map((p, i) => (
+                <div key={i} className="detail-part-item">
+                  <span>• {p.name}</span>
+                  {p.context && (
+                    <span className="context-badge-small" style={{ background: CONTEXT_COLORS[p.context]?.bg, color: CONTEXT_COLORS[p.context]?.color }}>
+                      {p.context?.substring(0, 4)}
+                    </span>
+                  )}
+                  {p.quantity && <span className="detail-part-qty">×{p.quantity}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Photos */}
+          {photos.length > 0 && (
+            <div className="section">
+              <h2>📷 Foto ({photos.length})</h2>
+              <div className="photo-grid">
+                {photos.map((photo, i) => (
+                  <div key={i} className="photo-thumb" onClick={() => setLightboxPhoto(photo.url || photo)}>
+                    <img src={photo.thumbnail || photo.url || photo} alt={`Foto ${i + 1}`} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Notes */}
+          {(d.internal_notes || d.notes) && (
+            <div className="section">
+              <h2>📝 Note</h2>
+              <p className="detail-notes">{d.internal_notes || d.notes}</p>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="detail-actions">
+            <button
+              className="button-submit"
+              type="button"
+              onClick={() => navigateTo('form', { editingPractice: d })}
+            >
+              ✏️ Modifica
+            </button>
+            <button
+              className="button-delete"
+              type="button"
+              onClick={() => deletePractice(d)}
+              disabled={saving}
+            >
+              🗑 Elimina
+            </button>
+          </div>
+        </div>
+
+        {lightboxPhoto && <Lightbox src={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}
+      </div>
+    );
+  };
+
+  // --- Form View ---
+  const renderForm = () => {
+    if (successDone) {
+      return (
+        <div className="view-form view-enter">
+          <div className="container">
+            <div className="success-screen">
+              <div className="success-icon">✅</div>
+              <h2>Pratica salvata!</h2>
+              <p>La pratica è stata salvata con successo.</p>
+              <button className="button-submit" onClick={() => { setCurrentView('dashboard'); setNavigationStack([]); setSuccessDone(false); }} type="button">
+                📋 Vai alla Dashboard
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => { if (window.Telegram?.WebApp) window.Telegram.WebApp.close(); }}
+                type="button"
+              >
+                Chiudi Mini App
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="view-form view-enter">
+        <div className="container">
+          {(currentView === 'form' && !startedFromBot) && (
+            <button className="back-button" onClick={() => { navigateBack(); resetFormForNew(); }} type="button">← Indietro</button>
+          )}
+          {(currentView === 'form' && startedFromBot) && (
+            <button className="back-button" onClick={() => { setCurrentView('dashboard'); setNavigationStack([]); setStartedFromBot(false); setLoading(false); }} type="button">← Dashboard</button>
+          )}
+
+          <h1>🔧 Dati Pratica</h1>
+
+          {showDraftBanner && (
+            <div className="draft-banner">
+              <span>📝 Bozza ripristinata</span>
+              <button type="button" onClick={() => { clearDraft(); setShowDraftBanner(false); resetFormForNew(); }}>
+                Scarta
+              </button>
+            </div>
+          )}
+
+          {error && <div className="error">{error}</div>}
+
+          {slowRequest && (
+            <div className="slow-request-warning">⏳ La richiesta sta impiegando più del previsto...</div>
+          )}
+
+          <form ref={formRef} onSubmit={handleSubmit(onSubmit)} className="form" noValidate>
+            {/* Dati cliente */}
+            <div className="section">
+              <h2>👤 Dati Cliente</h2>
+              <div className="form-group">
+                <label htmlFor="plate_confirmed">Targa*</label>
+                <input
+                  id="plate_confirmed"
+                  {...register('plate_confirmed', { required: 'Targa obbligatoria' })}
+                  className={`input ${fieldErrors.plate_confirmed ? 'input-error' : ''}`}
+                  placeholder="AB123CD"
+                  aria-label="Targa del veicolo"
+                  autoComplete="off"
+                />
+                {renderFieldError('plate_confirmed')}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="phone">Telefono*</label>
+                <input
+                  id="phone"
+                  {...register('phone', { required: 'Telefono obbligatorio' })}
+                  className={`input ${fieldErrors.phone ? 'input-error' : ''}`}
+                  placeholder="3351234567"
+                  type="tel"
+                  autoComplete="tel"
+                />
+                {renderFieldError('phone')}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="customer_name">Cliente/Riferimento*</label>
+                <input
+                  id="customer_name"
+                  {...register('customer_name', { required: 'Nome obbligatorio' })}
+                  className={`input ${fieldErrors.customer_name ? 'input-error' : ''}`}
+                  placeholder="Mario Rossi"
+                  autoComplete="name"
+                />
+                {renderFieldError('customer_name')}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="customer_type">Tipo Cliente*</label>
+                <select id="customer_type" {...register('customer_type')} className="select">
+                  <option value="privato">Privato</option>
+                  <option value="azienda">Azienda</option>
+                </select>
+              </div>
+
+              {watch('customer_type') === 'azienda' && (
+                <div className="form-group">
+                  <label>
+                    <input type="checkbox" {...register('billing_to_complete')} />
+                    Dati fatturazione da completare
+                  </label>
+                </div>
+              )}
+            </div>
+
+            {/* Appuntamento */}
+            <div className="section">
+              <h2>📅 Appuntamento</h2>
+              <div className="form-group">
+                <label htmlFor="appointment_date">Data*</label>
+                <Controller
+                  control={control}
+                  name="appointment_date"
+                  rules={{ required: 'Data obbligatoria' }}
+                  render={({ field }) => (
+                    <DatePicker
+                      id="appointment_date"
+                      selected={field.value}
+                      onChange={field.onChange}
+                      className={`input ${fieldErrors.appointment_date ? 'input-error' : ''}`}
+                      dateFormat="dd/MM/yyyy"
+                      placeholderText="GG/MM/AAAA"
+                      minDate={today}
+                    />
+                  )}
+                />
+                {renderFieldError('appointment_date')}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="appointment_time">Ora (slot 30 min)*</label>
+                <select
+                  id="appointment_time"
+                  {...register('appointment_time', { required: 'Ora obbligatoria' })}
+                  className={`select ${fieldErrors.appointment_time ? 'input-error' : ''}`}
+                >
+                  <option value="">-- Seleziona --</option>
+                  {Array.from({ length: 24 }, (_, i) =>
+                    ['00', '30'].map(min =>
+                      <option key={`${i.toString().padStart(2, '0')}:${min}`} value={`${i.toString().padStart(2, '0')}:${min}`}>
+                        {i.toString().padStart(2, '0')}:{min}
+                      </option>
+                    )
+                  ).flat()}
+                </select>
+                {renderFieldError('appointment_time')}
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="practice_type">Tipo Pratica*</label>
+                <select id="practice_type" {...register('practice_type')} className="select">
+                  <option value="preventivo">Preventivo</option>
+                  <option value="ordine_di_lavoro">Ordine di Lavoro</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Contesti */}
+            <div className="section" data-field="contexts">
+              <h2>🔧 Contesti</h2>
+              <div className="checkboxes">
+                {['officina', 'carrozzeria', 'revisione'].map(context => (
+                  <label key={context} className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={selectedContexts.includes(context)}
+                      onChange={() => toggleContext(context)}
+                    />
+                    {context.charAt(0).toUpperCase() + context.slice(1)}
+                  </label>
+                ))}
+              </div>
+              <div className="field-hint">Seleziona almeno un tipo di sezione</div>
+              {fieldErrors.contexts && <div className="field-error">{fieldErrors.contexts}</div>}
+            </div>
+
+            {/* Sezioni dinamiche */}
+            {selectedContexts.map(context => (
+              <div key={context} className="section">
+                <h2>📋 {context.charAt(0).toUpperCase() + context.slice(1)}</h2>
+
+                <div className="form-group">
+                  <label>Righe Descrittive*</label>
+                  {sections[context]?.description_rows?.map((row, index) => (
+                    <div key={index} className="description-row">
+                      <input
+                        type="text"
+                        value={row}
+                        onChange={(e) => updateDescriptionRow(context, index, e.target.value)}
+                        className="input"
+                        placeholder="Descrizione lavoro..."
+                      />
+                      {sections[context].description_rows.length > 1 && (
+                        <button type="button" onClick={() => removeDescriptionRow(context, index)} className="button-remove">✕</button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => addDescriptionRow(context)} className="button-add">+ Aggiungi riga</button>
+                </div>
+
+                {context === 'officina' && (
+                  <div className="form-group">
+                    <label>MAN Ore</label>
+                    <input
+                      type="number" step="0.5"
+                      value={sections[context]?.man_hours || ''}
+                      onChange={(e) => updateSection(context, 'man_hours', parseFloat(e.target.value) || '')}
+                      className="input" placeholder="2.5"
+                    />
+                  </div>
+                )}
+
+                {context === 'carrozzeria' && (
+                  <>
+                    <div className="form-group">
+                      <label>MAC Ore</label>
+                      <input
+                        type="number" step="0.5"
+                        value={sections[context]?.mac_hours || ''}
+                        onChange={(e) => updateSection(context, 'mac_hours', parseFloat(e.target.value) || '')}
+                        className="input" placeholder="2.5"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Materiali (€)</label>
+                      <input
+                        type="number" step="0.01"
+                        value={sections[context]?.materials_amount || ''}
+                        onChange={(e) => updateSection(context, 'materials_amount', parseFloat(e.target.value) || '')}
+                        className="input" placeholder="150.00"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={sections[context]?.waste_apply || false}
+                          onChange={(e) => updateSection(context, 'waste_apply', e.target.checked)}
+                        />
+                        Applica smaltimento rifiuti
+                      </label>
+                      {sections[context]?.waste_apply && (
+                        <input
+                          type="number" step="0.1"
+                          value={sections[context]?.waste_percentage || 2}
+                          onChange={(e) => updateSection(context, 'waste_percentage', parseFloat(e.target.value) || 2)}
+                          className="input" placeholder="2" min="0" max="100"
+                        />
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {(context === 'officina' || context === 'carrozzeria') && (
+                  <div className="form-group">
+                    <label>Pezzi / ricambi</label>
+                    {getPartsForContext(context).map((part, index) => (
+                      <div key={index} className="description-row">
+                        <input
+                          type="text" value={part.name}
+                          onChange={(e) => updatePart(context, index, 'name', e.target.value)}
+                          className="input" placeholder="Es. Pastiglie freno"
+                        />
+                        <input
+                          type="text" value={part.quantity}
+                          onChange={(e) => updatePart(context, index, 'quantity', e.target.value)}
+                          className="input" placeholder="1 pz"
+                          style={{ maxWidth: '100px' }}
+                        />
+                        <button type="button" onClick={() => removePart(context, index)} className="button-remove">✕</button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => addPart(context)} className="button-add">+ Aggiungi pezzo</button>
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Note interne */}
+            <div className="section">
+              <h2>📝 Note Interne</h2>
+              <textarea
+                {...register('internal_notes')}
+                className="textarea"
+                rows="3"
+                placeholder="Note interne per la pratica..."
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className={`button-submit ${saving ? 'btn-loading' : ''}`}
+            >
+              {saving ? 'Salvataggio in corso...' : (practice ? '✓ Aggiorna' : '✓ Salva')}
+            </button>
+
+            {practice && practice.id && (
+              <button
+                type="button"
+                onClick={() => deletePractice()}
+                disabled={saving}
+                className="button-delete"
+              >
+                🗑 Elimina
+              </button>
+            )}
+          </form>
+        </div>
+      </div>
+    );
+  };
+
+  // --- Main Render ---
+  if (loading && currentView === 'form') {
+    return (
+      <div className="App">
+        <SkeletonLoader />
+        {slowRequest && <div className="slow-request-warning">⏳ La richiesta sta impiegando più del previsto...</div>}
+      </div>
+    );
+  }
 
   return (
     <div className="App">
@@ -650,317 +1363,9 @@ function App() {
           onCancel={confirmModal.onCancel}
         />
       )}
-
-      <div className="container">
-        <h1>🔧 Dati Pratica</h1>
-
-        {showDraftBanner && (
-          <div className="draft-banner">
-            <span>📝 Bozza ripristinata</span>
-            <button type="button" onClick={() => { clearDraft(); setShowDraftBanner(false); handleCreateAnother(); }}>
-              Scarta
-            </button>
-          </div>
-        )}
-
-        {error && <div className="error">{error}</div>}
-
-        {slowRequest && (
-          <div className="slow-request-warning">⏳ La richiesta sta impiegando più del previsto...</div>
-        )}
-
-        <form ref={formRef} onSubmit={handleSubmit(onSubmit)} className="form" noValidate>
-          {/* Dati cliente */}
-          <div className="section">
-            <h2>👤 Dati Cliente</h2>
-
-            <div className="form-group">
-              <label htmlFor="plate_confirmed">Targa*</label>
-              <input
-                id="plate_confirmed"
-                {...register('plate_confirmed', { required: 'Targa obbligatoria' })}
-                className={`input ${fieldErrors.plate_confirmed ? 'input-error' : ''}`}
-                placeholder="AB123CD"
-                aria-label="Targa del veicolo"
-                aria-invalid={!!fieldErrors.plate_confirmed}
-                autoComplete="off"
-              />
-              {renderFieldError('plate_confirmed')}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="phone">Telefono*</label>
-              <input
-                id="phone"
-                {...register('phone', { required: 'Telefono obbligatorio' })}
-                className={`input ${fieldErrors.phone ? 'input-error' : ''}`}
-                placeholder="3351234567"
-                type="tel"
-                aria-label="Numero di telefono"
-                aria-invalid={!!fieldErrors.phone}
-                autoComplete="tel"
-              />
-              {renderFieldError('phone')}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="customer_name">Cliente/Riferimento*</label>
-              <input
-                id="customer_name"
-                {...register('customer_name', { required: 'Nome obbligatorio' })}
-                className={`input ${fieldErrors.customer_name ? 'input-error' : ''}`}
-                placeholder="Mario Rossi"
-                aria-label="Nome del cliente"
-                aria-invalid={!!fieldErrors.customer_name}
-                autoComplete="name"
-              />
-              {renderFieldError('customer_name')}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="customer_type">Tipo Cliente*</label>
-              <select id="customer_type" {...register('customer_type')} className="select" aria-label="Tipo di cliente">
-                <option value="privato">Privato</option>
-                <option value="azienda">Azienda</option>
-              </select>
-            </div>
-
-            {watch('customer_type') === 'azienda' && (
-              <div className="form-group">
-                <label>
-                  <input type="checkbox" {...register('billing_to_complete')} aria-label="Dati fatturazione da completare" />
-                  Dati fatturazione da completare
-                </label>
-              </div>
-            )}
-          </div>
-
-          {/* Appuntamento */}
-          <div className="section">
-            <h2>📅 Appuntamento</h2>
-
-            <div className="form-group">
-              <label htmlFor="appointment_date">Data*</label>
-              <Controller
-                control={control}
-                name="appointment_date"
-                rules={{ required: 'Data obbligatoria' }}
-                render={({ field }) => (
-                  <DatePicker
-                    id="appointment_date"
-                    selected={field.value}
-                    onChange={field.onChange}
-                    className={`input ${fieldErrors.appointment_date ? 'input-error' : ''}`}
-                    dateFormat="dd/MM/yyyy"
-                    placeholderText="GG/MM/AAAA"
-                    minDate={today}
-                    aria-label="Data dell'appuntamento"
-                  />
-                )}
-              />
-              {renderFieldError('appointment_date')}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="appointment_time">Ora (slot 30 min)*</label>
-              <select
-                id="appointment_time"
-                {...register('appointment_time', { required: 'Ora obbligatoria' })}
-                className={`select ${fieldErrors.appointment_time ? 'input-error' : ''}`}
-                aria-label="Orario dell'appuntamento"
-              >
-                <option value="">-- Seleziona --</option>
-                {Array.from({ length: 24 }, (_, i) =>
-                  ['00', '30'].map(min =>
-                    <option key={`${i.toString().padStart(2, '0')}:${min}`} value={`${i.toString().padStart(2, '0')}:${min}`}>
-                      {i.toString().padStart(2, '0')}:{min}
-                    </option>
-                  )
-                ).flat()}
-              </select>
-              {renderFieldError('appointment_time')}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="practice_type">Tipo Pratica*</label>
-              <select id="practice_type" {...register('practice_type')} className="select" aria-label="Tipo di pratica">
-                <option value="preventivo">Preventivo</option>
-                <option value="ordine_di_lavoro">Ordine di Lavoro</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Contesti */}
-          <div className="section" data-field="contexts">
-            <h2>🔧 Contesti</h2>
-            <div className="checkboxes">
-              {['officina', 'carrozzeria', 'revisione'].map(context => (
-                <label key={context} className="checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={selectedContexts.includes(context)}
-                    onChange={() => toggleContext(context)}
-                    aria-label={`Contesto ${context}`}
-                  />
-                  {context.charAt(0).toUpperCase() + context.slice(1)}
-                </label>
-              ))}
-            </div>
-            <div className="field-hint">Seleziona almeno un tipo di sezione</div>
-            {fieldErrors.contexts && <div className="field-error">{fieldErrors.contexts}</div>}
-          </div>
-
-          {/* Sezioni dinamiche */}
-          {selectedContexts.map(context => (
-            <div key={context} className="section">
-              <h2>📋 {context.charAt(0).toUpperCase() + context.slice(1)}</h2>
-
-              <div className="form-group">
-                <label>Righe Descrittive*</label>
-                {sections[context]?.description_rows.map((row, index) => (
-                  <div key={index} className="description-row">
-                    <input
-                      type="text"
-                      value={row}
-                      onChange={(e) => updateDescriptionRow(context, index, e.target.value)}
-                      className="input"
-                      placeholder="Descrizione lavoro..."
-                      aria-label={`Descrizione riga ${index + 1} per ${context}`}
-                    />
-                    {sections[context].description_rows.length > 1 && (
-                      <button type="button" onClick={() => removeDescriptionRow(context, index)} className="button-remove" aria-label="Rimuovi riga">
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button type="button" onClick={() => addDescriptionRow(context)} className="button-add" aria-label="Aggiungi riga descrittiva">
-                  + Aggiungi riga
-                </button>
-              </div>
-
-              {context === 'officina' && (
-                <div className="form-group">
-                  <label>MAN Ore</label>
-                  <input
-                    type="number" step="0.5"
-                    value={sections[context]?.man_hours || ''}
-                    onChange={(e) => updateSection(context, 'man_hours', parseFloat(e.target.value) || '')}
-                    className="input" placeholder="2.5"
-                    aria-label="Ore manodopera officina"
-                  />
-                </div>
-              )}
-
-              {context === 'carrozzeria' && (
-                <>
-                  <div className="form-group">
-                    <label>MAC Ore</label>
-                    <input
-                      type="number" step="0.5"
-                      value={sections[context]?.mac_hours || ''}
-                      onChange={(e) => updateSection(context, 'mac_hours', parseFloat(e.target.value) || '')}
-                      className="input" placeholder="2.5"
-                      aria-label="Ore macchina carrozzeria"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Materiali (€)</label>
-                    <input
-                      type="number" step="0.01"
-                      value={sections[context]?.materials_amount || ''}
-                      onChange={(e) => updateSection(context, 'materials_amount', parseFloat(e.target.value) || '')}
-                      className="input" placeholder="150.00"
-                      aria-label="Importo materiali carrozzeria"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={sections[context]?.waste_apply || false}
-                        onChange={(e) => updateSection(context, 'waste_apply', e.target.checked)}
-                        aria-label="Applica smaltimento rifiuti"
-                      />
-                      Applica smaltimento rifiuti
-                    </label>
-                    {sections[context]?.waste_apply && (
-                      <input
-                        type="number" step="0.1"
-                        value={sections[context]?.waste_percentage || 2}
-                        onChange={(e) => updateSection(context, 'waste_percentage', parseFloat(e.target.value) || 2)}
-                        className="input" placeholder="2" min="0" max="100"
-                        aria-label="Percentuale smaltimento rifiuti"
-                      />
-                    )}
-                  </div>
-                </>
-              )}
-
-              {(context === 'officina' || context === 'carrozzeria') && (
-                <div className="form-group">
-                  <label>Pezzi / ricambi</label>
-                  {getPartsForContext(context).map((part, index) => (
-                    <div key={index} className="description-row">
-                      <input
-                        type="text" value={part.name}
-                        onChange={(e) => updatePart(context, index, 'name', e.target.value)}
-                        className="input" placeholder="Es. Pastiglie freno"
-                        aria-label={`Nome pezzo ${index + 1} per ${context}`}
-                      />
-                      <input
-                        type="text" value={part.quantity}
-                        onChange={(e) => updatePart(context, index, 'quantity', e.target.value)}
-                        className="input" placeholder="1 pz"
-                        style={{ maxWidth: '100px' }}
-                        aria-label={`Quantità pezzo ${index + 1} per ${context}`}
-                      />
-                      <button type="button" onClick={() => removePart(context, index)} className="button-remove" aria-label="Rimuovi pezzo">
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => addPart(context)} className="button-add" aria-label="Aggiungi pezzo">
-                    + Aggiungi pezzo
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* Note interne */}
-          <div className="section">
-            <h2>📝 Note Interne</h2>
-            <textarea
-              {...register('internal_notes')}
-              className="textarea"
-              rows="3"
-              placeholder="Note interne per la pratica..."
-              aria-label="Note interne"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className={`button-submit ${saving ? 'btn-loading' : ''}`}
-          >
-            {saving ? 'Salvataggio in corso...' : (practice ? '✓ Aggiorna' : '✓ Salva')}
-          </button>
-
-          {practice && practice.id && (
-            <button
-              type="button"
-              onClick={deletePractice}
-              disabled={saving}
-              className="button-delete"
-              aria-label="Elimina pratica"
-            >
-              🗑 Elimina
-            </button>
-          )}
-        </form>
-      </div>
+      {currentView === 'dashboard' && renderDashboard()}
+      {currentView === 'detail' && renderDetail()}
+      {currentView === 'form' && renderForm()}
     </div>
   );
 }
