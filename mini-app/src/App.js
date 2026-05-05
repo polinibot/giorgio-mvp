@@ -418,7 +418,7 @@ function App() {
       return false;
     }
     return true;
-  }, [addToast, ACCEPTED_TYPES, MAX_FILE_SIZE]);
+  }, [addToast]);
 
   const uploadPhotoToDetail = useCallback(async (file) => {
     const practiceObj = detailData?.practice || detailData;
@@ -490,7 +490,7 @@ function App() {
       validFiles.push({ file, preview: URL.createObjectURL(file), id: Date.now() + Math.random() });
     }
     setFormPhotos(prev => [...prev, ...validFiles]);
-  }, [addToast, ACCEPTED_TYPES, MAX_FILE_SIZE]);
+  }, [addToast]);
 
   const removeFormPhoto = useCallback((id) => {
     setFormPhotos(prev => {
