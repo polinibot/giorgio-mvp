@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
@@ -7,7 +8,7 @@ from aiogram.enums import ParseMode
 from sqlalchemy.orm import Session
 
 from config import settings
-from database_sqlite import get_db, Practice, PracticePhoto, PracticeStatus
+from database_sqlite import get_db, create_tables, Practice, PracticePhoto, PracticeStatus, PracticeType, CustomerType
 from ocr_service import OCRService, OCRResult
 from security import SecurityService
 from models import PracticeDraft
@@ -78,9 +79,53 @@ class TelegramBot:
                 with open(local_path, 'wb') as f:
                     f.write(downloaded_file.getvalue())
                 
+                ocr_result = OCRService.extract_plate_from_image(local_path)
+                
+                db = next(get_db())
+                try:
+                    practice = Practice(
+                        created_by_telegram_id=message.from_user.id,
+                        status=PracticeStatus.DRAFT,
+                        plate_detected=ocr_result.plate,
+                        plate_confirmed=ocr_result.plate or "DA_COMPLETARE",
+                        phone="DA_COMPLETARE",
+                        customer_name="DA_COMPLETARE",
+                        customer_type=CustomerType.PRIVATO,
+                        appointment_date=datetime.utcnow(),
+                        appointment_time="09:00",
+                        practice_type=PracticeType.PREVENTIVO,
+                        contexts="officina"
+                    )
+                    db.add(practice)
+                    db.commit()
+                    db.refresh(practice)
+                    
+                    try:
+                        storage_path, _ = cloudinary_service.upload_practice_photo(
+                            local_path,
+                            practice.id,
+                            photo.file_id
+                        )
+                    except Exception:
+                        storage_path = local_path
+                    
+                    photo_record = PracticePhoto(
+                        practice_id=practice.id,
+                        telegram_file_id=photo.file_id,
+                        storage_path=storage_path,
+                        ocr_result=ocr_result.plate,
+                        ocr_confidence=ocr_result.confidence
+                    )
+                    db.add(photo_record)
+                    db.commit()
+                    
+                    await self.send_plate_confirmation(
+                        message,
+                        practice.id,
+                        photo.file_id,
+                        ocr_result,
                         local_path
                     )
-                    
                 finally:
                     db.close()
                     
@@ -340,6 +385,7 @@ class TelegramBot:
 
 # Funzione per avviare il bot
 async def start_bot():
+    create_tables()
     bot_instance = TelegramBot()
     await bot_instance.start()
 
