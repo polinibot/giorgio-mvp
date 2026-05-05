@@ -1,0 +1,25 @@
+[build]
+builder = "dockerfile"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[[services]]
+name = "api"
+
+[services.variables]
+PORT = "8000"
+PYTHON_VERSION = "3.11"
+
+[services.environment]
+TELEGRAM_BOT_TOKEN = "${TELEGRAM_BOT_TOKEN}"
+DATABASE_URL = "${DATABASE_URL}"
+WHITELIST_TELEGRAM_IDS = "${WHITELIST_TELEGRAM_IDS}"
+OCR_CONFIDENCE_THRESHOLD = "0.6"
+SECRET_KEY = "${SECRET_KEY}"
+CLOUDINARY_CLOUD_NAME = "${CLOUDINARY_CLOUD_NAME}"
+CLOUDINARY_API_KEY = "${CLOUDINARY_API_KEY}"
+CLOUDINARY_API_SECRET = "${CLOUDINARY_API_SECRET}"
