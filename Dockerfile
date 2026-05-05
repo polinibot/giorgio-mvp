@@ -18,20 +18,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia codice backend
 COPY backend/ .
 
-# Crea directory storage
+# Crea directory storage (before switching user)
 RUN mkdir -p storage/photos temp
 
-# Add non-root user
-RUN useradd -m -u 1000 app
-RUN chown -R app:app /app
+# Add non-root user and set ownership
+RUN useradd -m -u 1000 app && chown -R app:app /app
 USER app
 
 # Espone porta
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+# Railway uses its own healthcheck via healthcheckPath in railway.toml
+# No Docker HEALTHCHECK needed
 
-# Comando avvio
+# Comando avvio - bot in background, uvicorn in foreground
 CMD ["sh", "-c", "python bot.py & uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
