@@ -249,7 +249,7 @@ class TelegramBot:
                     await message.answer("❌ Formato targa non valido. Riprova (es. AB123CD):")
                     return
                 
-                # Aggiorna pratica
+                # Aggiorna pratica con la targa inserita manualmente
                 db = next(get_db())
                 try:
                     practice = db.query(Practice).filter(Practice.id == practice_id).first()
@@ -260,8 +260,8 @@ class TelegramBot:
                         # Rimuovi stato
                         del self.user_states[user_id]
                         
-                        # Apri Mini App
-                        await self.confirm_plate_and_open_form(message, practice_id)
+                        # Apri Mini App senza sovrascrivere la targa manuale
+                        await self.confirm_plate_and_open_form(message, practice_id, override_from_detected=False)
                     else:
                         await message.answer("❌ Pratica non trovata")
                         
@@ -320,21 +320,38 @@ class TelegramBot:
             parse_mode=ParseMode.HTML
         )
     
-    async def confirm_plate_and_open_form(self, callback: CallbackQuery, practice_id: int):
-        """Conferma la targa e apre la Mini App con form precompilato"""
+    async def confirm_plate_and_open_form(self, source: Message | CallbackQuery, practice_id: int, override_from_detected: bool = True):
+        """Conferma (opzionale) la targa rilevata e apre la Mini App con form precompilato.
+
+        Può essere chiamata sia da un CallbackQuery (conferma automatica) sia da un Message
+        dopo inserimento manuale della targa.
+        """
         db = next(get_db())
         try:
             practice = db.query(Practice).filter(Practice.id == practice_id).first()
             if not practice:
-                await callback.message.answer("❌ Pratica non trovata")
+                # Determina dove rispondere
+                if isinstance(source, CallbackQuery):
+                    await source.message.answer("❌ Pratica non trovata")
+                else:
+                    await source.answer("❌ Pratica non trovata")
                 return
+
+            # Solo nel caso di conferma automatica sovrascriviamo da plate_detected
+            if override_from_detected and practice.plate_detected:
+                practice.plate_confirmed = practice.plate_detected
+                db.commit()
             
-            # Conferma la targa rilevata
-            practice.plate_confirmed = practice.plate_detected
-            db.commit()
-            
+            # Determina target messaggio e utente Telegram
+            if isinstance(source, CallbackQuery):
+                message_target = source.message
+                from_user_id = source.from_user.id
+            else:
+                message_target = source
+                from_user_id = source.from_user.id
+
             # Crea Mini App button con dati precompilati
-            mini_app_url = f"https://giorgio-mvp-nine.vercel.app?practice_id={practice_id}&plate={practice.plate_confirmed}&user_id={callback.from_user.id}"
+            mini_app_url = f"https://giorgio-mvp-nine.vercel.app?practice_id={practice_id}&plate={practice.plate_confirmed}&user_id={from_user_id}"
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
@@ -343,7 +360,7 @@ class TelegramBot:
                 )]
             ])
             
-            await callback.message.answer(
+            await message_target.answer(
                 f"✅ Targa confermata: <b>{practice.plate_confirmed}</b>\n\n"
                 f"Premi il pulsante sotto per compilare i dati della pratica:",
                 reply_markup=keyboard,
