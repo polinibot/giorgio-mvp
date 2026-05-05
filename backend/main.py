@@ -49,7 +49,27 @@ async def http_exception_handler(request, exc):
         content=APIResponse(
             success=False,
             errors=[ValidationError(field="general", message=exc.detail)]
-        ).dict()
+        ).dict(),
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    """Cattura qualunque eccezione non gestita e restituisce JSON con CORS
+    headers, evitando il "Network Error" lato client (axios) dovuto al fatto
+    che le risposte 500 generiche di FastAPI non includono Access-Control-Allow-Origin.
+    """
+    import traceback
+    print(f"[unhandled_exception] {type(exc).__name__}: {exc}")
+    traceback.print_exc()
+    return JSONResponse(
+        status_code=500,
+        content=APIResponse(
+            success=False,
+            errors=[ValidationError(field="general", message=f"Internal error: {exc}")]
+        ).dict(),
+        headers={"Access-Control-Allow-Origin": "*"},
     )
 
 
@@ -66,16 +86,26 @@ def validate_telegram_init_data(
     """
     raw_init_data = x_telegram_init_data or init_data
 
-    # Prova a estrarre l'utente reale dall'initData
-    if raw_init_data:
-        user = SecurityService.extract_user_from_init_data(raw_init_data)
-        if user and user.get("id"):
-            return {
-                "id": int(user["id"]),
-                "first_name": user.get("first_name", ""),
-                "last_name": user.get("last_name", ""),
-                "username": user.get("username", ""),
-            }
+    # Prova a estrarre l'utente reale dall'initData (in modo difensivo:
+    # qualunque eccezione qui non deve mai propagarsi alla request, altrimenti
+    # il client riceve un "Network Error" perché mancano le CORS headers).
+    try:
+        if raw_init_data:
+            user = SecurityService.extract_user_from_init_data(raw_init_data)
+            if user and user.get("id") is not None:
+                try:
+                    user_id = int(user["id"])
+                except (TypeError, ValueError):
+                    user_id = None
+                if user_id is not None:
+                    return {
+                        "id": user_id,
+                        "first_name": user.get("first_name", "") or "",
+                        "last_name": user.get("last_name", "") or "",
+                        "username": user.get("username", "") or "",
+                    }
+    except Exception as e:
+        print(f"[validate_telegram_init_data] estrazione utente fallita: {e}")
 
     # Fallback (sviluppo / test fuori da Telegram)
     return {"id": 123456789, "first_name": "User", "last_name": "Test"}
