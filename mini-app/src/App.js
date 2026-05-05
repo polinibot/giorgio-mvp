@@ -89,13 +89,27 @@ function App() {
         }));
       }
     } catch (err) {
+      const status = err.response?.status;
       const detailedError = err.response?.data?.detail || err.message || 'Errore caricamento pratica';
-      setError(`Errore caricamento pratica: ${detailedError}`);
-      setDebugInfo(prev => ({
-        ...prev,
-        phase: 'load_practice_error',
-        lastError: detailedError
-      }));
+
+      if (status === 404) {
+        // Pratica non trovata: trattiamo come nuova pratica con form vuoto
+        setPractice(null);
+        setSelectedContexts([]);
+        setError('');
+        setDebugInfo(prev => ({
+          ...prev,
+          phase: 'practice_not_found_404',
+          lastError: detailedError
+        }));
+      } else {
+        setError(`Errore caricamento pratica: ${detailedError}`);
+        setDebugInfo(prev => ({
+          ...prev,
+          phase: 'load_practice_error',
+          lastError: detailedError
+        }));
+      }
     } finally {
       setLoading(false);
     }
