@@ -123,6 +123,35 @@ async def test_connection():
     return {"status": "ok", "message": "Connection successful", "timestamp": str(datetime.utcnow())}
 
 
+def _serialize_orm(obj) -> dict:
+    """Serializza un'istanza SQLAlchemy in dict JSON-safe rimuovendo lo stato
+    interno (_sa_instance_state) e convertendo enum/datetime in stringhe.
+    """
+    from enum import Enum
+    result = {}
+    for k, v in obj.__dict__.items():
+        if k.startswith("_"):
+            continue
+        if isinstance(v, Enum):
+            result[k] = v.value
+        elif isinstance(v, datetime):
+            result[k] = v.isoformat()
+        else:
+            result[k] = v
+    return result
+
+
+def _serialize_practice(practice) -> dict:
+    """Serializza una Practice convertendo `contexts` (stringa CSV) in lista."""
+    data = _serialize_orm(practice)
+    contexts = data.get("contexts")
+    if isinstance(contexts, str):
+        data["contexts"] = [c.strip() for c in contexts.split(",") if c.strip()]
+    elif contexts is None:
+        data["contexts"] = []
+    return data
+
+
 @app.get("/mini-app/data")
 async def get_mini_app_data(
     practice_id: Optional[int] = None,
@@ -160,10 +189,10 @@ async def get_mini_app_data(
         return APIResponse(
             success=True,
             data={
-                "practice": PracticeModel.from_orm(practice).dict(),
-                "photos": [photo.__dict__ for photo in photos],
-                "sections": [section.__dict__ for section in sections],
-                "parts": [part.__dict__ for part in parts]
+                "practice": _serialize_practice(practice),
+                "photos": [_serialize_orm(p) for p in photos],
+                "sections": [_serialize_orm(s) for s in sections],
+                "parts": [_serialize_orm(p) for p in parts],
             }
         )
     else:
