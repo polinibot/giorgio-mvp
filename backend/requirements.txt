@@ -12,3 +12,4 @@ pytesseract>=0.3.10
 cryptography>=41.0.0
 requests>=2.31.0
 cloudinary>=1.36.0
+slowapi>=0.1.9
