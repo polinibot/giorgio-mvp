@@ -416,7 +416,7 @@ function App() {
       return false;
     }
     return true;
-  }, [addToast]);
+  }, [addToast, ACCEPTED_TYPES, MAX_FILE_SIZE]);
 
   const uploadPhotoToDetail = useCallback(async (file) => {
     const practiceObj = detailData?.practice || detailData;
@@ -488,7 +488,7 @@ function App() {
       validFiles.push({ file, preview: URL.createObjectURL(file), id: Date.now() + Math.random() });
     }
     setFormPhotos(prev => [...prev, ...validFiles]);
-  }, [addToast]);
+  }, [addToast, ACCEPTED_TYPES, MAX_FILE_SIZE]);
 
   const removeFormPhoto = useCallback((id) => {
     setFormPhotos(prev => {
@@ -670,7 +670,7 @@ function App() {
       setError('Mini App deve essere eseguita in Telegram');
       setLoading(false);
     }
-  }, [loadPractice, setValue, restoreDraft]);
+  }, [loadPractice, setValue, restoreDraft, editingPractice]);
 
   // --- Contexts ---
   const toggleContext = (context) => {
