@@ -6,7 +6,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 import './App.css';
 
 // Configurazione axios
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://polini-api.railway.app';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://giorgio-mvp-production.up.railway.app';
 
 function App() {
   const [loading, setLoading] = useState(true);

@@ -118,7 +118,7 @@ class TelegramBot:
             practice_id = int(callback.data.split("_")[2])
             
             # Crea Mini App URL per modifica
-            mini_app_url = f"https://your-domain.com/mini-app?practice_id={practice_id}&user_id={callback.from_user.id}"
+            mini_app_url = f"https://giorgio-gj0pz5jox-polinibots-projects.vercel.app?practice_id={practice_id}&user_id={callback.from_user.id}"
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
@@ -287,7 +287,7 @@ class TelegramBot:
             db.commit()
             
             # Crea Mini App button con dati precompilati
-            mini_app_url = f"https://your-domain.com/mini-app?practice_id={practice_id}&plate={practice.plate_confirmed}&user_id={callback.from_user.id}"
+            mini_app_url = f"https://giorgio-gj0pz5jox-polinibots-projects.vercel.app?practice_id={practice_id}&plate={practice.plate_confirmed}&user_id={callback.from_user.id}"
             
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
