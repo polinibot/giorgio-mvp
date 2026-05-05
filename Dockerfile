@@ -15,14 +15,8 @@ COPY requirements.txt .
 # Installa dipendenze Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia codice backend (file essenziali)
-COPY main.py .
-COPY bot.py .
-COPY config.py .
-COPY models.py .
-COPY ocr_service.py .
-COPY security.py .
-COPY cloudinary_service.py .
+# Copia codice backend
+COPY backend/ .
 
 # Crea directory storage
 RUN mkdir -p storage/photos temp
