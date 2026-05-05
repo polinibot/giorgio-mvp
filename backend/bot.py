@@ -38,14 +38,9 @@ class TelegramBot:
                 await message.answer("⚠️ Accesso non autorizzato")
                 return
 
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🆕 Nuova pratica", callback_data="new_practice")]
-            ])
-
             await message.answer(
                 "👋 Benvenuto nel bot Giorgio!\n\n"
-                "Invia una foto della targa o del veicolo per iniziare una nuova pratica.",
-                reply_markup=keyboard
+                "📸 Invia una foto della targa o del veicolo per iniziare una nuova pratica."
             )
 
         @self.dp.callback_query(F.data == "new_practice")
@@ -305,14 +300,12 @@ class TelegramBot:
                 await message.answer("❌ Comando non riconosciuto. Usa /start per iniziare.")
 
     async def send_plate_confirmation(self, message: Message, practice_id: int, file_id: str, ocr_result: OCRResult, photo_path: str):
-        """Invia messaggio di conferma targa con foto e opzioni"""
+        """Invia messaggio di conferma targa con opzioni"""
 
         # Costruisci il testo del messaggio
         if ocr_result.plate and ocr_result.confidence > 0:
             text = (
-                f"📸 Foto ricevuta\n\n"
-                f"🔍 Targa rilevata: <b>{ocr_result.plate}</b>\n"
-                f"📊 Confidenza: {ocr_result.confidence:.1%}\n\n"
+                f"🔍 Targa rilevata: <b>{ocr_result.plate}</b>\n\n"
                 f"La targa è corretta?"
             )
 
@@ -321,7 +314,6 @@ class TelegramBot:
                 text += "\n⚠️ La confidenza è bassa, verifica attentamente."
         else:
             text = (
-                f"📸 Foto ricevuta\n\n"
                 f"❌ Non sono riuscito a rilevare una targa.\n\n"
                 f"Vuoi inserirla manualmente o riprovare con un'altra foto?"
             )
@@ -330,8 +322,8 @@ class TelegramBot:
         if ocr_result.plate and ocr_result.confidence > 0:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="✅ Conferma targa", callback_data=f"plate_confirm_{practice_id}"),
-                    InlineKeyboardButton(text="✏️ Modifica targa", callback_data=f"plate_edit_{practice_id}")
+                    InlineKeyboardButton(text="✅ Conferma", callback_data=f"plate_confirm_{practice_id}"),
+                    InlineKeyboardButton(text="✏️ Modifica", callback_data=f"plate_edit_{practice_id}")
                 ],
                 [
                     InlineKeyboardButton(text="🔄 Riprova con altra foto", callback_data=f"plate_retry_{practice_id}")
@@ -345,10 +337,9 @@ class TelegramBot:
                 ]
             ])
 
-        # Invia foto con testo e tastiera
-        await message.answer_photo(
-            photo=file_id,
-            caption=text,
+        # Invia solo il testo (l'utente ha già la foto)
+        await message.answer(
+            text,
             reply_markup=keyboard,
             parse_mode=ParseMode.HTML
         )
@@ -393,6 +384,15 @@ class TelegramBot:
                 f"Premi il pulsante sotto per compilare i dati della pratica:",
                 reply_markup=keyboard,
                 parse_mode=ParseMode.HTML
+            )
+
+            # Aggiungi pulsante "Nuova pratica" alla fine del flusso
+            new_practice_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🆕 Nuova pratica", callback_data="new_practice")]
+            ])
+            await message_target.answer(
+                "Hai completato questa pratica? Puoi iniziarne un'altra:",
+                reply_markup=new_practice_keyboard
             )
 
         except Exception as e:
