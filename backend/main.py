@@ -9,6 +9,7 @@ import os
 from config import settings
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
+from aiogram.enums import ParseMode
 from database_sqlite import get_db, Practice, PracticePhoto, PracticeSection, PracticePart, PracticeStatus
 from models import (
     Practice as PracticeModel, 
@@ -128,6 +129,7 @@ def _serialize_orm(obj) -> dict:
     interno (_sa_instance_state) e convertendo enum/datetime in stringhe.
     """
     from enum import Enum
+    import json as _json
     result = {}
     for k, v in obj.__dict__.items():
         if k.startswith("_"):
@@ -136,6 +138,12 @@ def _serialize_orm(obj) -> dict:
             result[k] = v.value
         elif isinstance(v, datetime):
             result[k] = v.isoformat()
+        elif k == "description_rows" and isinstance(v, str):
+            # Le sezioni salvano description_rows come JSON string nel DB
+            try:
+                result[k] = _json.loads(v)
+            except Exception:
+                result[k] = [v]
         else:
             result[k] = v
     return result
@@ -210,23 +218,27 @@ async def create_practice(
     db: Session = Depends(get_db)
 ):
     """Crea una nuova pratica"""
-    
+
+    # Validazioni base (HTTPException qui devono propagarsi senza essere
+    # convertite in 500 dal blocco try/except sottostante)
+    if not practice_data.contexts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Almeno un contesto è obbligatorio"
+        )
+
+    if practice_data.appointment_time[3:] not in ["00", "30"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="L'ora deve avere minuti 00 o 30 (slot da 30 minuti)"
+        )
+
     try:
-        # Validazioni base
-        if not practice_data.contexts:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Almeno un contesto è obbligatorio"
-            )
-        
-        # Validazione slot 30 minuti
-        if practice_data.appointment_time[3:] not in ["00", "30"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="L'ora deve avere minuti 00 o 30 (slot da 30 minuti)"
-            )
-        
-        # Crea pratica
+        # `contexts` nel DB è una stringa CSV: convertiamo la lista di enum.
+        contexts_csv = ",".join([
+            c.value if hasattr(c, "value") else str(c) for c in practice_data.contexts
+        ])
+
         practice = Practice(
             created_by_telegram_id=user_data['id'],
             status=PracticeStatus.CONFIRMED,
@@ -238,40 +250,35 @@ async def create_practice(
             appointment_date=practice_data.appointment_date,
             appointment_time=practice_data.appointment_time,
             practice_type=practice_data.practice_type,
-            contexts=practice_data.contexts,
+            contexts=contexts_csv,
             internal_notes=practice_data.internal_notes
         )
-        
+
         db.add(practice)
         db.commit()
         db.refresh(practice)
-        
-        # Invia riepilogo Telegram (async, non bloccante)
+
+        # Invia riepilogo Telegram (best-effort, non blocca la risposta)
         try:
             import asyncio
             from telegram_utils import TelegramFormatter
-            
-            # Crea riepilogo base
+
             summary_data = {
                 "practice_id": practice.id,
                 "plate": practice.plate_confirmed,
                 "phone": practice.phone,
                 "appointment": f"{practice.appointment_date.strftime('%d/%m/%Y')} {practice.appointment_time}",
                 "practice_type": practice.practice_type.value,
-                "contexts": [c.value for c in practice.contexts],
+                "contexts": [c.value for c in practice.contexts_list],
                 "sections_summary": {},
                 "billing_warning": "⚠ Dati fatturazione da completare" if practice.billing_to_complete else None,
                 "internal_notes": practice.internal_notes
             }
-            
-            from models import PracticeSummary
+
             summary = PracticeSummary(**summary_data)
-            
-            # Formatta messaggio
             message_text = TelegramFormatter.format_practice_summary(summary)
             keyboard = TelegramFormatter.create_practice_keyboard(practice.id)
-            
-            # Invia messaggio al bot (in background)
+
             async def send_telegram_message():
                 try:
                     bot_instance = Bot(token=settings.telegram_bot_token)
@@ -283,19 +290,18 @@ async def create_practice(
                     )
                 except Exception as e:
                     print(f"Errore invio riepilogo Telegram: {e}")
-            
-            # Esegui in background
+
             asyncio.create_task(send_telegram_message())
-            
         except Exception as e:
             print(f"Errore preparazione riepilogo Telegram: {e}")
-            # Non fallire la creazione pratica se il riepilogo fallisce
-        
+
         return APIResponse(
             success=True,
-            data=PracticeModel.from_orm(practice).dict()
+            data=_serialize_practice(practice)
         )
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -327,12 +333,18 @@ async def update_practice(
     try:
         # Aggiorna campi forniti
         update_data = practice_data.dict(exclude_unset=True)
-        
+
+        # `contexts` nel DB è una stringa CSV
+        if "contexts" in update_data and update_data["contexts"] is not None:
+            update_data["contexts"] = ",".join([
+                c.value if hasattr(c, "value") else str(c) for c in update_data["contexts"]
+            ])
+
         for field, value in update_data.items():
             setattr(practice, field, value)
-        
+
         practice.updated_by_telegram_id = user_data['id']
-        
+
         # Validazione slot 30 minuti se aggiornato
         if 'appointment_time' in update_data:
             if practice.appointment_time[3:] not in ["00", "30"]:
@@ -340,15 +352,17 @@ async def update_practice(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="L'ora deve avere minuti 00 o 30 (slot da 30 minuti)"
                 )
-        
+
         db.commit()
         db.refresh(practice)
-        
+
         return APIResponse(
             success=True,
-            data=PracticeModel.from_orm(practice).dict()
+            data=_serialize_practice(practice)
         )
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -447,7 +461,7 @@ async def get_practice_summary(
         phone=practice.phone,
         appointment=f"{practice.appointment_date.strftime('%d/%m/%Y')} {practice.appointment_time}",
         practice_type=practice.practice_type.value,
-        contexts=[c.value for c in practice.contexts],
+        contexts=[c.value for c in practice.contexts_list],
         sections_summary=sections_summary,
         billing_warning=billing_warning,
         internal_notes=practice.internal_notes
@@ -481,26 +495,42 @@ async def create_section(
         )
     
     try:
+        import json as _json
+        # `description_rows` nel DB è un Text con JSON: serializziamo qui.
+        rows = section_data.get('description_rows', [])
+        if isinstance(rows, list):
+            rows_json = _json.dumps(rows)
+        else:
+            rows_json = _json.dumps([str(rows)])
+
         section = PracticeSection(
             practice_id=practice_id,
             context=section_data['context'],
-            description_rows=section_data['description_rows'],
+            description_rows=rows_json,
             man_hours=section_data.get('man_hours'),
             mac_hours=section_data.get('mac_hours'),
             materials_amount=section_data.get('materials_amount'),
             waste_apply=section_data.get('waste_apply'),
             waste_percentage=section_data.get('waste_percentage')
         )
-        
+
         db.add(section)
         db.commit()
         db.refresh(section)
-        
+
         return APIResponse(
             success=True,
-            data=section.__dict__
+            data=_serialize_orm(section)
         )
-        
+
+    except HTTPException:
+        raise
+    except KeyError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Campo obbligatorio mancante: {e}"
+        )
     except Exception as e:
         db.rollback()
         raise HTTPException(

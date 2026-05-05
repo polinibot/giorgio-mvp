@@ -303,13 +303,16 @@ function App() {
       }
 
       if (response.data.success) {
-        const practiceId = response.data.data.id || practice.id;
-        
+        const responseData = response.data.data || {};
+        const practiceId = responseData.id || (practice && practice.id);
+
         // Salva sezioni
         for (const context of selectedContexts) {
           const section = sections[context];
           if (section && section.description_rows.some(row => row.trim())) {
-            await axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, section, {
+            // Il backend richiede sempre il campo `context` per ogni sezione
+            const sectionPayload = { ...section, context };
+            await axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, sectionPayload, {
               headers: { 'X-Telegram-Init-Data': initData }
             });
           }
