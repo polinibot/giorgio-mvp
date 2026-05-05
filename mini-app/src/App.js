@@ -12,8 +12,8 @@ const DRAFT_STORAGE_KEY = 'giorgio_draft';
 
 // --- Helpers ---
 
-/** Retry with exponential backoff (max 3 attempts) */
-async function fetchWithRetry(fn, { maxRetries = 3, baseDelay = 1000 } = {}) {
+/** Retry with exponential backoff */
+async function fetchWithRetry(fn, { maxRetries = 2, baseDelay = 300 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -413,12 +413,13 @@ function App() {
   }, [addToast]);
 
   const uploadPhotoToDetail = useCallback(async (file) => {
-    if (!detailData?.id || !validateFile(file)) return;
+    const practiceObj = detailData?.practice || detailData;
+    if (!practiceObj?.id || !validateFile(file)) return;
     setUploadingPhoto(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await fetch(`${API_BASE_URL}/api/practices/${detailData.id}/photos`, {
+      const res = await fetch(`${API_BASE_URL}/api/practices/${practiceObj.id}/photos`, {
         method: 'POST',
         headers: { 'X-Telegram-Init-Data': initData },
         body: formData
@@ -440,7 +441,8 @@ function App() {
   }, [detailData, initData, addToast, validateFile]);
 
   const deletePhoto = useCallback((photoId) => {
-    if (!detailData?.id) return;
+    const practiceObj = detailData?.practice || detailData;
+    if (!practiceObj?.id) return;
     setConfirmModal({
       title: '🗑 Eliminare questa foto?',
       message: 'La foto verrà rimossa definitivamente.',
@@ -448,7 +450,7 @@ function App() {
         setConfirmModal(null);
         setDeletingPhotoId(photoId);
         try {
-          const res = await fetch(`${API_BASE_URL}/api/practices/${detailData.id}/photos/${photoId}`, {
+          const res = await fetch(`${API_BASE_URL}/api/practices/${practiceObj.id}/photos/${photoId}`, {
             method: 'DELETE',
             headers: { 'X-Telegram-Init-Data': initData }
           });
@@ -1047,6 +1049,7 @@ function App() {
     }
 
     const d = detailData;
+    const practice = d.practice || d;
     const photos = d.photos || [];
     const dSections = d.sections || [];
     const dParts = d.parts || [];
@@ -1058,18 +1061,18 @@ function App() {
 
           {/* Header info */}
           <div className="detail-header section">
-            <div className="detail-plate">{d.plate_confirmed || d.plate || '—'}</div>
-            <div className="detail-customer">{d.customer_name || '—'}</div>
-            {d.phone && <div className="detail-phone">📞 {d.phone}</div>}
-            <div className="detail-date">📅 {formatDate(d.appointment_date || d.created_at)}</div>
+            <div className="detail-plate">{practice.plate_confirmed || practice.plate || '—'}</div>
+            <div className="detail-customer">{practice.customer_name || '—'}</div>
+            {practice.phone && <div className="detail-phone">📞 {practice.phone}</div>}
+            <div className="detail-date">📅 {formatDate(practice.appointment_date || practice.created_at)}</div>
           </div>
 
           {/* Sync status */}
-          <div className="section detail-sync-section" onClick={() => toggleSync(d.id, d.synced)}>
+          <div className="section detail-sync-section" onClick={() => toggleSync(practice.id, practice.synced)}>
             <div className="detail-sync-label">Stato sincronizzazione</div>
-            <div className={`detail-sync-toggle ${d.synced ? 'synced' : 'not-synced'}`}>
-              <span className={`sync-dot ${d.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
-              {d.synced ? 'Sincronizzata' : 'Non sincronizzata'}
+            <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
+              <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
+              {practice.synced ? 'Sincronizzata' : 'Non sincronizzata'}
             </div>
           </div>
 
@@ -1155,10 +1158,10 @@ function App() {
           </div>
 
           {/* Notes */}
-          {(d.internal_notes || d.notes) && (
+          {(practice.internal_notes || practice.notes) && (
             <div className="section">
               <h2>📝 Note</h2>
-              <p className="detail-notes">{d.internal_notes || d.notes}</p>
+              <p className="detail-notes">{practice.internal_notes || practice.notes}</p>
             </div>
           )}
 
@@ -1167,14 +1170,14 @@ function App() {
             <button
               className="button-submit"
               type="button"
-              onClick={() => navigateTo('form', { editingPractice: d })}
+              onClick={() => navigateTo('form', { editingPractice: practice })}
             >
               ✏️ Modifica
             </button>
             <button
               className="button-delete"
               type="button"
-              onClick={() => deletePractice(d)}
+              onClick={() => deletePractice(practice)}
               disabled={saving}
             >
               🗑 Elimina
@@ -1298,6 +1301,107 @@ function App() {
                   </label>
                 </div>
               )}
+
+              {watch('billing_to_complete') && watch('customer_type') === 'azienda' && (
+                <>
+                  <div className="form-group">
+                    <label htmlFor="company_name">Ragione Sociale</label>
+                    <input
+                      id="company_name"
+                      {...register('company_name')}
+                      className="input"
+                      placeholder="Ragione Sociale"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="vat_number">Partita IVA</label>
+                    <input
+                      id="vat_number"
+                      {...register('vat_number')}
+                      className="input"
+                      placeholder="IT12345678901"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="fiscal_code">Codice Fiscale</label>
+                    <input
+                      id="fiscal_code"
+                      {...register('fiscal_code')}
+                      className="input"
+                      placeholder="RSSMRA80A01H501U"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="billing_address">Indirizzo</label>
+                    <input
+                      id="billing_address"
+                      {...register('billing_address')}
+                      className="input"
+                      placeholder="Via Roma 1"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="billing_city">Città</label>
+                    <input
+                      id="billing_city"
+                      {...register('billing_city')}
+                      className="input"
+                      placeholder="Milano"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="billing_zip">CAP</label>
+                    <input
+                      id="billing_zip"
+                      {...register('billing_zip')}
+                      className="input"
+                      placeholder="20100"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Foto */}
+            <div className="section photo-upload-section">
+              <h2>📷 Foto</h2>
+              {formPhotos.length > 0 && (
+                <div className="photo-preview-grid">
+                  {formPhotos.map((item) => (
+                    <div key={item.id} className="photo-preview-item">
+                      <img src={item.preview} alt="Preview" />
+                      <button
+                        className="photo-remove-btn"
+                        type="button"
+                        onClick={() => removeFormPhoto(item.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {formPhotoUploadProgress && (
+                <div className="upload-progress">
+                  <span className="loading-spinner sm"></span>
+                  {formPhotoUploadProgress}
+                </div>
+              )}
+              <input
+                type="file"
+                ref={formFileInputRef}
+                className="photo-file-input"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                onChange={(e) => { if (e.target.files.length) addFormPhotos(Array.from(e.target.files)); e.target.value = ''; }}
+              />
+              <button
+                className="photo-upload-btn"
+                type="button"
+                onClick={() => formFileInputRef.current?.click()}
+              >
+                📷 Aggiungi foto
+              </button>
             </div>
 
             {/* Appuntamento */}
@@ -1482,48 +1586,6 @@ function App() {
                 rows="3"
                 placeholder="Note interne per la pratica..."
               />
-            </div>
-
-            {/* Foto */}
-            <div className="section photo-upload-section">
-              <h2>📷 Foto</h2>
-              {formPhotos.length > 0 && (
-                <div className="photo-preview-grid">
-                  {formPhotos.map((item) => (
-                    <div key={item.id} className="photo-preview-item">
-                      <img src={item.preview} alt="Preview" />
-                      <button
-                        className="photo-remove-btn"
-                        type="button"
-                        onClick={() => removeFormPhoto(item.id)}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {formPhotoUploadProgress && (
-                <div className="upload-progress">
-                  <span className="loading-spinner sm"></span>
-                  {formPhotoUploadProgress}
-                </div>
-              )}
-              <input
-                type="file"
-                ref={formFileInputRef}
-                className="photo-file-input"
-                accept="image/jpeg,image/png,image/webp"
-                multiple
-                onChange={(e) => { if (e.target.files.length) addFormPhotos(Array.from(e.target.files)); e.target.value = ''; }}
-              />
-              <button
-                className="photo-upload-btn"
-                type="button"
-                onClick={() => formFileInputRef.current?.click()}
-              >
-                📷 Aggiungi foto
-              </button>
             </div>
 
             <button
