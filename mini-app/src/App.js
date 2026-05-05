@@ -57,9 +57,9 @@ function App() {
       apiBaseUrl: API_BASE_URL
     }));
     try {
-      console.log('Chiamata API a:', fullUrl);
-      console.log('InitData:', currentInitData ? 'presente' : 'mancante');
-      console.log('Plate from URL:', plateFromUrl || 'none');
+      // console.log('Chiamata API a:', fullUrl);
+      // console.log('InitData:', currentInitData ? 'presente' : 'mancante');
+      // console.log('Plate from URL:', plateFromUrl || 'none');
       
       const response = await axios.get(`${API_BASE_URL}/mini-app/data`, {
         params: { practice_id: practiceId },
@@ -70,22 +70,33 @@ function App() {
       if (response.data.success) {
         const practiceData = response.data.data.practice;
         setPractice(practiceData);
-        setSelectedContexts(normalizeContexts(practiceData.contexts));
-        
-        // Popola form
-        Object.keys(practiceData).forEach(key => {
-          if (key !== 'contexts' && key !== 'appointment_date') {
-            setValue(key, practiceData[key]);
+
+        // Una pratica creata dal bot dopo l'OCR è in stato "draft" con placeholder
+        // tipo "DA_COMPLETARE" / valori di default. In quel caso mostriamo un form
+        // vuoto e compiliamo solo la targa, così l'utente parte da campi puliti.
+        const isDraft = practiceData.status === 'draft';
+
+        if (isDraft) {
+          setSelectedContexts([]);
+          setValue('plate_confirmed', practiceData.plate_confirmed || plateFromUrl || '');
+        } else {
+          setSelectedContexts(normalizeContexts(practiceData.contexts));
+
+          // Popola form
+          Object.keys(practiceData).forEach(key => {
+            if (key !== 'contexts' && key !== 'appointment_date') {
+              setValue(key, practiceData[key]);
+            }
+          });
+
+          // Converte data se presente
+          if (practiceData.appointment_date) {
+            setValue('appointment_date', new Date(practiceData.appointment_date));
           }
-        });
-        
-        // Converte data se presente
-        if (practiceData.appointment_date) {
-          setValue('appointment_date', new Date(practiceData.appointment_date));
         }
         
-        // Carica sezioni
-        if (response.data.data.sections) {
+        // Carica sezioni (solo se non è una bozza vuota)
+        if (!isDraft && response.data.data.sections) {
           const sectionsData = {};
           response.data.data.sections.forEach(section => {
             sectionsData[section.context] = section;
@@ -338,6 +349,8 @@ function App() {
     return (
       <div className="App">
         <div className="loading">Caricamento Mini App...</div>
+        {/* Debug box nascosto ora che il flusso è stabile.
+            Scommenta in caso di troubleshooting.
         <div className="debug-box">
           <div><strong>Fase:</strong> {debugInfo.phase}</div>
           <div><strong>Telegram:</strong> {debugInfo.hasTelegram ? 'sì' : 'no'}</div>
@@ -346,6 +359,7 @@ function App() {
           <div><strong>Plate:</strong> {debugInfo.plate || '-'}</div>
           {debugInfo.lastError && <div><strong>Errore:</strong> {debugInfo.lastError}</div>}
         </div>
+        */}
       </div>
     );
   }
@@ -354,6 +368,8 @@ function App() {
     <div className="App">
       <div className="container">
         <h1>🔧 Dati Pratica</h1>
+        {/* Debug box nascosto ora che il flusso è stabile.
+            Scommenta in caso di troubleshooting.
         <div className="debug-box">
           <div><strong>Fase:</strong> {debugInfo.phase}</div>
           <div><strong>Telegram:</strong> {debugInfo.hasTelegram ? 'sì' : 'no'}</div>
@@ -364,6 +380,7 @@ function App() {
           {debugInfo.apiBaseUrl && <div><strong>API Base:</strong> {debugInfo.apiBaseUrl}</div>}
           {debugInfo.lastError && <div><strong>Errore:</strong> {debugInfo.lastError}</div>}
         </div>
+        */}
         
         {error && <div className="error">{error}</div>}
         {success && <div className="success">{success}</div>}
