@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import axios from 'axios';
 import DatePicker from 'react-datepicker';
-import { format } from 'date-fns';
 import 'react-datepicker/dist/react-datepicker.css';
 import './App.css';
 
@@ -25,44 +24,10 @@ function App() {
   
   const { register, control, handleSubmit, setValue, watch, formState: { errors } } = useForm();
 
-  // Inizializzazione Telegram WebApp
-  useEffect(() => {
-    if (window.Telegram && window.Telegram.WebApp) {
-      const webApp = window.Telegram.WebApp;
-      webApp.ready();
-      webApp.expand();
-      
-      // Imposta colore tema
-      webApp.setHeaderColor('#1f2937');
-      webApp.setBackgroundColor('#111827');
-      
-      // Ottieni initData
-      const initData = webApp.initData;
-      setInitData(initData);
-      
-      // Estrai parametri URL
-      const urlParams = new URLSearchParams(window.location.search);
-      const practiceId = urlParams.get('practice_id');
-      const plate = urlParams.get('plate');
-      
-      if (practiceId) {
-        loadPractice(practiceId);
-      } else if (plate) {
-        setValue('plate_confirmed', plate);
-        setLoading(false);
-      } else {
-        setLoading(false);
-      }
-    } else {
-      setError('Mini App deve essere eseguita in Telegram');
-      setLoading(false);
-    }
-  }, []);
-
-  const loadPractice = async (practiceId) => {
+  const loadPractice = useCallback(async (practiceId, currentInitData) => {
     try {
       const response = await axios.get(`${API_BASE_URL}/mini-app/data`, {
-        params: { practice_id: practiceId, init_data: initData }
+        params: { practice_id: practiceId, init_data: currentInitData }
       });
       
       if (response.data.success) {
@@ -96,7 +61,41 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [setValue]);
+
+  // Inizializzazione Telegram WebApp
+  useEffect(() => {
+    if (window.Telegram && window.Telegram.WebApp) {
+      const webApp = window.Telegram.WebApp;
+      webApp.ready();
+      webApp.expand();
+      
+      // Imposta colore tema
+      webApp.setHeaderColor('#1f2937');
+      webApp.setBackgroundColor('#111827');
+      
+      // Ottieni initData
+      const currentInitData = webApp.initData;
+      setInitData(currentInitData);
+      
+      // Estrai parametri URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const practiceId = urlParams.get('practice_id');
+      const plate = urlParams.get('plate');
+      
+      if (practiceId) {
+        loadPractice(practiceId, currentInitData);
+      } else if (plate) {
+        setValue('plate_confirmed', plate);
+        setLoading(false);
+      } else {
+        setLoading(false);
+      }
+    } else {
+      setError('Mini App deve essere eseguita in Telegram');
+      setLoading(false);
+    }
+  }, [loadPractice, setValue]);
 
   const toggleContext = (context) => {
     const newContexts = selectedContexts.includes(context)
