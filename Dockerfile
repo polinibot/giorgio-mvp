@@ -23,7 +23,6 @@ COPY models.py .
 COPY ocr_service.py .
 COPY security.py .
 COPY cloudinary_service.py .
-COPY database_sqlite.py .
 
 # Crea directory storage
 RUN mkdir -p storage/photos temp
