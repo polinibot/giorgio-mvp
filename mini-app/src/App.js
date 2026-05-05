@@ -15,6 +15,7 @@ function App() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [initData, setInitData] = useState('');
+  const [urlPlate, setUrlPlate] = useState(''); // Keep plate from URL
   const [debugInfo, setDebugInfo] = useState({
     phase: 'init',
     practiceId: '',
@@ -45,7 +46,7 @@ function App() {
   
   const { register, control, handleSubmit, setValue, watch, formState: { errors } } = useForm();
 
-  const loadPractice = useCallback(async (practiceId, currentInitData) => {
+  const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '') => {
     const fullUrl = `${API_BASE_URL}/mini-app/data?practice_id=${practiceId}`;
     setDebugInfo(prev => ({
       ...prev,
@@ -58,6 +59,7 @@ function App() {
     try {
       console.log('Chiamata API a:', fullUrl);
       console.log('InitData:', currentInitData ? 'presente' : 'mancante');
+      console.log('Plate from URL:', plateFromUrl || 'none');
       
       const response = await axios.get(`${API_BASE_URL}/mini-app/data`, {
         params: { practice_id: practiceId },
@@ -105,6 +107,12 @@ function App() {
         setPractice(null);
         setSelectedContexts([]);
         setError('');
+        
+        // Prefill plate from URL if present
+        if (plateFromUrl) {
+          setValue('plate_confirmed', plateFromUrl);
+        }
+        
         setDebugInfo(prev => ({
           ...prev,
           phase: 'practice_not_found_404',
@@ -161,6 +169,7 @@ function App() {
       const urlParams = new URLSearchParams(window.location.search);
       const practiceId = urlParams.get('practice_id');
       const plate = urlParams.get('plate');
+      setUrlPlate(plate || '');
       setDebugInfo(prev => ({
         ...prev,
         phase: 'telegram_ready',
@@ -170,7 +179,7 @@ function App() {
       }));
       
       if (practiceId) {
-        loadPractice(practiceId, currentInitData);
+        loadPractice(practiceId, currentInitData, plate || '');
       } else if (plate) {
         setValue('plate_confirmed', plate);
         setDebugInfo(prev => ({
