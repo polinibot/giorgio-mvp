@@ -145,6 +145,12 @@ function App() {
     return () => window.removeEventListener('error', handleError);
   }, []);
 
+  useEffect(() => {
+    if (!loading && debugInfo.phase === 'practice_not_found_404' && urlPlate) {
+      setValue('plate_confirmed', urlPlate);
+    }
+  }, [loading, debugInfo.phase, urlPlate, setValue]);
+
   // Inizializzazione Telegram WebApp
   useEffect(() => {
     if (window.Telegram && window.Telegram.WebApp) {
