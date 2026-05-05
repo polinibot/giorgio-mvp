@@ -251,6 +251,12 @@ function App() {
     setCurrentView(prev);
     setSelectedPracticeId(null);
     setEditingPractice(null);
+    // Reset form state when leaving form view
+    setSelectedContexts([]);
+    setSections({});
+    setParts({});
+    setFormPhotos([]);
+    setFormPhotoUploadProgress('');
   }, [navigationStack]);
 
   // --- Telegram BackButton ---
@@ -527,6 +533,7 @@ function App() {
         axios.patch(`${API_BASE_URL}/api/practices/${id}/sync`, { synced: !currentSynced }, { headers: getHeaders(), timeout: 10000 })
       );
       setDetailData(prev => prev ? { ...prev, synced: !currentSynced } : prev);
+      setPractices(prev => prev.map(p => p.id === id ? { ...p, synced: !currentSynced } : p));
       addToast(currentSynced ? 'Pratica segnata come non sincronizzata' : 'Pratica segnata come sincronizzata', 'success');
     } catch (err) {
       addToast(classifyError(err), 'error');
@@ -648,7 +655,7 @@ function App() {
           loadPractice(practiceId, currentInitData, plate || '');
         } else {
           if (plate) setValue('plate_confirmed', plate);
-          const hadDraft = restoreDraft();
+          const hadDraft = editingPractice ? false : restoreDraft();
           if (hadDraft) setShowDraftBanner(true);
           if (plate) setValue('plate_confirmed', plate);
           setSelectedContexts(prev => prev.length ? prev : []);
@@ -732,6 +739,8 @@ function App() {
           setNavigationStack([]);
           setSelectedPracticeId(null);
           setDetailData(null);
+          setPractices(prev => prev.filter(pr => pr.id !== p.id));
+          setStats(prev => prev ? { ...prev, total: prev.total - 1, pending_sync: p.synced ? prev.pending_sync : prev.pending_sync - 1 } : prev);
         } catch (err) {
           addToast(classifyError(err), 'error');
         } finally {
@@ -1003,7 +1012,7 @@ function App() {
                 onClick={() => navigateTo('detail', { practiceId: p.id })}
               >
                 <div className="practice-card-header">
-                  <span className="practice-plate">{p.plate_confirmed || p.plate || '—'}</span>
+                  <span className="practice-plate">{p.plate || '—'}</span>
                   <span className={`sync-dot ${p.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
                 </div>
                 <div className="practice-card-customer">{p.customer_name || '—'}</div>
@@ -1121,9 +1130,9 @@ function App() {
                 {photos.map((photo, i) => (
                   <div key={photo.id || i} className="photo-thumb-wrapper">
                     <img
-                      src={photo.thumbnail || photo.url || photo}
+                      src={photo.thumbnail || photo.url}
                       alt={`Foto ${i + 1}`}
-                      onClick={() => setLightboxPhoto(photo.url || photo)}
+                      onClick={() => setLightboxPhoto(photo.url)}
                     />
                     <button
                       className="photo-remove-btn"
@@ -1552,6 +1561,18 @@ function App() {
                   </>
                 )}
 
+                <div className="form-group">
+                  <label htmlFor={`notes_${context}`}>Note interne</label>
+                  <textarea
+                    id={`notes_${context}`}
+                    value={sections[context]?.notes || ''}
+                    onChange={(e) => updateSection(context, 'notes', e.target.value)}
+                    className="input"
+                    placeholder="Note per questo reparto..."
+                    aria-label={`Note interne ${context}`}
+                  />
+                </div>
+
                 {(context === 'officina' || context === 'carrozzeria') && (
                   <div className="form-group">
                     <label>Pezzi / ricambi</label>
@@ -1577,14 +1598,14 @@ function App() {
               </div>
             ))}
 
-            {/* Note interne */}
+            {/* Note generali */}
             <div className="section">
-              <h2>📝 Note Interne</h2>
+              <h2>📝 Note Generali</h2>
               <textarea
                 {...register('internal_notes')}
                 className="textarea"
                 rows="3"
-                placeholder="Note interne per la pratica..."
+                placeholder="Note generali per la pratica..."
               />
             </div>
 
