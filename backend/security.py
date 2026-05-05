@@ -27,31 +27,41 @@ class SecurityService:
             True se validi, False altrimenti
         """
         try:
+            if not init_data:
+                return False
+
             # Parse dei dati init
             data = parse_qs(init_data)
-            
+
             # Estrai l'hash dalla firma
             hash_value = data.get('hash', [None])[0]
             if not hash_value:
                 return False
-            
+
             # Rimuovi l'hash dai dati per la verifica
             auth_data = {k: v[0] for k, v in data.items() if k != 'hash'}
-            
+
             # Ordina i dati per chiave
             sorted_data = sorted(auth_data.items())
-            
-            # Costruisci la stringa di verifica
-            data_check_string = '\n'.join([f"{k}={v}" for k, v in sorted_data])
-            
-            # Calcola l'HMAC-SHA256 con il bot token
-            secret_key = hashlib.sha256(settings.telegram_bot_token.encode()).digest()
+
+            # Costruisci la stringa di verifica (key=value per ogni riga)
+            data_check_string = '\n'.join(f"{k}={v}" for k, v in sorted_data)
+
+            # Algoritmo Telegram WebApp:
+            # secret_key = HMAC_SHA256("WebAppData", bot_token)
+            # check_hash = HMAC_SHA256(secret_key, data_check_string)
+            webapp_secret = hmac.new(
+                b"WebAppData",
+                settings.telegram_bot_token.encode("utf-8"),
+                hashlib.sha256,
+            ).digest()
+
             calculated_hash = hmac.new(
-                secret_key, 
-                data_check_string.encode(), 
-                hashlib.sha256
+                webapp_secret,
+                data_check_string.encode("utf-8"),
+                hashlib.sha256,
             ).hexdigest()
-            
+
             # Confronta gli hash in modo sicuro
             return hmac.compare_digest(calculated_hash, hash_value)
             
