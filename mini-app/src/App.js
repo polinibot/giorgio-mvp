@@ -108,7 +108,7 @@ function App() {
         setDebugInfo(prev => ({
           ...prev,
           phase: 'practice_not_found_404',
-          lastError: detailedError
+          lastError: '' // Nascondiamo l'errore per il 404
         }));
       } else {
         setError(`Errore caricamento pratica: ${detailedError}`);
