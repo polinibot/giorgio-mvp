@@ -31,6 +31,10 @@ function App() {
   // Stato per le sezioni dinamiche
   const [sections, setSections] = useState({});
 
+  // Stato per i pezzi/ricambi per ciascun contesto (Piano §6)
+  // Struttura: { officina: [{ name, quantity }, ...], carrozzeria: [...] }
+  const [parts, setParts] = useState({});
+
   const normalizeContexts = (contexts) => {
     if (Array.isArray(contexts)) {
       return contexts;
@@ -102,6 +106,16 @@ function App() {
             sectionsData[section.context] = section;
           });
           setSections(sectionsData);
+        }
+
+        // Carica pezzi raggruppati per contesto
+        if (!isDraft && response.data.data.parts) {
+          const partsData = {};
+          response.data.data.parts.forEach(p => {
+            if (!partsData[p.context]) partsData[p.context] = [];
+            partsData[p.context].push({ name: p.name || '', quantity: p.quantity || '' });
+          });
+          setParts(partsData);
         }
 
         setDebugInfo(prev => ({
@@ -289,6 +303,50 @@ function App() {
     }));
   };
 
+  // --- Pezzi/ricambi (Piano §6) ---
+  const getPartsForContext = (context) => parts[context] || [];
+
+  const addPart = (context) => {
+    setParts(prev => ({
+      ...prev,
+      [context]: [...(prev[context] || []), { name: '', quantity: '' }]
+    }));
+  };
+
+  const removePart = (context, index) => {
+    setParts(prev => ({
+      ...prev,
+      [context]: (prev[context] || []).filter((_, i) => i !== index)
+    }));
+  };
+
+  const updatePart = (context, index, field, value) => {
+    setParts(prev => ({
+      ...prev,
+      [context]: (prev[context] || []).map((p, i) =>
+        i === index ? { ...p, [field]: value } : p
+      )
+    }));
+  };
+
+  const deletePractice = async () => {
+    if (!practice || !practice.id) return;
+    if (!window.confirm('Cancellare questa pratica? Operazione non reversibile dall\'app.')) return;
+    try {
+      await axios.delete(`${API_BASE_URL}/practices/${practice.id}`, {
+        headers: { 'X-Telegram-Init-Data': initData }
+      });
+      setSuccess('Pratica cancellata');
+      setTimeout(() => {
+        if (window.Telegram && window.Telegram.WebApp) {
+          window.Telegram.WebApp.close();
+        }
+      }, 1500);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Errore cancellazione pratica');
+    }
+  };
+
   const onSubmit = async (data) => {
     setSaving(true);
     setError('');
@@ -324,6 +382,25 @@ function App() {
             // Il backend richiede sempre il campo `context` per ogni sezione
             const sectionPayload = { ...section, context };
             await axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, sectionPayload, {
+              headers: { 'X-Telegram-Init-Data': initData }
+            });
+          }
+        }
+
+        // Salva pezzi: approccio stateless → eliminiamo tutti e re-inseriamo
+        try {
+          await axios.delete(`${API_BASE_URL}/practices/${practiceId}/parts`, {
+            headers: { 'X-Telegram-Init-Data': initData }
+          });
+        } catch (_) { /* ignoriamo: può non esserci nulla da eliminare */ }
+        for (const context of selectedContexts) {
+          const list = (parts[context] || []).filter(p => (p.name || '').trim());
+          for (const p of list) {
+            await axios.post(`${API_BASE_URL}/practices/${practiceId}/parts`, {
+              context,
+              name: p.name.trim(),
+              quantity: (p.quantity || '').trim() || null
+            }, {
               headers: { 'X-Telegram-Init-Data': initData }
             });
           }
@@ -607,6 +684,45 @@ function App() {
                   </div>
                 </>
               )}
+
+              {(context === 'officina' || context === 'carrozzeria') && (
+                <div className="form-group">
+                  <label>Pezzi / ricambi</label>
+                  {getPartsForContext(context).map((part, index) => (
+                    <div key={index} className="description-row">
+                      <input
+                        type="text"
+                        value={part.name}
+                        onChange={(e) => updatePart(context, index, 'name', e.target.value)}
+                        className="input"
+                        placeholder="Es. Pastiglie freno"
+                      />
+                      <input
+                        type="text"
+                        value={part.quantity}
+                        onChange={(e) => updatePart(context, index, 'quantity', e.target.value)}
+                        className="input"
+                        placeholder="1 pz"
+                        style={{ maxWidth: '100px' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removePart(context, index)}
+                        className="button-remove"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => addPart(context)}
+                    className="button-add"
+                  >
+                    + Aggiungi pezzo
+                  </button>
+                </div>
+              )}
             </div>
           ))}
 
@@ -624,6 +740,18 @@ function App() {
           <button type="submit" disabled={saving} className="button-submit">
             {saving ? 'Salvataggio...' : (practice ? 'Aggiorna Pratica' : 'Crea Pratica')}
           </button>
+
+          {practice && practice.id && (
+            <button
+              type="button"
+              onClick={deletePractice}
+              disabled={saving}
+              className="button-remove"
+              style={{ marginTop: '12px', width: '100%' }}
+            >
+              🗑 Cancella pratica
+            </button>
+          )}
         </form>
       </div>
     </div>

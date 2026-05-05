@@ -10,7 +10,7 @@ from config import settings
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.enums import ParseMode
-from database_sqlite import get_db, Practice, PracticePhoto, PracticeSection, PracticePart, PracticeStatus
+from database_sqlite import get_db, Practice, PracticePhoto, PracticeSection, PracticePart, PracticeStatus, CustomerType
 from models import (
     Practice as PracticeModel, 
     PracticeCreate, 
@@ -112,6 +112,29 @@ def validate_telegram_init_data(
     return {"id": 123456789, "first_name": "User", "last_name": "Test"}
 
 
+def require_whitelisted_user(
+    user_data: dict = Depends(validate_telegram_init_data)
+) -> dict:
+    """Dependency: enforce whitelist Telegram come da Piano §13.
+
+    Se la whitelist è vuota (ambiente dev/test) non blocchiamo nulla.
+    Il fallback dev (id=123456789) passa sempre per non rompere lo sviluppo locale.
+    """
+    whitelist = getattr(settings, "whitelist_telegram_ids", None) or []
+    if not whitelist:
+        return user_data
+    uid = user_data.get("id")
+    if uid == 123456789:
+        # dev fallback quando initData non è disponibile
+        return user_data
+    if uid not in whitelist:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Utente non autorizzato"
+        )
+    return user_data
+
+
 @app.get("/")
 async def root():
     """Health check"""
@@ -163,7 +186,7 @@ def _serialize_practice(practice) -> dict:
 @app.get("/mini-app/data")
 async def get_mini_app_data(
     practice_id: Optional[int] = None,
-    user_data: dict = Depends(validate_telegram_init_data),
+    user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db)
 ):
     """Restituisce i dati per la Mini App Telegram"""
@@ -214,7 +237,7 @@ async def get_mini_app_data(
 @app.post("/practices")
 async def create_practice(
     practice_data: PracticeCreate,
-    user_data: dict = Depends(validate_telegram_init_data),
+    user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db)
 ):
     """Crea una nuova pratica"""
@@ -314,7 +337,7 @@ async def create_practice(
 async def update_practice(
     practice_id: int,
     practice_data: PracticeUpdate,
-    user_data: dict = Depends(validate_telegram_init_data),
+    user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db)
 ):
     """Aggiorna una pratica esistente"""
@@ -374,7 +397,7 @@ async def update_practice(
 @app.delete("/practices/{practice_id}")
 async def delete_practice(
     practice_id: int,
-    user_data: dict = Depends(validate_telegram_init_data),
+    user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db)
 ):
     """Soft-delete di una pratica"""
@@ -411,7 +434,7 @@ async def delete_practice(
 @app.get("/practices/{practice_id}/summary")
 async def get_practice_summary(
     practice_id: int,
-    user_data: dict = Depends(validate_telegram_init_data),
+    user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db)
 ):
     """Genera riepilogo pratica per messaggio Telegram"""
@@ -450,9 +473,9 @@ async def get_practice_summary(
                      for part in parts if part.context == section.context]
         }
     
-    # Avviso fatturazione
+    # Avviso fatturazione (Piano §9)
     billing_warning = None
-    if practice.customer_type == "azienda" and practice.billing_to_complete:
+    if practice.customer_type == CustomerType.AZIENDA and practice.billing_to_complete:
         billing_warning = "⚠ Dati fatturazione da completare"
     
     summary = PracticeSummary(
@@ -477,7 +500,7 @@ async def get_practice_summary(
 async def create_section(
     practice_id: int,
     section_data: dict,
-    user_data: dict = Depends(validate_telegram_init_data),
+    user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db)
 ):
     """Aggiunge una sezione a una pratica"""
@@ -499,7 +522,13 @@ async def create_section(
         # `description_rows` nel DB è un Text con JSON: serializziamo qui.
         rows = section_data.get('description_rows', [])
         if isinstance(rows, list):
-            rows_json = _json.dumps(rows)
+            non_empty = [r for r in rows if isinstance(r, str) and r.strip()]
+            if not non_empty:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Almeno una riga descrittiva è obbligatoria per contesto"
+                )
+            rows_json = _json.dumps(non_empty)
         else:
             rows_json = _json.dumps([str(rows)])
 
@@ -536,6 +565,93 @@ async def create_section(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Errore creazione sezione: {str(e)}"
+        )
+
+
+@app.post("/practices/{practice_id}/parts")
+async def create_part(
+    practice_id: int,
+    part_data: dict,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db)
+):
+    """Aggiunge un pezzo/ricambio a una pratica (Piano §6: pezzi e quantità)."""
+
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data['id']
+    ).first()
+    if not practice:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pratica non trovata"
+        )
+
+    try:
+        name = (part_data.get("name") or "").strip()
+        if not name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nome pezzo obbligatorio"
+            )
+        context_value = part_data.get("context")
+        if not context_value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Campo 'context' obbligatorio"
+            )
+
+        part = PracticePart(
+            practice_id=practice_id,
+            context=context_value,
+            name=name,
+            quantity=part_data.get("quantity") or None
+        )
+        db.add(part)
+        db.commit()
+        db.refresh(part)
+
+        return APIResponse(
+            success=True,
+            data=_serialize_orm(part)
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Errore creazione pezzo: {str(e)}"
+        )
+
+
+@app.delete("/practices/{practice_id}/parts")
+async def delete_all_parts(
+    practice_id: int,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db)
+):
+    """Elimina tutti i pezzi di una pratica (utilizzato prima di re-inserirli
+    dal form Mini App, che è stateless)."""
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data['id']
+    ).first()
+    if not practice:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pratica non trovata"
+        )
+    try:
+        db.query(PracticePart).filter(PracticePart.practice_id == practice_id).delete()
+        db.commit()
+        return APIResponse(success=True, data={"message": "Pezzi eliminati"})
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Errore eliminazione pezzi: {str(e)}"
         )
 
 
