@@ -824,6 +824,16 @@ function App() {
     if (!data.appointment_date) errs.appointment_date = 'Data obbligatoria';
     if (!data.appointment_time) errs.appointment_time = 'Ora obbligatoria';
     if (selectedContexts.length === 0) errs.contexts = 'Seleziona almeno un contesto';
+    selectedContexts.forEach(context => {
+      const rows = sections[context]?.description_rows || [];
+      if (!rows.some(row => (row || '').trim())) {
+        errs.contexts = `Inserisci almeno una riga descrittiva per ${context}`;
+      }
+      const waste = sections[context]?.waste_percentage;
+      if (sections[context]?.waste_apply && (Number.isNaN(Number(waste)) || Number(waste) < 0 || Number(waste) > 100)) {
+        errs.contexts = 'La percentuale smaltimento deve essere tra 0 e 100';
+      }
+    });
 
     return errs;
   };
@@ -849,7 +859,7 @@ function App() {
     startSlowTimer();
 
     try {
-      const payload = {
+      const practicePayload = {
         plate_confirmed: data.plate_confirmed,
         phone: data.phone,
         customer_name: data.customer_name,
@@ -862,76 +872,44 @@ function App() {
         internal_notes: data.internal_notes || null,
       };
 
+      const sectionPayloads = selectedContexts.map(context => {
+        const section = sections[context] || {};
+        return {
+          context,
+          description_rows: (section.description_rows || []).filter(row => (row || '').trim()),
+          man_hours: section.man_hours === '' ? null : section.man_hours,
+          mac_hours: section.mac_hours === '' ? null : section.mac_hours,
+          materials_amount: section.materials_amount === '' ? null : section.materials_amount,
+          waste_apply: section.waste_apply || false,
+          waste_percentage: section.waste_apply ? (section.waste_percentage || 2) : null,
+          notes: section.notes || null,
+        };
+      });
+
+      const partPayloads = [];
+      for (const context of selectedContexts) {
+        const list = (parts[context] || []).filter(p => (p.name || '').trim());
+        for (const p of list) {
+          partPayloads.push({ context, name: p.name.trim(), quantity: (p.quantity || '').trim() || null });
+        }
+      }
+
+      const payload = { practice: practicePayload, sections: sectionPayloads, parts: partPayloads };
+
       let response;
       if (practice) {
         response = await fetchWithRetry(() =>
-          axios.put(`${API_BASE_URL}/practices/${practice.id}`, payload, { headers: getHeaders(), timeout: 30000 })
+          axios.put(`${API_BASE_URL}/practices/${practice.id}/full`, payload, { headers: getHeaders(), timeout: 30000 })
         );
       } else {
         response = await fetchWithRetry(() =>
-          axios.post(`${API_BASE_URL}/practices`, payload, { headers: getHeaders(), timeout: 30000 })
+          axios.post(`${API_BASE_URL}/practices/full`, payload, { headers: getHeaders(), timeout: 30000 })
         );
       }
 
       if (response.data.success) {
         const responseData = response.data.data || {};
         const practiceId = responseData.id || (practice && practice.id);
-
-        // Save sections
-        const sectionErrors = [];
-        for (const context of selectedContexts) {
-          const section = sections[context];
-          if (!section) continue;
-          const hasNonEmptyRows = section.description_rows?.some(row => (row || '').trim());
-          const hasOtherData = section.man_hours || section.mac_hours || section.materials_amount || section.waste_apply || (section.notes || '').trim();
-          if (!hasNonEmptyRows && !hasOtherData) continue;
-          // Ensure at least one non-empty row for backend validation
-          const rowsToSend = hasNonEmptyRows
-            ? section.description_rows
-            : [''];
-          const sectionPayload = { ...section, context, description_rows: rowsToSend };
-          try {
-            await fetchWithRetry(() =>
-              axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, sectionPayload, { headers: getHeaders(), timeout: 30000 })
-            );
-          } catch (sectionErr) {
-            sectionErrors.push(context);
-          }
-        }
-        if (sectionErrors.length > 0) {
-          addToast(`Errore salvataggio sezioni: ${sectionErrors.join(', ')}`, 'error');
-        }
-
-        // Save parts — try bulk first
-        const allParts = [];
-        for (const context of selectedContexts) {
-          const list = (parts[context] || []).filter(p => (p.name || '').trim());
-          for (const p of list) {
-            allParts.push({ context, name: p.name.trim(), quantity: (p.quantity || '').trim() || null });
-          }
-        }
-
-        let bulkSuccess = false;
-        if (allParts.length > 0 || selectedContexts.length > 0) {
-          try {
-            await fetchWithRetry(() =>
-              axios.post(`${API_BASE_URL}/practices/${practiceId}/parts/bulk`, { parts: allParts }, { headers: getHeaders() }), { maxRetries: 1 }
-            );
-            bulkSuccess = true;
-          } catch (bulkErr) {
-            if (bulkErr.response?.status === 404) bulkSuccess = false;
-            else throw bulkErr;
-          }
-        }
-
-        if (!bulkSuccess) {
-          try {
-            await axios.delete(`${API_BASE_URL}/practices/${practiceId}/parts`, { headers: getHeaders() });
-          } catch (_) {}
-          for (const p of allParts) {
-            await axios.post(`${API_BASE_URL}/practices/${practiceId}/parts`, p, { headers: getHeaders() });
-          }
-        }
 
         clearDraft();
 

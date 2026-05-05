@@ -1,7 +1,9 @@
 import logging
 import os
+import json
 from pydantic_settings import BaseSettings
-from typing import List
+from pydantic import field_validator
+from typing import Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +11,7 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     telegram_bot_token: str = ""
     database_url: str = "sqlite:///./giorgio.db"  # Default SQLite
-    whitelist_telegram_ids: List[int] = []
+    whitelist_telegram_ids: Any = []
     ocr_confidence_threshold: float = 0.6
     secret_key: str = ""
 
@@ -32,6 +34,16 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+
+    @field_validator("whitelist_telegram_ids", mode="before")
+    @classmethod
+    def parse_whitelist_ids(cls, value):
+        if isinstance(value, str) and value.strip():
+            raw = value.strip()
+            if raw.startswith("["):
+                return json.loads(raw)
+            return [int(item.strip()) for item in raw.split(",") if item.strip()]
+        return value
 
     @property
     def webhook_url(self) -> str:

@@ -25,6 +25,10 @@ Base = declarative_base()
 logger.info("Database engine created with URL: %s", settings.database_url[:20] + "...")
 
 
+def enum_values(enum_cls):
+    return [member.value for member in enum_cls]
+
+
 class Practice(Base):
     __tablename__ = "practices"
 
@@ -33,17 +37,17 @@ class Practice(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     created_by_telegram_id = Column(Integer, nullable=False, index=True)
     updated_by_telegram_id = Column(Integer, nullable=True)
-    status = Column(Enum(PracticeStatus), default=PracticeStatus.DRAFT)
+    status = Column(Enum(PracticeStatus, values_callable=enum_values), default=PracticeStatus.DRAFT)
     plate_detected = Column(String(20), nullable=True)
     plate_confirmed = Column(String(20), nullable=False)
     phone = Column(String(20), nullable=False)
     customer_name = Column(String(200), nullable=False)
-    customer_type = Column(Enum(CustomerType), nullable=False)
+    customer_type = Column(Enum(CustomerType, values_callable=enum_values), nullable=False)
     billing_to_complete = Column(Boolean, default=False)
     appointment_date = Column(DateTime, nullable=False)
     appointment_time = Column(String(5), nullable=False)  # HH:MM
-    practice_type = Column(Enum(PracticeType), nullable=False)
-    contexts = Column(ARRAY(Enum(Context)), nullable=False)
+    practice_type = Column(Enum(PracticeType, values_callable=enum_values), nullable=False)
+    contexts = Column(ARRAY(Enum(Context, values_callable=enum_values)), nullable=False)
     internal_notes = Column(Text, nullable=True)
     management_external_id = Column(String(100), nullable=True)
     management_sync_status = Column(String(50), nullable=True)
@@ -68,7 +72,7 @@ class PracticeSection(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     practice_id = Column(Integer, nullable=False, index=True)
-    context = Column(Enum(Context), nullable=False)
+    context = Column(Enum(Context, values_callable=enum_values), nullable=False)
     description_rows = Column(ARRAY(Text), nullable=False)
     man_hours = Column(Float, nullable=True)
     mac_hours = Column(Float, nullable=True)
@@ -83,7 +87,7 @@ class PracticePart(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     practice_id = Column(Integer, nullable=False, index=True)
-    context = Column(Enum(Context), nullable=False)
+    context = Column(Enum(Context, values_callable=enum_values), nullable=False)
     name = Column(String(200), nullable=False)
     quantity = Column(String(50), nullable=True)  # Testuale: "1 pz", "2 pz", "3,5 kg"
 

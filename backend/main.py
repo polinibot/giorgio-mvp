@@ -7,7 +7,7 @@ import asyncio
 import traceback
 from datetime import datetime, timezone, date
 from enum import Enum
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Request, status, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +24,7 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.enums import ParseMode
 from database_sqlite import (
-    get_db, Practice, PracticePhoto, PracticeSection, PracticePart,
+    get_db, create_tables, Practice, PracticePhoto, PracticeSection, PracticePart,
 )
 from models import (
     PracticeStatus, PracticeType, CustomerType, Context,
@@ -39,6 +39,7 @@ from models import (
 from security import SecurityService
 from ocr_service import OCRService
 from cloudinary_service import cloudinary_service
+from telegram_utils import build_practice_summary
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,11 @@ app = FastAPI(
     version="2.0.0",
 )
 app.state.limiter = limiter
+
+
+@app.on_event("startup")
+async def startup_event():
+    create_tables()
 
 # --- CORS ---
 app.add_middleware(
@@ -145,6 +151,12 @@ def validate_telegram_init_data(
 
     try:
         if raw_init_data:
+            if not SecurityService.validate_telegram_init_data(raw_init_data):
+                logger.warning("Auth failed: invalid Telegram initData signature")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid Telegram initData",
+                )
             user = SecurityService.extract_user_from_init_data(raw_init_data)
             if user and user.get("id") is not None:
                 try:
@@ -223,6 +235,133 @@ async def test_connection():
 
 class SyncToggleRequest(BaseModel):
     synced: bool
+
+
+class SectionPayload(BaseModel):
+    context: Context
+    description_rows: List[str]
+    man_hours: Optional[float] = None
+    mac_hours: Optional[float] = None
+    materials_amount: Optional[float] = None
+    waste_apply: Optional[bool] = None
+    waste_percentage: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class PartPayload(BaseModel):
+    context: Context
+    name: str
+    quantity: Optional[str] = None
+
+
+class PracticeFullSave(BaseModel):
+    practice: PracticeCreate
+    sections: List[SectionPayload]
+    parts: List[PartPayload] = []
+
+
+def _context_value(value: Any) -> str:
+    return value.value if isinstance(value, Enum) else str(value)
+
+
+def _contexts_csv(contexts: List[Context]) -> str:
+    return ",".join(_context_value(context) for context in contexts)
+
+
+def _validate_slot_time(appointment_time: str):
+    if len(appointment_time or "") != 5 or appointment_time[2] != ":" or appointment_time[3:] not in ["00", "30"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="L'ora deve avere minuti 00 o 30 (slot da 30 minuti)",
+        )
+
+
+def _clean_section_rows(rows: List[str]) -> List[str]:
+    cleaned = [row.strip() for row in rows if isinstance(row, str) and row.strip()]
+    if not cleaned:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Almeno una riga descrittiva e obbligatoria per ogni contesto",
+        )
+    return cleaned
+
+
+def _validate_full_payload(body: PracticeFullSave):
+    selected_contexts = {_context_value(context) for context in body.practice.contexts}
+    if not selected_contexts:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Almeno un contesto e obbligatorio")
+    _validate_slot_time(body.practice.appointment_time)
+
+    sections_by_context: Dict[str, SectionPayload] = {}
+    for section in body.sections:
+        ctx = _context_value(section.context)
+        if ctx not in selected_contexts:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Sezione non coerente con i contesti: {ctx}")
+        if ctx in sections_by_context:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Sezione duplicata: {ctx}")
+        _clean_section_rows(section.description_rows)
+        if section.man_hours is not None and section.man_hours < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MAN deve essere >= 0")
+        if section.mac_hours is not None and section.mac_hours < 0:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MAC deve essere >= 0")
+        if section.waste_percentage is not None and not 0 <= section.waste_percentage <= 100:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Smaltimento deve essere tra 0 e 100")
+        sections_by_context[ctx] = section
+
+    missing = selected_contexts - set(sections_by_context)
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Riga descrittiva mancante per: {', '.join(sorted(missing))}",
+        )
+
+    for part in body.parts:
+        ctx = _context_value(part.context)
+        if ctx not in selected_contexts:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Pezzo non coerente con i contesti: {ctx}")
+        if not part.name.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nome pezzo obbligatorio")
+
+
+def _apply_practice_data(practice: Practice, data: PracticeCreate, user_id: int):
+    practice.plate_confirmed = data.plate_confirmed
+    practice.phone = data.phone
+    practice.customer_name = data.customer_name
+    practice.customer_type = data.customer_type
+    practice.billing_to_complete = data.billing_to_complete
+    practice.appointment_date = data.appointment_date
+    practice.appointment_time = data.appointment_time
+    practice.practice_type = data.practice_type
+    practice.contexts = _contexts_csv(data.contexts)
+    practice.internal_notes = data.internal_notes
+    practice.status = PracticeStatus.CONFIRMED
+    practice.updated_by_telegram_id = user_id
+
+
+def _replace_sections_and_parts(db: Session, practice_id: int, sections: List[SectionPayload], parts: List[PartPayload]):
+    db.query(PracticeSection).filter(PracticeSection.practice_id == practice_id).delete()
+    db.query(PracticePart).filter(PracticePart.practice_id == practice_id).delete()
+
+    for section in sections:
+        db.add(PracticeSection(
+            practice_id=practice_id,
+            context=section.context,
+            description_rows=_json.dumps(_clean_section_rows(section.description_rows)),
+            man_hours=section.man_hours,
+            mac_hours=section.mac_hours,
+            materials_amount=section.materials_amount,
+            waste_apply=section.waste_apply,
+            waste_percentage=section.waste_percentage,
+            notes=section.notes,
+        ))
+
+    for part in parts:
+        db.add(PracticePart(
+            practice_id=practice_id,
+            context=part.context,
+            name=part.name.strip(),
+            quantity=(part.quantity or "").strip() or None,
+        ))
 
 
 @app.get("/api/practices/stats")
@@ -461,8 +600,11 @@ async def upload_practice_photo(
             f.write(file_content)
 
         # Upload to Cloudinary
-        secure_url, metadata = cloudinary_service.upload_practice_photo(
-            temp_path, practice_id, generated_file_id
+        secure_url, metadata = await asyncio.to_thread(
+            cloudinary_service.upload_practice_photo,
+            temp_path,
+            practice_id,
+            generated_file_id,
         )
 
         # Create DB record
@@ -577,6 +719,73 @@ async def get_mini_app_data(
         return APIResponse(success=True, data={"user": user_data})
 
 
+@app.post("/practices/full")
+@limiter.limit("20/minute")
+async def create_practice_full(
+    request: Request,
+    body: PracticeFullSave,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Create a practice with sections and parts in one transaction."""
+    _validate_full_payload(body)
+    try:
+        practice = Practice(created_by_telegram_id=user_data["id"])
+        _apply_practice_data(practice, body.practice, user_data["id"])
+        db.add(practice)
+        db.flush()
+        _replace_sections_and_parts(db, practice.id, body.sections, body.parts)
+        db.commit()
+        db.refresh(practice)
+
+        logger.info("Full practice %d created by user %d", practice.id, user_data["id"])
+        _send_practice_telegram_notification_full(practice.id, user_data)
+        return APIResponse(success=True, data=serialize(practice))
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error("Error creating full practice: %s", e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore creazione pratica")
+
+
+@app.put("/practices/{practice_id}/full")
+@limiter.limit("60/minute")
+async def update_practice_full(
+    request: Request,
+    practice_id: int,
+    body: PracticeFullSave,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Update a practice with sections and parts in one transaction."""
+    _validate_full_payload(body)
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    try:
+        _apply_practice_data(practice, body.practice, user_data["id"])
+        _replace_sections_and_parts(db, practice_id, body.sections, body.parts)
+        db.commit()
+        db.refresh(practice)
+
+        logger.info("Full practice %d updated by user %d", practice_id, user_data["id"])
+        _send_practice_telegram_notification_full(practice.id, user_data)
+        return APIResponse(success=True, data=serialize(practice))
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error("Error updating full practice %d: %s", practice_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore aggiornamento pratica")
+
+
 @app.post("/practices")
 @limiter.limit("20/minute")
 async def create_practice(
@@ -678,6 +887,35 @@ def _send_practice_telegram_notification(practice, user_data: dict):
         asyncio.create_task(_send())
     except Exception as e:
         logger.error("Failed to prepare Telegram notification for practice %d: %s", practice.id, e)
+
+
+def _send_practice_telegram_notification_full(practice_id: int, user_data: dict):
+    """Send a Telegram summary built after all related data has been committed."""
+    try:
+        from telegram_utils import TelegramFormatter
+
+        async def _send():
+            db = next(get_db())
+            try:
+                summary = build_practice_summary(db, practice_id, user_data["id"])
+                message_text = TelegramFormatter.format_practice_summary(summary)
+                keyboard = TelegramFormatter.create_practice_keyboard(practice_id)
+                bot_instance = Bot(token=settings.telegram_bot_token)
+                await bot_instance.send_message(
+                    chat_id=user_data["id"],
+                    text=message_text,
+                    reply_markup=InlineKeyboardMarkup(**keyboard),
+                    parse_mode=ParseMode.HTML,
+                )
+                logger.info("Telegram summary sent for practice %d", practice_id)
+            except Exception as e:
+                logger.error("Failed to send Telegram summary for practice %d: %s", practice_id, e)
+            finally:
+                db.close()
+
+        asyncio.create_task(_send())
+    except Exception as e:
+        logger.error("Failed to prepare Telegram notification for practice %d: %s", practice_id, e)
 
 
 @app.put("/practices/{practice_id}")
@@ -786,49 +1024,37 @@ async def get_practice_summary(
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
 
-    sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice_id).all()
-    parts = db.query(PracticePart).filter(PracticePart.practice_id == practice_id).all()
-
-    # Build parts lookup dict keyed by context value (N+1 fix)
-    parts_by_context: dict = {}
-    for part in parts:
-        ctx_val = part.context.value if isinstance(part.context, Enum) else str(part.context)
-        parts_by_context.setdefault(ctx_val, []).append(part)
-
-    sections_summary = {}
-    for section in sections:
-        ctx_val = section.context.value if isinstance(section.context, Enum) else str(section.context)
-        section_parts = parts_by_context.get(ctx_val, [])
-        sections_summary[ctx_val] = {
-            "description_rows": section.description_rows,
-            "man_hours": section.man_hours,
-            "mac_hours": section.mac_hours,
-            "materials_amount": section.materials_amount,
-            "waste_apply": section.waste_apply,
-            "waste_percentage": section.waste_percentage,
-            "parts": [
-                p.name + (f" ({p.quantity})" if p.quantity else "")
-                for p in section_parts
-            ],
-        }
-
-    billing_warning = None
-    if practice.customer_type == CustomerType.AZIENDA and practice.billing_to_complete:
-        billing_warning = "⚠ Dati fatturazione da completare"
-
-    summary = PracticeSummary(
-        practice_id=practice.id,
-        plate=practice.plate_confirmed,
-        phone=practice.phone,
-        appointment=f"{practice.appointment_date.strftime('%d/%m/%Y')} {practice.appointment_time}",
-        practice_type=practice.practice_type.value,
-        contexts=[c.value for c in practice.contexts_list],
-        sections_summary=sections_summary,
-        billing_warning=billing_warning,
-        internal_notes=practice.internal_notes,
-    )
-
+    summary = build_practice_summary(db, practice_id, user_data["id"])
     return APIResponse(success=True, data=summary.dict())
+
+
+
+@app.get("/practices/{practice_id}/automation-payload")
+@limiter.limit("30/minute")
+async def get_automation_payload(
+    request: Request,
+    practice_id: int,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Export a practice payload ready for the future management automation."""
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+        Practice.status != PracticeStatus.DELETED,
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    try:
+        from automation_service import AutomationService
+
+        payload = AutomationService.prepare_automation_payload(practice_id, db)
+        readiness = AutomationService.validate_automation_readiness(payload)
+        return APIResponse(success=True, data={"payload": payload, "readiness": readiness})
+    except Exception as e:
+        logger.error("Error exporting automation payload for practice %d: %s", practice_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore export automation")
 
 
 # --- Sections ---
@@ -864,19 +1090,22 @@ async def create_section(
         else:
             rows_json = _json.dumps([str(rows)])
 
-        section = PracticeSection(
-            practice_id=practice_id,
-            context=section_data["context"],
-            description_rows=rows_json,
-            man_hours=section_data.get("man_hours"),
-            mac_hours=section_data.get("mac_hours"),
-            materials_amount=section_data.get("materials_amount"),
-            waste_apply=section_data.get("waste_apply"),
-            waste_percentage=section_data.get("waste_percentage"),
-            notes=section_data.get("notes"),
-        )
+        context_value = section_data["context"]
+        section = db.query(PracticeSection).filter(
+            PracticeSection.practice_id == practice_id,
+            PracticeSection.context == context_value,
+        ).first()
+        if not section:
+            section = PracticeSection(practice_id=practice_id, context=context_value)
+            db.add(section)
 
-        db.add(section)
+        section.description_rows = rows_json
+        section.man_hours = section_data.get("man_hours")
+        section.mac_hours = section_data.get("mac_hours")
+        section.materials_amount = section_data.get("materials_amount")
+        section.waste_apply = section_data.get("waste_apply")
+        section.waste_percentage = section_data.get("waste_percentage")
+        section.notes = section_data.get("notes")
         db.commit()
         db.refresh(section)
         logger.info("Section created for practice %d, context=%s", practice_id, section_data.get("context"))

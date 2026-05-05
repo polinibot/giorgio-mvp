@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from sqlalchemy.orm import Session
-from database import Practice, PracticeSection, PracticePart, PracticePhoto, Context, PracticeType
+from database_sqlite import Practice, PracticeSection, PracticePart, PracticePhoto
 from models import PracticeModel
+from telegram_utils import _parse_description_rows
 
 
 class AutomationService:
@@ -54,7 +55,7 @@ class AutomationService:
             },
             
             # Contesti operativi
-            "contexts": [context.value for context in practice.contexts],
+            "contexts": [context.value for context in practice.contexts_list],
             
             # Foto per riferimento
             "photos": [
@@ -89,7 +90,7 @@ class AutomationService:
             
             payload["sections"][section.context.value] = {
                 "context": section.context.value,
-                "description_rows": section.description_rows,
+                "description_rows": _parse_description_rows(section.description_rows),
                 "man_hours": section.man_hours,
                 "mac_hours": section.mac_hours,
                 "materials_amount": section.materials_amount,

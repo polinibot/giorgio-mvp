@@ -28,6 +28,17 @@ class TelegramBot:
         self.user_states = {}  # Stato per input manuale targa
         self.setup_handlers()
 
+    @staticmethod
+    def _write_file(path: str, content: bytes):
+        with open(path, "wb") as f:
+            f.write(content)
+
+    @staticmethod
+    def _verify_image(path: str):
+        from PIL import Image
+        with Image.open(path) as img:
+            img.verify()
+
     def setup_handlers(self):
         """Configura tutti gli handler del bot"""
 
@@ -79,14 +90,11 @@ class TelegramBot:
                 downloaded_file = await self.bot.download_file(file_path)
                 local_path = f"storage/photos/{photo.file_id}.jpg"
 
-                with open(local_path, 'wb') as f:
-                    f.write(downloaded_file.getvalue())
+                await asyncio.to_thread(self._write_file, local_path, downloaded_file.getvalue())
 
                 # Validate that downloaded file is a valid image
                 try:
-                    from PIL import Image
-                    with Image.open(local_path) as img:
-                        img.verify()
+                    await asyncio.to_thread(self._verify_image, local_path)
                 except Exception as img_err:
                     logger.warning("Downloaded file is not a valid image: %s", img_err)
                     await message.answer("❌ Il file ricevuto non è un'immagine valida. Riprova con una foto.")
@@ -96,7 +104,7 @@ class TelegramBot:
 
                 # OCR with error handling
                 try:
-                    ocr_result = OCRService.extract_plate_from_image(local_path)
+                    ocr_result = await asyncio.to_thread(OCRService.extract_plate_from_image, local_path)
                 except Exception as ocr_err:
                     logger.error("OCR processing failed: %s", ocr_err)
                     ocr_result = OCRResult("", 0.0)
@@ -122,7 +130,8 @@ class TelegramBot:
                     db.refresh(practice)
 
                     try:
-                        storage_path, _ = cloudinary_service.upload_practice_photo(
+                        storage_path, _ = await asyncio.to_thread(
+                            cloudinary_service.upload_practice_photo,
                             local_path,
                             practice.id,
                             photo.file_id
@@ -219,14 +228,29 @@ class TelegramBot:
 
             practice_id = int(callback.data.split("_")[2])
 
+            try:
+                from telegram_utils import TelegramFormatter, build_practice_summary
+                db = next(get_db())
+                try:
+                    summary = build_practice_summary(db, practice_id, callback.from_user.id)
+                finally:
+                    db.close()
+                text = TelegramFormatter.format_practice_summary(summary)
+                keyboard = TelegramFormatter.create_practice_keyboard(practice_id)
+                await callback.message.answer(
+                    text,
+                    reply_markup=InlineKeyboardMarkup(**keyboard),
+                    parse_mode=ParseMode.HTML
+                )
+            except Exception as e:
+                logger.error("Error loading practice summary %d: %s", practice_id, e)
+                await callback.message.answer("âŒ Errore caricamento riepilogo")
+            await callback.answer()
+            return
+
             # Ottieni riepilogo dall'API
             try:
-                import requests
-                response = requests.get(
-                    f"http://localhost:8000/practices/{practice_id}/summary",
-                    params={"init_data": ""},  # In produzione, passare initData reale
-                    timeout=10,
-                )
+                raise RuntimeError("Unreachable legacy API summary path")
 
                 if response.status_code == 200:
                     data = response.json()
@@ -301,9 +325,10 @@ class TelegramBot:
 
     async def send_plate_confirmation(self, message: Message, practice_id: int, file_id: str, ocr_result: OCRResult, photo_path: str):
         """Invia messaggio di conferma targa con opzioni"""
+        should_fallback = OCRService.should_use_fallback(ocr_result)
 
         # Costruisci il testo del messaggio
-        if ocr_result.plate and ocr_result.confidence > 0:
+        if ocr_result.plate and not should_fallback:
             text = (
                 f"🔍 Targa rilevata: <b>{ocr_result.plate}</b>\n\n"
                 f"La targa è corretta?"
@@ -319,7 +344,7 @@ class TelegramBot:
             )
 
         # Costruisci la tastiera inline
-        if ocr_result.plate and ocr_result.confidence > 0:
+        if ocr_result.plate and not should_fallback:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="✅ Conferma", callback_data=f"plate_confirm_{practice_id}"),

@@ -1,133 +1,172 @@
+import json
 import logging
-from datetime import datetime
-from typing import Dict, List, Any
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from models import PracticeSummary
 
 logger = logging.getLogger(__name__)
 
 
+def _enum_value(value: Any) -> Any:
+    return value.value if isinstance(value, Enum) else value
+
+
+def _parse_description_rows(rows: Any) -> List[str]:
+    if rows is None:
+        return []
+    if isinstance(rows, list):
+        return [str(row) for row in rows if str(row).strip()]
+    if isinstance(rows, str):
+        try:
+            parsed = json.loads(rows)
+            if isinstance(parsed, list):
+                return [str(row) for row in parsed if str(row).strip()]
+        except Exception:
+            pass
+        return [row for row in rows.splitlines() if row.strip()] or ([rows] if rows.strip() else [])
+    return [str(rows)]
+
+
+def build_practice_summary(db, practice_id: int, telegram_user_id: Optional[int] = None) -> PracticeSummary:
+    """Build a Telegram-ready summary directly from the current database models."""
+    from database_sqlite import Practice, PracticeSection, PracticePart
+    from models import CustomerType
+
+    query = db.query(Practice).filter(Practice.id == practice_id)
+    if telegram_user_id is not None:
+        query = query.filter(Practice.created_by_telegram_id == telegram_user_id)
+    practice = query.first()
+    if not practice:
+        raise ValueError("Pratica non trovata")
+
+    sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice_id).all()
+    parts = db.query(PracticePart).filter(PracticePart.practice_id == practice_id).all()
+
+    parts_by_context: Dict[str, List[Any]] = {}
+    for part in parts:
+        ctx_val = _enum_value(part.context)
+        parts_by_context.setdefault(ctx_val, []).append(part)
+
+    sections_summary: Dict[str, Dict[str, Any]] = {}
+    for section in sections:
+        ctx_val = _enum_value(section.context)
+        section_parts = parts_by_context.get(ctx_val, [])
+        sections_summary[ctx_val] = {
+            "description_rows": _parse_description_rows(section.description_rows),
+            "man_hours": section.man_hours,
+            "mac_hours": section.mac_hours,
+            "materials_amount": section.materials_amount,
+            "waste_apply": section.waste_apply,
+            "waste_percentage": section.waste_percentage,
+            "parts": [
+                p.name + (f" ({p.quantity})" if p.quantity else "")
+                for p in section_parts
+            ],
+        }
+
+    customer_type = _enum_value(practice.customer_type)
+    billing_warning = None
+    if customer_type == CustomerType.AZIENDA.value and practice.billing_to_complete:
+        billing_warning = "Attenzione: dati fatturazione da completare"
+
+    return PracticeSummary(
+        practice_id=practice.id,
+        plate=practice.plate_confirmed,
+        phone=practice.phone,
+        appointment=f"{practice.appointment_date.strftime('%d/%m/%Y')} {practice.appointment_time}",
+        practice_type=_enum_value(practice.practice_type),
+        contexts=[_enum_value(c) for c in practice.contexts_list],
+        sections_summary=sections_summary,
+        billing_warning=billing_warning,
+        internal_notes=practice.internal_notes,
+    )
+
+
 class TelegramFormatter:
-    """Utilità per formattare messaggi e riepiloghi Telegram"""
-    
+    """Utility per formattare messaggi e riepiloghi Telegram."""
+
     @staticmethod
     def format_practice_summary(summary: PracticeSummary) -> str:
-        """Formatta riepilogo pratica per messaggio Telegram"""
-        
-        text = f"🔧 Pratica #{summary.practice_id} creata\n\n"
-        text += f"📍 Targa: <b>{summary.plate}</b>\n"
-        text += f"📞 Telefono: {summary.phone}\n"
-        text += f"📅 Appuntamento: {summary.appointment}\n"
-        text += f"📋 Tipo: <b>{summary.practice_type.upper()}</b>\n"
-        text += f"🏢 Contesti: {', '.join([c.title() for c in summary.contexts])}\n\n"
-        
-        # Sezioni dettagliate
+        text = f"Pratica #{summary.practice_id} creata\n\n"
+        text += f"Targa: <b>{summary.plate}</b>\n"
+        text += f"Telefono: {summary.phone}\n"
+        text += f"Appuntamento: {summary.appointment}\n"
+        text += f"Tipo: <b>{summary.practice_type.upper()}</b>\n"
+        text += f"Contesti: {', '.join([c.title() for c in summary.contexts])}\n\n"
+
         for context, data in summary.sections_summary.items():
-            text += f"🔹 <b>{context.title()}</b>:\n"
-            
-            # Righe descrittive
-            if data.get('description_rows'):
-                for row in data['description_rows']:
-                    if row.strip():
-                        text += f"• {row}\n"
-            
-            # Ore manodopera
-            if data.get('man_hours'):
-                text += f"⏱️ MAN: {data['man_hours']} ore\n"
-            
-            if data.get('mac_hours'):
-                text += f"⏱️ MAC: {data['mac_hours']} ore\n"
-            
-            # Materiali carrozzeria
-            if data.get('materials_amount'):
-                text += f"💰 Materiali: €{data['materials_amount']:.2f}\n"
-            
-            # Smaltimento rifiuti
-            if data.get('waste_apply'):
-                percentage = data.get('waste_percentage', 2)
-                text += f"♻️ Smaltimento: {percentage}%\n"
-            
-            # Pezzi
-            if data.get('parts'):
-                text += "🔩 Pezzi:\n"
-                for part in data['parts']:
-                    text += f"  • {part}\n"
-            
+            text += f"<b>{context.title()}</b>:\n"
+            for row in data.get("description_rows") or []:
+                if str(row).strip():
+                    text += f"- {row}\n"
+            if data.get("man_hours") is not None:
+                text += f"MAN: {data['man_hours']} ore\n"
+            if data.get("mac_hours") is not None:
+                text += f"MAC: {data['mac_hours']} ore\n"
+            if data.get("materials_amount") is not None:
+                text += f"Materiali: EUR {data['materials_amount']:.2f}\n"
+            if data.get("waste_apply"):
+                percentage = data.get("waste_percentage", 2)
+                text += f"Smaltimento: {percentage}%\n"
+            if data.get("parts"):
+                text += "Pezzi:\n"
+                for part in data["parts"]:
+                    text += f"  - {part}\n"
             text += "\n"
-        
-        # Avviso fatturazione
+
         if summary.billing_warning:
             text += f"{summary.billing_warning}\n\n"
-        
-        # Note interne
         if summary.internal_notes:
-            text += f"📝 Note: {summary.internal_notes}\n\n"
-        
+            text += f"Note: {summary.internal_notes}\n\n"
         return text
-    
+
     @staticmethod
     def format_practice_modification_summary(summary: PracticeSummary) -> str:
-        """Formatta riepilogo per pratica modificata"""
-        
-        text = f"✏️ Pratica #{summary.practice_id} aggiornata\n\n"
-        text += f"📍 Targa: <b>{summary.plate}</b>\n"
-        text += f"📅 Appuntamento: {summary.appointment}\n"
-        text += f"📋 Tipo: <b>{summary.practice_type.upper()}</b>\n"
-        text += f"🏢 Contesti: {', '.join([c.title() for c in summary.contexts])}\n\n"
-        
-        # Note se presenti
+        text = f"Pratica #{summary.practice_id} aggiornata\n\n"
+        text += f"Targa: <b>{summary.plate}</b>\n"
+        text += f"Appuntamento: {summary.appointment}\n"
+        text += f"Tipo: <b>{summary.practice_type.upper()}</b>\n"
+        text += f"Contesti: {', '.join([c.title() for c in summary.contexts])}\n\n"
         if summary.internal_notes:
-            text += f"📝 Note: {summary.internal_notes}\n\n"
-        
-        text += "💾 Tutte le modifiche sono state salvate."
-        
+            text += f"Note: {summary.internal_notes}\n\n"
+        text += "Tutte le modifiche sono state salvate."
         return text
-    
+
     @staticmethod
     def create_practice_keyboard(practice_id: int) -> Dict[str, List[Dict[str, str]]]:
-        """Crea tastiera inline per azioni pratica"""
-        
         return {
             "inline_keyboard": [
                 [
-                    {"text": "✏️ Modifica pratica", "callback_data": f"edit_practice_{practice_id}"},
-                    {"text": "📊 Apri riepilogo", "callback_data": f"summary_practice_{practice_id}"}
+                    {"text": "Modifica pratica", "callback_data": f"edit_practice_{practice_id}"},
+                    {"text": "Apri riepilogo", "callback_data": f"summary_practice_{practice_id}"},
                 ],
-                [
-                    {"text": "🆕 Nuova pratica", "callback_data": "new_practice"}
-                ]
+                [{"text": "Nuova pratica", "callback_data": "new_practice"}],
             ]
         }
-    
+
     @staticmethod
     def format_error_message(error_type: str, details: str = "") -> str:
-        """Formatta messaggi di errore per Telegram"""
-        
         error_messages = {
-            "ocr_failed": "❌ Non sono riuscito a leggere la targa dalla foto.\nRiprova con un'immagine più chiara o inseriscila manualmente.",
-            "validation_failed": "❌ Dati non validi.\nControlla i campi obbligatori e riprova.",
-            "database_error": "❌ Errore durante il salvataggio.\nRiprova tra poco.",
-            "unauthorized": "⚠️ Non sei autorizzato a usare questo bot.",
-            "practice_not_found": "❌ Pratica non trovata.",
-            "generic": "❌ Si è verificato un errore.\nRiprova più tardi."
+            "ocr_failed": "Non sono riuscito a leggere la targa dalla foto. Riprova con un'immagine piu chiara o inseriscila manualmente.",
+            "validation_failed": "Dati non validi. Controlla i campi obbligatori e riprova.",
+            "database_error": "Errore durante il salvataggio. Riprova tra poco.",
+            "unauthorized": "Non sei autorizzato a usare questo bot.",
+            "practice_not_found": "Pratica non trovata.",
+            "generic": "Si e verificato un errore. Riprova piu tardi.",
         }
-        
         message = error_messages.get(error_type, error_messages["generic"])
-        
         if details:
             message += f"\n\nDettagli: {details}"
-        
         return message
-    
+
     @staticmethod
     def format_success_message(action: str, practice_id: int = None) -> str:
-        """Formatta messaggi di successo per Telegram"""
-        
         success_messages = {
-            "practice_created": f"✅ Pratica #{practice_id} creata con successo!",
-            "practice_updated": f"✅ Pratica #{practice_id} aggiornata con successo!",
-            "practice_deleted": f"🗑️ Pratica #{practice_id} cancellata con successo.",
-            "photo_saved": "📸 Foto salvata correttamente.",
-            "plate_confirmed": "✅ Targa confermata correttamente."
+            "practice_created": f"Pratica #{practice_id} creata con successo!",
+            "practice_updated": f"Pratica #{practice_id} aggiornata con successo!",
+            "practice_deleted": f"Pratica #{practice_id} cancellata con successo.",
+            "photo_saved": "Foto salvata correttamente.",
+            "plate_confirmed": "Targa confermata correttamente.",
         }
-        
-        return success_messages.get(action, "✅ Operazione completata con successo!")
+        return success_messages.get(action, "Operazione completata con successo!")

@@ -54,7 +54,8 @@ CREATE TABLE practices (
     internal_notes TEXT,
     management_external_id VARCHAR(100),
     management_sync_status VARCHAR(50),
-    management_last_sync_at TIMESTAMP WITH TIME ZONE
+    management_last_sync_at TIMESTAMP WITH TIME ZONE,
+    synced BOOLEAN DEFAULT FALSE NOT NULL
 );
 
 -- Tabella foto pratiche
