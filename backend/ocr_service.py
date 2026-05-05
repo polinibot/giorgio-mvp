@@ -1,7 +1,7 @@
 import re
 import pytesseract
-from PIL import Image
-from typing import Tuple, Optional
+from PIL import Image, ImageEnhance, ImageFilter
+from typing import Optional
 from config import settings
 
 
@@ -34,43 +34,96 @@ class OCRService:
             OCRResult con targa rilevata e confidenza
         """
         try:
-            # Carica l'immagine
             image = Image.open(image_path)
+            candidates = OCRService._preprocess_images(image)
+            configs = [
+                r'--oem 3 --psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+                r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+                r'--oem 3 --psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+                r'--oem 3 --psm 11 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
+            ]
             
-            # Configurazione Tesseract per ottimizzare il riconoscimento targhe
-            custom_config = r'--oem 3 --psm 8 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+            best_plate = ""
+            best_confidence = 0.0
             
-            # Estrai testo e dati di confidenza
-            data = pytesseract.image_to_data(image, config=custom_config, output_type=pytesseract.Output.DICT)
-            
-            # Filtra e pulisci i risultati
-            plates = []
-            confidences = []
-            
-            for i, text in enumerate(data['text']):
-                text = text.strip().upper()
-                if text and len(text) >= 5:  # Le targhe hanno almeno 5 caratteri
-                    # Rimuovi spazi e caratteri non validi
-                    clean_text = re.sub(r'[^A-Z0-9]', '', text)
+            for candidate in candidates:
+                for config in configs:
+                    data = pytesseract.image_to_data(candidate, config=config, output_type=pytesseract.Output.DICT)
+                    text_parts = []
                     
-                    # Verifica se corrisponde a un pattern di targa italiana
-                    for pattern in OCRService.ITALIAN_PLATE_PATTERNS:
-                        if re.match(pattern, clean_text):
-                            plates.append(clean_text)
-                            confidences.append(float(data['conf'][i]))
-                            break
+                    for i, text in enumerate(data.get('text', [])):
+                        clean_text = re.sub(r'[^A-Z0-9]', '', text.strip().upper())
+                        if clean_text:
+                            text_parts.append(clean_text)
+                            plate = OCRService._extract_plate_from_text(clean_text)
+                            if plate:
+                                confidence = OCRService._safe_confidence(data.get('conf', [])[i])
+                                if confidence >= best_confidence:
+                                    best_plate = plate
+                                    best_confidence = confidence
+                    
+                    combined_text = ''.join(text_parts)
+                    plate = OCRService._extract_plate_from_text(combined_text)
+                    if plate and best_confidence < 0.5:
+                        best_plate = plate
+                        best_confidence = 0.5
             
-            if plates:
-                # Prendi la targa con confidenza più alta
-                best_idx = confidences.index(max(confidences))
-                return OCRResult(plates[best_idx], confidences[best_idx] / 100.0)
-            else:
-                # Nessuna targa trovata, restituisci risultato vuoto
-                return OCRResult("", 0.0)
+            if best_plate:
+                return OCRResult(best_plate, best_confidence)
+            
+            return OCRResult("", 0.0)
                 
         except Exception as e:
             print(f"Errore OCR: {e}")
             return OCRResult("", 0.0)
+    
+    @staticmethod
+    def _preprocess_images(image: Image.Image):
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        width, height = image.size
+        center_crop = image.crop((
+            int(width * 0.05),
+            int(height * 0.25),
+            int(width * 0.95),
+            int(height * 0.85)
+        ))
+        
+        processed = []
+        for img in (image, center_crop):
+            gray = img.convert('L')
+            scale = max(1, min(3, 1800 // max(1, gray.width)))
+            if scale > 1:
+                gray = gray.resize((gray.width * scale, gray.height * scale), Image.Resampling.LANCZOS)
+            
+            sharp = gray.filter(ImageFilter.SHARPEN)
+            contrast = ImageEnhance.Contrast(sharp).enhance(2.2)
+            threshold = contrast.point(lambda pixel: 255 if pixel > 145 else 0)
+            
+            processed.extend([gray, contrast, threshold])
+        
+        return processed
+    
+    @staticmethod
+    def _extract_plate_from_text(text: str) -> Optional[str]:
+        clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
+        for length in range(7, 4, -1):
+            for start in range(0, max(1, len(clean_text) - length + 1)):
+                candidate = clean_text[start:start + length]
+                if OCRService.validate_plate_format(candidate):
+                    return candidate
+        return None
+    
+    @staticmethod
+    def _safe_confidence(confidence) -> float:
+        try:
+            value = float(confidence)
+            if value < 0:
+                return 0.0
+            return min(value / 100.0, 1.0)
+        except (TypeError, ValueError):
+            return 0.0
     
     @staticmethod
     def validate_plate_format(plate: str) -> bool:
