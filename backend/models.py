@@ -79,6 +79,7 @@ class PracticeSectionCreate(BaseModel):
     materials_amount: Optional[float] = None
     waste_apply: Optional[bool] = None
     waste_percentage: Optional[float] = None
+    notes: Optional[str] = None
 
 
 class PracticeSection(BaseModel):
@@ -91,6 +92,7 @@ class PracticeSection(BaseModel):
     materials_amount: Optional[float] = None
     waste_apply: Optional[bool] = None
     waste_percentage: Optional[float] = None
+    notes: Optional[str] = None
 
     class Config:
         from_attributes = True

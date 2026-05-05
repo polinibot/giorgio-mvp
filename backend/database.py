@@ -75,6 +75,7 @@ class PracticeSection(Base):
     materials_amount = Column(Float, nullable=True)
     waste_apply = Column(Boolean, nullable=True)
     waste_percentage = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
 
 
 class PracticePart(Base):

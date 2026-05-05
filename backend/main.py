@@ -873,6 +873,7 @@ async def create_section(
             materials_amount=section_data.get("materials_amount"),
             waste_apply=section_data.get("waste_apply"),
             waste_percentage=section_data.get("waste_percentage"),
+            notes=section_data.get("notes"),
         )
 
         db.add(section)

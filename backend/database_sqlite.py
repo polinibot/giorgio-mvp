@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -86,6 +86,7 @@ class PracticeSection(Base):
     materials_amount = Column(Float, nullable=True)
     waste_apply = Column(Boolean, nullable=True)
     waste_percentage = Column(Float, nullable=True)
+    notes = Column(Text, nullable=True)
 
     @property
     def description_rows_list(self):
@@ -126,6 +127,15 @@ def get_db():
 def create_tables():
     """Crea tutte le tabelle del database"""
     Base.metadata.create_all(bind=engine)
+    # Migrate: add notes column to practice_sections if missing
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT notes FROM practice_sections LIMIT 1"))
+    except Exception:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE practice_sections ADD COLUMN notes TEXT"))
+            conn.commit()
+        logger.info("Migrated: added notes column to practice_sections")
     logger.info("Database SQLite creato con successo")
 
 

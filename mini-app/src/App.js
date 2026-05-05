@@ -613,7 +613,7 @@ function App() {
           const partsData = {};
           response.data.data.parts.forEach(p => {
             if (!partsData[p.context]) partsData[p.context] = [];
-            partsData[p.context].push({ name: p.name || '', quantity: p.quantity || '' });
+            partsData[p.context].push({ name: p.name || '', quantity: p.quantity || '', _key: Date.now() + Math.random() });
           });
           setParts(partsData);
         }
@@ -694,7 +694,7 @@ function App() {
           loadPractice(practiceId, currentInitData, plate || '');
         } else {
           if (plate) setValue('plate_confirmed', plate);
-          const hadDraft = editingPractice ? false : restoreDraft();
+          const hadDraft = restoreDraft();
           if (hadDraft) setShowDraftBanner(true);
           setSelectedContexts(prev => prev.length ? prev : []);
           setLoading(false);
@@ -708,7 +708,7 @@ function App() {
       setError('Mini App deve essere eseguita in Telegram');
       setLoading(false);
     }
-  }, [loadPractice, setValue, restoreDraft, editingPractice]);
+  }, [loadPractice, setValue, restoreDraft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Contexts ---
   const toggleContext = (context) => {
@@ -784,7 +784,7 @@ function App() {
         startSlowTimer();
         try {
           await fetchWithRetry(() =>
-            axios.delete(`${API_BASE_URL}/practices/${p.id}`, { headers: getHeaders() })
+            axios.delete(`${API_BASE_URL}/practices/${p.id}`, { headers: getHeaders(), timeout: 30000 })
           );
           clearDraft();
           addToast('Pratica cancellata con successo', 'success');
@@ -865,11 +865,11 @@ function App() {
       let response;
       if (practice) {
         response = await fetchWithRetry(() =>
-          axios.put(`${API_BASE_URL}/practices/${practice.id}`, payload, { headers: getHeaders() })
+          axios.put(`${API_BASE_URL}/practices/${practice.id}`, payload, { headers: getHeaders(), timeout: 30000 })
         );
       } else {
         response = await fetchWithRetry(() =>
-          axios.post(`${API_BASE_URL}/practices`, payload, { headers: getHeaders() })
+          axios.post(`${API_BASE_URL}/practices`, payload, { headers: getHeaders(), timeout: 30000 })
         );
       }
 
@@ -878,14 +878,28 @@ function App() {
         const practiceId = responseData.id || (practice && practice.id);
 
         // Save sections
+        const sectionErrors = [];
         for (const context of selectedContexts) {
           const section = sections[context];
-          if (section && section.description_rows?.some(row => row.trim())) {
-            const sectionPayload = { ...section, context };
+          if (!section) continue;
+          const hasNonEmptyRows = section.description_rows?.some(row => (row || '').trim());
+          const hasOtherData = section.man_hours || section.mac_hours || section.materials_amount || section.waste_apply || (section.notes || '').trim();
+          if (!hasNonEmptyRows && !hasOtherData) continue;
+          // Ensure at least one non-empty row for backend validation
+          const rowsToSend = hasNonEmptyRows
+            ? section.description_rows
+            : [''];
+          const sectionPayload = { ...section, context, description_rows: rowsToSend };
+          try {
             await fetchWithRetry(() =>
-              axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, sectionPayload, { headers: getHeaders() })
+              axios.post(`${API_BASE_URL}/practices/${practiceId}/sections`, sectionPayload, { headers: getHeaders(), timeout: 30000 })
             );
+          } catch (sectionErr) {
+            sectionErrors.push(context);
           }
+        }
+        if (sectionErrors.length > 0) {
+          addToast(`Errore salvataggio sezioni: ${sectionErrors.join(', ')}`, 'error');
         }
 
         // Save parts — try bulk first
@@ -932,9 +946,15 @@ function App() {
           // Created from bot startapp
           setSuccessDone(true);
         } else {
-          // Navigate back to dashboard
-          setCurrentView('dashboard');
-          setNavigationStack([]);
+          // Navigate back: if editing, go to detail; otherwise dashboard
+          if (selectedPracticeId) {
+            setSelectedPracticeId(practiceId);
+            setCurrentView('detail');
+            setNavigationStack(['dashboard']);
+          } else {
+            setCurrentView('dashboard');
+            setNavigationStack([]);
+          }
           setEditingPractice(null);
           setPractice(null);
         }

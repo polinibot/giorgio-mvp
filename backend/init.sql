@@ -78,7 +78,8 @@ CREATE TABLE practice_sections (
     mac_hours FLOAT,
     materials_amount FLOAT,
     waste_apply BOOLEAN,
-    waste_percentage FLOAT
+    waste_percentage FLOAT,
+    notes TEXT
 );
 
 -- Tabella pezzi pratiche
