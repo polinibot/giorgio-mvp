@@ -15,6 +15,14 @@ function App() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [initData, setInitData] = useState('');
+  const [debugInfo, setDebugInfo] = useState({
+    phase: 'init',
+    practiceId: '',
+    plate: '',
+    hasTelegram: false,
+    hasInitData: false,
+    lastError: ''
+  });
   
   // Stato per i contesti selezionati
   const [selectedContexts, setSelectedContexts] = useState([]);
@@ -25,6 +33,12 @@ function App() {
   const { register, control, handleSubmit, setValue, watch, formState: { errors } } = useForm();
 
   const loadPractice = useCallback(async (practiceId, currentInitData) => {
+    setDebugInfo(prev => ({
+      ...prev,
+      phase: 'loading_practice',
+      practiceId,
+      hasInitData: !!currentInitData
+    }));
     try {
       const response = await axios.get(`${API_BASE_URL}/mini-app/data`, {
         params: { practice_id: practiceId, init_data: currentInitData }
@@ -55,24 +69,54 @@ function App() {
           });
           setSections(sectionsData);
         }
+
+        setDebugInfo(prev => ({
+          ...prev,
+          phase: 'practice_loaded'
+        }));
       }
     } catch (err) {
-      setError('Errore caricamento pratica');
+      const detailedError = err.response?.data?.detail || err.message || 'Errore caricamento pratica';
+      setError(`Errore caricamento pratica: ${detailedError}`);
+      setDebugInfo(prev => ({
+        ...prev,
+        phase: 'load_practice_error',
+        lastError: detailedError
+      }));
     } finally {
       setLoading(false);
     }
   }, [setValue]);
 
+  useEffect(() => {
+    const handleError = (event) => {
+      setError(`Errore JavaScript: ${event.message}`);
+      setDebugInfo(prev => ({
+        ...prev,
+        phase: 'js_error',
+        lastError: event.message
+      }));
+    };
+
+    window.addEventListener('error', handleError);
+    return () => window.removeEventListener('error', handleError);
+  }, []);
+
   // Inizializzazione Telegram WebApp
   useEffect(() => {
     if (window.Telegram && window.Telegram.WebApp) {
       const webApp = window.Telegram.WebApp;
+      setDebugInfo(prev => ({
+        ...prev,
+        phase: 'telegram_detected',
+        hasTelegram: true
+      }));
       webApp.ready();
       webApp.expand();
       
       // Imposta colore tema
-      webApp.setHeaderColor('#1f2937');
-      webApp.setBackgroundColor('#111827');
+      webApp.setHeaderColor('#ffffff');
+      webApp.setBackgroundColor('#f8fafc');
       
       // Ottieni initData
       const currentInitData = webApp.initData;
@@ -82,17 +126,37 @@ function App() {
       const urlParams = new URLSearchParams(window.location.search);
       const practiceId = urlParams.get('practice_id');
       const plate = urlParams.get('plate');
+      setDebugInfo(prev => ({
+        ...prev,
+        phase: 'telegram_ready',
+        practiceId: practiceId || '',
+        plate: plate || '',
+        hasInitData: !!currentInitData
+      }));
       
       if (practiceId) {
         loadPractice(practiceId, currentInitData);
       } else if (plate) {
         setValue('plate_confirmed', plate);
+        setDebugInfo(prev => ({
+          ...prev,
+          phase: 'plate_prefilled'
+        }));
         setLoading(false);
       } else {
+        setDebugInfo(prev => ({
+          ...prev,
+          phase: 'empty_form'
+        }));
         setLoading(false);
       }
     } else {
       setError('Mini App deve essere eseguita in Telegram');
+      setDebugInfo(prev => ({
+        ...prev,
+        phase: 'telegram_missing',
+        lastError: 'window.Telegram.WebApp non disponibile'
+      }));
       setLoading(false);
     }
   }, [loadPractice, setValue]);
@@ -219,7 +283,15 @@ function App() {
   if (loading) {
     return (
       <div className="App">
-        <div className="loading">Caricamento...</div>
+        <div className="loading">Caricamento Mini App...</div>
+        <div className="debug-box">
+          <div><strong>Fase:</strong> {debugInfo.phase}</div>
+          <div><strong>Telegram:</strong> {debugInfo.hasTelegram ? 'sì' : 'no'}</div>
+          <div><strong>InitData:</strong> {debugInfo.hasInitData ? 'presente' : 'assente'}</div>
+          <div><strong>Practice ID:</strong> {debugInfo.practiceId || '-'}</div>
+          <div><strong>Plate:</strong> {debugInfo.plate || '-'}</div>
+          {debugInfo.lastError && <div><strong>Errore:</strong> {debugInfo.lastError}</div>}
+        </div>
       </div>
     );
   }
@@ -228,6 +300,14 @@ function App() {
     <div className="App">
       <div className="container">
         <h1>🔧 Dati Pratica</h1>
+        <div className="debug-box">
+          <div><strong>Fase:</strong> {debugInfo.phase}</div>
+          <div><strong>Telegram:</strong> {debugInfo.hasTelegram ? 'sì' : 'no'}</div>
+          <div><strong>InitData:</strong> {debugInfo.hasInitData ? 'presente' : 'assente'}</div>
+          <div><strong>Practice ID:</strong> {debugInfo.practiceId || '-'}</div>
+          <div><strong>Plate:</strong> {debugInfo.plate || '-'}</div>
+          {debugInfo.lastError && <div><strong>Errore:</strong> {debugInfo.lastError}</div>}
+        </div>
         
         {error && <div className="error">{error}</div>}
         {success && <div className="success">{success}</div>}
