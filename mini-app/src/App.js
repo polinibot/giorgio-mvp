@@ -46,8 +46,6 @@ function App() {
       const plate = urlParams.get('plate');
       
       if (practiceId) {
-        // Sostituire con URL reale dopo deployment
-        const mini_app_url = `https://polini-bot.vercel.app?practice_id=${practiceId}&plate=${practice.plate_confirmed}&user_id=${callback.from_user.id}`;
         loadPractice(practiceId);
       } else if (plate) {
         setValue('plate_confirmed', plate);
