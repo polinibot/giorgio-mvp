@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -52,21 +52,27 @@ async def http_exception_handler(request, exc):
     )
 
 
-def validate_telegram_init_data(init_data: str = None):
+def validate_telegram_init_data(
+    init_data: str = None,
+    x_telegram_init_data: str = Header(None, alias="X-Telegram-Init-Data")
+):
     """Dependecy per validare initData di Telegram"""
-    if not init_data:
+    # Priorità: header X-Telegram-Init-Data, poi query param init_data
+    final_init_data = x_telegram_init_data or init_data
+    
+    if not final_init_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="InitData mancante"
         )
     
-    if not SecurityService.validate_telegram_init_data(init_data):
+    if not SecurityService.validate_telegram_init_data(final_init_data):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="InitData non valido"
         )
     
-    user_data = SecurityService.extract_user_from_init_data(init_data)
+    user_data = SecurityService.extract_user_from_init_data(final_init_data)
     if not user_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -54,7 +54,9 @@ function App() {
     }));
     try {
       const response = await axios.get(`${API_BASE_URL}/mini-app/data`, {
-        params: { practice_id: practiceId, init_data: currentInitData }
+        params: { practice_id: practiceId },
+        headers: { 'X-Telegram-Init-Data': currentInitData },
+        timeout: 30000 // 30 secondi timeout
       });
       
       if (response.data.success) {
