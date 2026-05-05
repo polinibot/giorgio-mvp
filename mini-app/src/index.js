@@ -25,10 +25,20 @@ window.addEventListener('unhandledrejection', (event) => {
 });
 
 try {
+  const bootstrapStatus = document.getElementById('bootstrap-status');
+  if (bootstrapStatus) {
+    bootstrapStatus.textContent = 'Caricamento interfaccia...';
+  }
   const root = ReactDOM.createRoot(document.getElementById('root'));
   root.render(
     <App />
   );
+  if (bootstrapStatus) {
+    bootstrapStatus.textContent = 'Interfaccia caricata.';
+    setTimeout(() => {
+      bootstrapStatus.remove();
+    }, 1000);
+  }
 } catch (error) {
   renderFatalError(error?.message || 'Errore sconosciuto in fase di bootstrap');
 }
