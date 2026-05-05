@@ -1,0 +1,282 @@
+/* Stile Mini App Giorgio - Compatibile con Telegram */
+
+.App {
+  background-color: #111827;
+  color: #f3f4f6;
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.container {
+  max-width: 100%;
+  padding: 16px;
+  margin: 0 auto;
+}
+
+h1 {
+  color: #f9fafb;
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+h2 {
+  color: #e5e7eb;
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  border-bottom: 1px solid #374151;
+  padding-bottom: 8px;
+}
+
+.section {
+  background-color: #1f2937;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #374151;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+label {
+  color: #d1d5db;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.input, .select, .textarea {
+  background-color: #374151;
+  border: 1px solid #4b5563;
+  border-radius: 8px;
+  padding: 12px;
+  color: #f3f4f6;
+  font-size: 16px;
+  transition: border-color 0.2s;
+}
+
+.input:focus, .select:focus, .textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.input::placeholder, .textarea::placeholder {
+  color: #9ca3af;
+}
+
+.textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #d1d5db;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #3b82f6;
+}
+
+.description-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.description-row .input {
+  flex: 1;
+}
+
+.button-remove {
+  background-color: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.button-remove:hover {
+  background-color: #b91c1c;
+}
+
+.button-add {
+  background-color: #059669;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+  margin-top: 8px;
+}
+
+.button-add:hover {
+  background-color: #047857;
+}
+
+.button-submit {
+  background-color: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  margin-top: 20px;
+}
+
+.button-submit:hover:not(:disabled) {
+  background-color: #2563eb;
+}
+
+.button-submit:disabled {
+  background-color: #4b5563;
+  cursor: not-allowed;
+}
+
+.error {
+  background-color: #dc2626;
+  color: white;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.success {
+  background-color: #059669;
+  color: white;
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.error-text {
+  color: #f87171;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  font-size: 18px;
+  color: #d1d5db;
+}
+
+/* DatePicker customization */
+.react-datepicker {
+  background-color: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 8px;
+}
+
+.react-datepicker__header {
+  background-color: #374151;
+  border-bottom: 1px solid #4b5563;
+}
+
+.react-datepicker__current-month,
+.react-datepicker__day-name {
+  color: #f3f4f6;
+}
+
+.react-datepicker__day {
+  color: #d1d5db;
+}
+
+.react-datepicker__day:hover {
+  background-color: #4b5563;
+}
+
+.react-datepicker__day--selected {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.react-datepicker__day--outside-month {
+  color: #6b7280;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .container {
+    padding: 12px;
+  }
+  
+  .section {
+    padding: 12px;
+  }
+  
+  h1 {
+    font-size: 20px;
+  }
+  
+  h2 {
+    font-size: 16px;
+  }
+}
+
+/* Animazioni */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.section {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Focus states per accessibilità */
+.input:focus-visible,
+.select:focus-visible,
+.textarea:focus-visible,
+.button-submit:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}

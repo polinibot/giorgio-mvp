@@ -1,0 +1,75 @@
+import hmac
+import hashlib
+from urllib.parse import parse_qs
+from typing import Dict, Optional
+from config import settings
+
+
+class SecurityService:
+    """Servizio per la sicurezza minima del bot e Mini App."""
+    
+    @staticmethod
+    def is_user_whitelisted(telegram_user_id: int) -> bool:
+        """
+        Verifica se l'utente Telegram è nella whitelist.
+        """
+        return telegram_user_id in settings.whitelist_telegram_ids
+    
+    @staticmethod
+    def validate_telegram_init_data(init_data: str) -> bool:
+        """
+        Valida l'initData di Telegram Mini App usando HMAC-SHA256.
+        
+        Args:
+            init_data: Dati init ricevuti dalla Mini App (formato query string)
+            
+        Returns:
+            True se validi, False altrimenti
+        """
+        try:
+            # Parse dei dati init
+            data = parse_qs(init_data)
+            
+            # Estrai l'hash dalla firma
+            hash_value = data.get('hash', [None])[0]
+            if not hash_value:
+                return False
+            
+            # Rimuovi l'hash dai dati per la verifica
+            auth_data = {k: v[0] for k, v in data.items() if k != 'hash'}
+            
+            # Ordina i dati per chiave
+            sorted_data = sorted(auth_data.items())
+            
+            # Costruisci la stringa di verifica
+            data_check_string = '\n'.join([f"{k}={v}" for k, v in sorted_data])
+            
+            # Calcola l'HMAC-SHA256 con il bot token
+            secret_key = hashlib.sha256(settings.telegram_bot_token.encode()).digest()
+            calculated_hash = hmac.new(
+                secret_key, 
+                data_check_string.encode(), 
+                hashlib.sha256
+            ).hexdigest()
+            
+            # Confronta gli hash in modo sicuro
+            return hmac.compare_digest(calculated_hash, hash_value)
+            
+        except Exception as e:
+            print(f"Errore validazione initData: {e}")
+            return False
+    
+    @staticmethod
+    def extract_user_from_init_data(init_data: str) -> Optional[Dict]:
+        """
+        Estrae i dati utente dall'initData validato.
+        """
+        try:
+            data = parse_qs(init_data)
+            user_data = data.get('user', [None])[0]
+            if user_data:
+                import json
+                return json.loads(user_data)
+            return None
+        except Exception:
+            return None
