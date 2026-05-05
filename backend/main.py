@@ -3,7 +3,7 @@ import os
 import json as _json
 import asyncio
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from enum import Enum
 from typing import List, Optional
 
@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, func, extract
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -102,6 +103,7 @@ def serialize(obj) -> dict:
 
     Converts enums to their value, datetimes to ISO strings, and handles
     special fields like description_rows (JSON text) and contexts (CSV).
+    Includes the synced field for Practice objects.
     """
     result = {}
     for k, v in obj.__dict__.items():
@@ -118,6 +120,8 @@ def serialize(obj) -> dict:
                 result[k] = [v]
         elif k == "contexts" and isinstance(v, str):
             result[k] = [c.strip() for c in v.split(",") if c.strip()]
+        elif isinstance(v, bool):
+            result[k] = v
         else:
             result[k] = v
     return result
@@ -209,6 +213,182 @@ async def root():
 async def test_connection():
     """Test endpoint for Vercel connection check."""
     return {"status": "ok", "message": "Connection successful", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+# --- Practice Dashboard Endpoints ---
+
+
+class SyncToggleRequest(BaseModel):
+    synced: bool
+
+
+@app.get("/api/practices/stats")
+@limiter.limit("60/minute")
+async def get_practice_stats(
+    request: Request,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Return statistics for the current user's practices."""
+    telegram_id = user_data["id"]
+
+    total = db.query(func.count(Practice.id)).filter(
+        Practice.created_by_telegram_id == telegram_id,
+        Practice.status != PracticeStatus.DELETED,
+    ).scalar() or 0
+
+    now = datetime.utcnow()
+    first_of_month = datetime(now.year, now.month, 1)
+    this_month = db.query(func.count(Practice.id)).filter(
+        Practice.created_by_telegram_id == telegram_id,
+        Practice.status != PracticeStatus.DELETED,
+        Practice.created_at >= first_of_month,
+    ).scalar() or 0
+
+    pending_sync = db.query(func.count(Practice.id)).filter(
+        Practice.created_by_telegram_id == telegram_id,
+        Practice.status != PracticeStatus.DELETED,
+        Practice.synced == False,
+    ).scalar() or 0
+
+    logger.info("Stats retrieved for user %d: total=%d, this_month=%d, pending_sync=%d",
+                telegram_id, total, this_month, pending_sync)
+
+    return APIResponse(success=True, data={
+        "total": total,
+        "this_month": this_month,
+        "pending_sync": pending_sync,
+    })
+
+
+@app.get("/api/practices")
+@limiter.limit("60/minute")
+async def list_practices(
+    request: Request,
+    search: Optional[str] = None,
+    context: Optional[str] = None,
+    synced: Optional[bool] = None,
+    sort: Optional[str] = "newest",
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """List practices for the current user with filtering and sorting."""
+    telegram_id = user_data["id"]
+
+    query = db.query(Practice).filter(
+        Practice.created_by_telegram_id == telegram_id,
+        Practice.status != PracticeStatus.DELETED,
+    )
+
+    # Search filter (plate or customer_name)
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Practice.plate_confirmed.ilike(search_term),
+                Practice.customer_name.ilike(search_term),
+            )
+        )
+
+    # Context filter
+    if context:
+        query = query.filter(Practice.contexts.ilike(f"%{context}%"))
+
+    # Synced filter
+    if synced is not None:
+        query = query.filter(Practice.synced == synced)
+
+    # Sorting
+    if sort == "oldest":
+        query = query.order_by(Practice.created_at.asc())
+    elif sort == "alpha":
+        query = query.order_by(Practice.customer_name.asc())
+    else:  # newest (default)
+        query = query.order_by(Practice.created_at.desc())
+
+    practices = query.all()
+
+    results = []
+    for p in practices:
+        results.append({
+            "id": p.id,
+            "plate": p.plate_confirmed,
+            "customer_name": p.customer_name,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "contexts": [c.strip() for c in p.contexts.split(",") if c.strip()] if isinstance(p.contexts, str) else p.contexts,
+            "synced": p.synced,
+        })
+
+    logger.info("Listed %d practices for user %d", len(results), telegram_id)
+    return APIResponse(success=True, data=results)
+
+
+@app.get("/api/practices/{practice_id}")
+@limiter.limit("60/minute")
+async def get_practice_detail(
+    request: Request,
+    practice_id: int,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Get full practice details including photos, sections, parts, and synced status."""
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+    ).first()
+
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    photos = db.query(PracticePhoto).filter(PracticePhoto.practice_id == practice_id).all()
+    sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice_id).all()
+    parts = db.query(PracticePart).filter(PracticePart.practice_id == practice_id).all()
+
+    logger.info("Practice %d detail retrieved by user %d", practice_id, user_data["id"])
+
+    return APIResponse(
+        success=True,
+        data={
+            "practice": serialize(practice),
+            "photos": [serialize(ph) for ph in photos],
+            "sections": [serialize(s) for s in sections],
+            "parts": [serialize(p) for p in parts],
+        },
+    )
+
+
+@app.patch("/api/practices/{practice_id}/sync")
+@limiter.limit("60/minute")
+async def toggle_practice_sync(
+    request: Request,
+    practice_id: int,
+    body: SyncToggleRequest,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle the synced status of a practice."""
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+    ).first()
+
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    try:
+        practice.synced = body.synced
+        practice.updated_by_telegram_id = user_data["id"]
+        db.commit()
+        db.refresh(practice)
+        logger.info("Practice %d sync toggled to %s by user %d", practice_id, body.synced, user_data["id"])
+        return APIResponse(success=True, data=serialize(practice))
+    except Exception as e:
+        db.rollback()
+        logger.error("Error toggling sync for practice %d: %s", practice_id, e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Errore aggiornamento stato sync",
+        )
 
 
 # --- Practice Endpoints ---

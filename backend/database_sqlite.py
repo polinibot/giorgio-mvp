@@ -43,6 +43,7 @@ class Practice(Base):
     management_external_id = Column(String(100), nullable=True)
     management_sync_status = Column(String(50), nullable=True)
     management_last_sync_at = Column(DateTime, nullable=True)
+    synced = Column(Boolean, default=False, nullable=False)
 
     @property
     def contexts_list(self):
