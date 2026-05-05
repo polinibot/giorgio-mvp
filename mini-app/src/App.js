@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import axios from 'axios';
 import DatePicker from 'react-datepicker';
@@ -7,9 +7,7 @@ import './App.css';
 
 // --- Constants & Helpers ---
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://giorgio-mvp-production.up.railway.app';
-const DRAFT_STORAGE_KEY = 'giorgio_draft';
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
 
 const CONTEXT_COLORS = {
   officina: { bg: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: 'rgba(59, 130, 246, 0.3)' },
@@ -138,10 +136,9 @@ function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [detailData, setDetailData] = useState(null);
   const [selectedContexts, setSelectedContexts] = useState([]);
-  const [sections, setSections] = useState({});
-  const [parts, setParts] = useState({});
 
-  const { register, control, handleSubmit, setValue, watch, reset } = useForm();
+
+  const { register, control, handleSubmit, reset } = useForm();
 
   const addToast = useCallback((message, type = 'success') => {
     const id = Date.now();
