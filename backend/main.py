@@ -61,11 +61,11 @@ def validate_telegram_init_data(
     # Priorità: header X-Telegram-Init-Data, poi query param init_data
     final_init_data = x_telegram_init_data or init_data
     
-    # TEMPORANEO: disabilito validazione per debug del network error
-    # TODO: riabilitare dopo aver risolto il problema
     if not final_init_data:
-        # Se manca init_data, restituisco un utente fittizio per debug
-        return {"id": 123456789, "first_name": "Debug", "last_name": "User"}
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="InitData mancante"
+        )
     
     if not SecurityService.validate_telegram_init_data(final_init_data):
         raise HTTPException(
