@@ -1,6 +1,9 @@
+import logging
 from datetime import datetime
 from typing import Dict, List, Any
 from models import PracticeSummary
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramFormatter:

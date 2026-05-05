@@ -1,39 +1,28 @@
+import logging
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, ARRAY, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
-import enum
 
 from config import settings
+from models import PracticeStatus, PracticeType, CustomerType, Context
 
-engine = create_engine(settings.database_url)
+logger = logging.getLogger(__name__)
+
+# Pool configuration for PostgreSQL; SQLite ignores pool_size/pool_recycle
+engine_kwargs = {}
+if settings.database_url and not settings.database_url.startswith("sqlite"):
+    engine_kwargs.update(
+        pool_size=10,
+        pool_recycle=3600,
+        pool_pre_ping=True,
+    )
+
+engine = create_engine(settings.database_url, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-
-class PracticeStatus(str, enum.Enum):
-    DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    DELETED = "deleted"
-    SYNC_PENDING = "sync_pending"
-    SYNCED = "synced"
-    SYNC_FAILED = "sync_failed"
-
-
-class PracticeType(str, enum.Enum):
-    PREVENTIVO = "preventivo"
-    ORDINE_DI_LAVORO = "ordine_di_lavoro"
-
-
-class CustomerType(str, enum.Enum):
-    PRIVATO = "privato"
-    AZIENDA = "azienda"
-
-
-class Context(str, enum.Enum):
-    OFFICINA = "officina"
-    CARROZZERIA = "carrozzeria"
-    REVISIONE = "revisione"
+logger.info("Database engine created with URL: %s", settings.database_url[:20] + "...")
 
 
 class Practice(Base):
@@ -42,7 +31,7 @@ class Practice(Base):
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_by_telegram_id = Column(Integer, nullable=False)
+    created_by_telegram_id = Column(Integer, nullable=False, index=True)
     updated_by_telegram_id = Column(Integer, nullable=True)
     status = Column(Enum(PracticeStatus), default=PracticeStatus.DRAFT)
     plate_detected = Column(String(20), nullable=True)
@@ -65,7 +54,7 @@ class PracticePhoto(Base):
     __tablename__ = "practice_photos"
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False)
+    practice_id = Column(Integer, nullable=False, index=True)
     telegram_file_id = Column(String(500), nullable=False)
     storage_path = Column(String(500), nullable=False)
     ocr_result = Column(String(20), nullable=True)
@@ -77,7 +66,7 @@ class PracticeSection(Base):
     __tablename__ = "practice_sections"
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False)
+    practice_id = Column(Integer, nullable=False, index=True)
     context = Column(Enum(Context), nullable=False)
     description_rows = Column(ARRAY(Text), nullable=False)
     man_hours = Column(Float, nullable=True)
@@ -91,7 +80,7 @@ class PracticePart(Base):
     __tablename__ = "practice_parts"
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False)
+    practice_id = Column(Integer, nullable=False, index=True)
     context = Column(Enum(Context), nullable=False)
     name = Column(String(200), nullable=False)
     quantity = Column(String(50), nullable=True)  # Testuale: "1 pz", "2 pz", "3,5 kg"

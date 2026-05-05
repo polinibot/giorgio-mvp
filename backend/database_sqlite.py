@@ -1,44 +1,22 @@
+import logging
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
-import enum
-import os
+
+from models import PracticeStatus, PracticeType, CustomerType, Context
+
+logger = logging.getLogger(__name__)
 
 # Database SQLite - niente Docker richiesto
 DATABASE_URL = "sqlite:///./giorgio.db"
 
 engine = create_engine(
-    DATABASE_URL, 
+    DATABASE_URL,
     connect_args={"check_same_thread": False}  # Necessario per SQLite
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
-
-class PracticeStatus(str, enum.Enum):
-    DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    DELETED = "deleted"
-    SYNC_PENDING = "sync_pending"
-    SYNCED = "synced"
-    SYNC_FAILED = "sync_failed"
-
-
-class PracticeType(str, enum.Enum):
-    PREVENTIVO = "preventivo"
-    ORDINE_DI_LAVORO = "ordine_di_lavoro"
-
-
-class CustomerType(str, enum.Enum):
-    PRIVATO = "privato"
-    AZIENDA = "azienda"
-
-
-class Context(str, enum.Enum):
-    OFFICINA = "officina"
-    CARROZZERIA = "carrozzeria"
-    REVISIONE = "revisione"
 
 
 class Practice(Base):
@@ -47,7 +25,7 @@ class Practice(Base):
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_by_telegram_id = Column(Integer, nullable=False)
+    created_by_telegram_id = Column(Integer, nullable=False, index=True)
     updated_by_telegram_id = Column(Integer, nullable=True)
     status = Column(Enum(PracticeStatus), default=PracticeStatus.DRAFT)
     plate_detected = Column(String(20), nullable=True)
@@ -72,7 +50,7 @@ class Practice(Base):
         if self.contexts:
             return [Context(c.strip()) for c in self.contexts.split(',') if c.strip()]
         return []
-    
+
     @contexts_list.setter
     def contexts_list(self, contexts_list):
         """Converte lista in stringa contexts"""
@@ -86,7 +64,7 @@ class PracticePhoto(Base):
     __tablename__ = "practice_photos"
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False)
+    practice_id = Column(Integer, nullable=False, index=True)
     telegram_file_id = Column(String(500), nullable=False)
     storage_path = Column(String(500), nullable=False)
     ocr_result = Column(String(20), nullable=True)
@@ -98,7 +76,7 @@ class PracticeSection(Base):
     __tablename__ = "practice_sections"
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False)
+    practice_id = Column(Integer, nullable=False, index=True)
     context = Column(Enum(Context), nullable=False)
     # SQLite non supporta array, usiamo JSON string
     description_rows = Column(Text, nullable=False)  # JSON string
@@ -115,10 +93,10 @@ class PracticeSection(Base):
         if self.description_rows:
             try:
                 return json.loads(self.description_rows)
-            except:
+            except Exception:
                 return [self.description_rows]
         return []
-    
+
     @description_rows_list.setter
     def description_rows_list(self, rows_list):
         """Converte lista in JSON string"""
@@ -130,7 +108,7 @@ class PracticePart(Base):
     __tablename__ = "practice_parts"
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False)
+    practice_id = Column(Integer, nullable=False, index=True)
     context = Column(Enum(Context), nullable=False)
     name = Column(String(200), nullable=False)
     quantity = Column(String(50), nullable=True)  # Testuale: "1 pz", "2 pz", "3,5 kg"
@@ -147,7 +125,7 @@ def get_db():
 def create_tables():
     """Crea tutte le tabelle del database"""
     Base.metadata.create_all(bind=engine)
-    print("✅ Database SQLite creato con successo")
+    logger.info("Database SQLite creato con successo")
 
 
 if __name__ == "__main__":

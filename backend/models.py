@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from enum import Enum
@@ -11,6 +12,18 @@ class PracticeStatus(str, Enum):
     SYNC_PENDING = "sync_pending"
     SYNCED = "synced"
     SYNC_FAILED = "sync_failed"
+
+
+class SectionType(str, Enum):
+    MANODOPERA = "manodopera"
+    MATERIALI = "materiali"
+    SMALTIMENTO = "smaltimento"
+
+
+class PartType(str, Enum):
+    RICAMBIO = "ricambio"
+    CONSUMABILE = "consumabile"
+    ACCESSORIO = "accessorio"
 
 
 class PracticeType(str, Enum):
@@ -27,6 +40,10 @@ class Context(str, Enum):
     OFFICINA = "officina"
     CARROZZERIA = "carrozzeria"
     REVISIONE = "revisione"
+
+
+# Alias for backward compatibility
+PracticeContext = Context
 
 
 class OCRResult(BaseModel):
@@ -97,9 +114,9 @@ class PracticePart(BaseModel):
 
 
 class PracticeCreate(BaseModel):
-    plate_confirmed: str
-    phone: str
-    customer_name: str
+    plate_confirmed: str = Field(..., min_length=5, max_length=10)
+    phone: str = Field(..., min_length=6, max_length=20)
+    customer_name: str = Field(..., min_length=1, max_length=200)
     customer_type: CustomerType
     billing_to_complete: bool = False
     appointment_date: datetime
@@ -107,6 +124,29 @@ class PracticeCreate(BaseModel):
     practice_type: PracticeType
     contexts: List[Context]
     internal_notes: Optional[str] = None
+
+    @field_validator("plate_confirmed")
+    @classmethod
+    def validate_plate(cls, v: str) -> str:
+        cleaned = re.sub(r'[^A-Z0-9]', '', v.upper())
+        if len(cleaned) < 5 or len(cleaned) > 10:
+            raise ValueError("Plate must be between 5 and 10 alphanumeric characters")
+        return cleaned
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        cleaned = re.sub(r'[^0-9+]', '', v)
+        if len(cleaned) < 6:
+            raise ValueError("Phone number must have at least 6 digits")
+        return v
+
+    @field_validator("customer_name")
+    @classmethod
+    def validate_customer_name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Customer name cannot be empty")
+        return v.strip()
 
 
 class PracticeUpdate(BaseModel):
