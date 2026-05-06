@@ -167,6 +167,16 @@ function getFilterChip(labelText) {
   );
 }
 
+const CONTEXT_MATRIX = [
+  ['officina'],
+  ['carrozzeria'],
+  ['revisione'],
+  ['officina', 'carrozzeria'],
+  ['officina', 'revisione'],
+  ['carrozzeria', 'revisione'],
+  ['officina', 'carrozzeria', 'revisione'],
+];
+
 beforeEach(() => {
   axios.get.mockReset();
   axios.post.mockReset();
@@ -189,20 +199,24 @@ afterEach(() => {
 
 let currentRoot;
 
-afterEach(() => {
-  if (currentRoot) {
-    act(() => {
-      currentRoot.unmount();
-    });
-    currentRoot = null;
-  }
-});
-
 function mount(query = '?plate=AB123CD') {
   const { container, root } = renderApp(query);
   currentRoot = root;
   return container;
 }
+
+async function unmountCurrentRoot() {
+  if (!currentRoot) return;
+
+  await act(async () => {
+    currentRoot.unmount();
+  });
+  currentRoot = null;
+}
+
+afterEach(async () => {
+  await unmountCurrentRoot();
+});
 
 describe('Mini App user-simulation suite', () => {
   test('opens a fully prefilled demo form with one URL', async () => {
@@ -457,10 +471,7 @@ describe('Mini App user-simulation suite', () => {
       await new Promise((resolve) => setTimeout(resolve, 700));
     });
 
-    act(() => {
-      currentRoot.unmount();
-    });
-    currentRoot = null;
+    await unmountCurrentRoot();
 
     mount('?plate=AB123CD');
 
@@ -495,6 +506,58 @@ describe('Mini App user-simulation suite', () => {
     expect(getSection('Officina').querySelector('input[placeholder="Descrizione lavoro..."]').value).toBe('Sostituzione olio');
     expect(getSection('Officina').querySelector('textarea#notes_officina').value).toBe('Da riconfermare col cliente');
   });
+
+  test.each(CONTEXT_MATRIX.map((combo) => [combo]))(
+    'draft restore preserves context combination %s without losing section rows',
+    async (combo) => {
+      localStorage.clear();
+
+      mount(`?plate=AB123CD&matrix=${combo.join('-')}`);
+      await waitFor(() => document.querySelector('form'));
+
+      for (const context of combo) {
+        const label = getCheckboxLabel(context.charAt(0).toUpperCase() + context.slice(1));
+        clickElement(label.querySelector('input[type="checkbox"]'));
+      }
+
+      for (const context of combo) {
+        const title = context.charAt(0).toUpperCase() + context.slice(1);
+        await waitFor(() => getSection(title));
+        setValueWithin(
+          getSection(title),
+          'input[placeholder="Descrizione lavoro..."]',
+          `Riga ${context}`
+        );
+      }
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      });
+
+      await unmountCurrentRoot();
+
+      mount(`?plate=AB123CD&matrix=${combo.join('-')}`);
+      await waitFor(() => document.querySelector('form'));
+
+      for (const context of combo) {
+        const title = context.charAt(0).toUpperCase() + context.slice(1);
+        await waitFor(() => getSection(title));
+        expect(
+          getSection(title).querySelector('input[placeholder="Descrizione lavoro..."]').value
+        ).toBe(`Riga ${context}`);
+      }
+
+      for (const context of ['officina', 'carrozzeria', 'revisione']) {
+        if (!combo.includes(context)) {
+          const title = context.charAt(0).toUpperCase() + context.slice(1);
+          expect(getSection(title)).toBeNull();
+        }
+      }
+
+      await unmountCurrentRoot();
+      localStorage.clear();
+    }
+  );
 
   test('editing an existing multi-context practice preserves all contexts and parts on submit', async () => {
     axios.put.mockResolvedValueOnce({ data: { success: true, data: { id: 7 } } });

@@ -16,6 +16,7 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "test:e2e": "react-scripts test --runInBand --watchAll=false",
     "eject": "react-scripts eject",
     "dev": "react-scripts start"
   },
