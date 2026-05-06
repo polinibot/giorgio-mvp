@@ -1,6 +1,6 @@
 import hmac
 import hashlib
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, unquote, unquote_plus
 from typing import Dict, Optional
 from config import settings
 
@@ -30,22 +30,14 @@ class SecurityService:
             if not init_data:
                 return False
 
-            pairs = [chunk for chunk in init_data.split('&') if chunk]
-            raw_data = {}
-            hash_value = None
-            for pair in pairs:
-                key, sep, value = pair.partition('=')
-                if not sep:
-                    continue
-                if key == 'hash':
-                    hash_value = value
-                else:
-                    raw_data[key] = value
-
+            data = parse_qs(init_data, keep_blank_values=True)
+            hash_value = data.get('hash', [None])[0]
             if not hash_value:
                 return False
 
-            sorted_data = sorted(raw_data.items())
+            auth_data = {k: unquote(v[0]) for k, v in data.items() if k != 'hash'}
+
+            sorted_data = sorted(auth_data.items())
 
             data_check_string = '\n'.join(f"{k}={v}" for k, v in sorted_data)
 

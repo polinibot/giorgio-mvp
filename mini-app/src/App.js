@@ -343,12 +343,12 @@ const extractTelegramInitDataFromLocation = () => {
   try {
     const searchParams = new URLSearchParams(window.location.search);
     const fromSearch = searchParams.get('tgWebAppData');
-    if (fromSearch) return decodeURIComponent(fromSearch);
+    if (fromSearch) return fromSearch;
 
     const hashRaw = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : (window.location.hash || '');
     const hashParams = new URLSearchParams(hashRaw);
     const fromHash = hashParams.get('tgWebAppData');
-    if (fromHash) return decodeURIComponent(fromHash);
+    if (fromHash) return fromHash;
   } catch (_) {
     // no-op
   }
