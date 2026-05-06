@@ -31,5 +31,5 @@ EXPOSE 8000
 # Railway uses its own healthcheck via healthcheckPath in railway.toml
 # No Docker HEALTHCHECK needed
 
-# Comando avvio - bot in background, uvicorn in foreground
-CMD ["sh", "-c", "python bot.py & uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Comando avvio - solo uvicorn, bot non necessario per API
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${PORT:-8000}"]
