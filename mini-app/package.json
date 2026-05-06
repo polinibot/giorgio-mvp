@@ -3,20 +3,23 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
     "@telegram-apps/sdk": "^1.0.0",
     "axios": "^1.6.0",
-    "react-hook-form": "^7.48.0",
+    "date-fns": "^2.30.0",
+    "react": "^18.2.0",
     "react-datepicker": "^4.21.0",
-    "date-fns": "^2.30.0"
+    "react-dom": "^18.2.0",
+    "react-hook-form": "^7.48.0",
+    "react-scripts": "5.0.1"
   },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "test:e2e": "react-scripts test --runInBand --watchAll=false",
+    "smoke:build": "node scripts/build-smoke.mjs",
+    "smoke:test": "playwright test",
+    "smoke": "node scripts/run-smoke.mjs",
     "eject": "react-scripts eject",
     "dev": "react-scripts start"
   },
@@ -38,5 +41,8 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "http://localhost:8000"
+  "proxy": "http://localhost:8000",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
 }
