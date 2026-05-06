@@ -167,7 +167,45 @@ def serialize(obj) -> dict:
 
 # --- Authentication ---
 
+def _mask_init_data(init_data: Optional[str]) -> Dict[str, Any]:
+    raw = init_data or ""
+    return {
+        "present": bool(raw),
+        "length": len(raw),
+        "has_hash": "hash=" in raw,
+        "preview": f"{raw[:80]}..." if len(raw) > 80 else raw,
+    }
+
+
+def _auth_debug_snapshot(
+    request: Optional[Request],
+    init_data: Optional[str],
+    x_telegram_init_data: Optional[str],
+    user_id: Optional[int],
+    x_telegram_user_id: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "path": str(request.url.path) if request else None,
+        "query": str(request.url.query) if request else None,
+        "client": request.client.host if request and request.client else None,
+        "query_user_id": user_id,
+        "header_user_id": x_telegram_user_id,
+        "header_init_data": _mask_init_data(x_telegram_init_data),
+        "query_init_data": _mask_init_data(init_data),
+    }
+
+
+def _log_auth_debug(stage: str, payload: Dict[str, Any], level: str = "warning") -> None:
+    message = "Auth debug [%s]: %s"
+    if level == "info":
+        logger.info(message, stage, payload)
+    elif level == "debug":
+        logger.debug(message, stage, payload)
+    else:
+        logger.warning(message, stage, payload)
+
 def validate_telegram_init_data(
+    request: Request,
     init_data: str = None,
     x_telegram_init_data: str = Header(None, alias="X-Telegram-Init-Data"),
     user_id: Optional[int] = None,
@@ -179,11 +217,14 @@ def validate_telegram_init_data(
     In debug mode, fall back to a test user.
     """
     raw_init_data = x_telegram_init_data or init_data
+    auth_snapshot = _auth_debug_snapshot(request, init_data, x_telegram_init_data, user_id, x_telegram_user_id)
+    _log_auth_debug("start", auth_snapshot, level="info")
 
     try:
         if raw_init_data:
             is_valid = SecurityService.validate_telegram_init_data(raw_init_data)
             if not is_valid and not DEBUG:
+                _log_auth_debug("invalid_init_data", auth_snapshot)
                 logger.warning("Auth failed: invalid Telegram initData signature")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -201,6 +242,7 @@ def validate_telegram_init_data(
                 except (TypeError, ValueError):
                     user_id = None
                 if user_id is not None:
+                    _log_auth_debug("init_data_user_ok", {**auth_snapshot, "resolved_user_id": user_id}, level="info")
                     logger.debug("Authenticated Telegram user %d", user_id)
                     return {
                         "id": user_id,
@@ -225,6 +267,7 @@ def validate_telegram_init_data(
         fallback_uid = int(user_id)
 
     if fallback_uid is not None:
+        _log_auth_debug("fallback_user_id_ok", {**auth_snapshot, "resolved_user_id": fallback_uid}, level="info")
         logger.warning("Auth fallback used without initData for Telegram user %s", fallback_uid)
         return {
             "id": fallback_uid,
@@ -235,6 +278,7 @@ def validate_telegram_init_data(
 
     # In production, reject unauthenticated requests
     if not DEBUG:
+        _log_auth_debug("auth_missing", auth_snapshot)
         logger.warning("Auth failed: no valid initData and DEBUG=False")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

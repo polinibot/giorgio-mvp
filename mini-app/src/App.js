@@ -486,6 +486,36 @@ const extractTelegramUserIdFromRuntime = () => {
   return '';
 };
 
+function DebugPanel({ authMode, initData, telegramUserId, lastApiDebug }) {
+  const search = typeof window !== 'undefined' ? window.location.search : '';
+  const hash = typeof window !== 'undefined' ? window.location.hash : '';
+
+  return (
+    <div className="debug-panel">
+      <div className="debug-panel-title">Debug Sessione</div>
+      <div className="debug-panel-line">authMode: {authMode}</div>
+      <div className="debug-panel-line">initData presente: {initData ? 'si' : 'no'}</div>
+      <div className="debug-panel-line">initData len: {initData?.length || 0}</div>
+      <div className="debug-panel-line">initData hash=: {initData?.includes('hash=') ? 'si' : 'no'}</div>
+      <div className="debug-panel-line">telegramUserId: {telegramUserId || '-'}</div>
+      <div className="debug-panel-line">search: {search || '-'}</div>
+      <div className="debug-panel-line">hash: {hash || '-'}</div>
+      {lastApiDebug && (
+        <>
+          <div className="debug-panel-line">lastApi.label: {lastApiDebug.label || '-'}</div>
+          <div className="debug-panel-line">lastApi.status: {lastApiDebug.status || '-'}</div>
+          <div className="debug-panel-line">lastApi.method: {lastApiDebug.method || '-'}</div>
+          <div className="debug-panel-line">lastApi.url: {lastApiDebug.url || '-'}</div>
+          <div className="debug-panel-line">lastApi.params: {JSON.stringify(lastApiDebug.params || {})}</div>
+          <div className="debug-panel-line">lastApi.headerKeys: {JSON.stringify(lastApiDebug.headerKeys || [])}</div>
+          <div className="debug-panel-line">lastApi.error: {JSON.stringify(lastApiDebug.error || null)}</div>
+          <div className="debug-panel-line">lastApi.timestamp: {lastApiDebug.timestamp || '-'}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // --- Main App ---
 
 function App() {
@@ -500,6 +530,7 @@ function App() {
   // Shared state
   const [initData, setInitData] = useState('');
   const [telegramUserId, setTelegramUserId] = useState('');
+  const [lastApiDebug, setLastApiDebug] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [confirmModal, setConfirmModal] = useState(null);
 
@@ -542,6 +573,47 @@ function App() {
   const searchTimerRef = useRef(null);
 
   const { register, control, handleSubmit, setValue, watch, getValues, formState: { errors } } = useForm();
+
+  const rememberRequest = (label, { method = 'GET', url, params = {}, headers = {} } = {}) => {
+    setLastApiDebug(prev => ({
+      ...(prev || {}),
+      timestamp: new Date().toISOString(),
+      label,
+      method,
+      url,
+      params,
+      headerKeys: Object.keys(headers || {}),
+      status: 'pending',
+      error: null,
+    }));
+  };
+
+  const rememberResponse = (label, extra = {}) => {
+    setLastApiDebug(prev => ({
+      ...(prev || {}),
+      ...(prev?.label === label ? {} : { label }),
+      timestamp: new Date().toISOString(),
+      status: 'ok',
+      error: null,
+      ...extra,
+    }));
+  };
+
+  const rememberError = (label, err, extra = {}) => {
+    setLastApiDebug(prev => ({
+      ...(prev || {}),
+      ...(prev?.label === label ? {} : { label }),
+      timestamp: new Date().toISOString(),
+      status: 'error',
+      error: {
+        message: err?.message || null,
+        status: err?.response?.status || null,
+        detail: err?.response?.data?.detail || null,
+        code: err?.response?.data?.code || err?.code || null,
+      },
+      ...extra,
+    }));
+  };
 
   // --- Toast helpers ---
   const addToast = useCallback((message, type = 'success', duration = 4000) => {
@@ -709,6 +781,7 @@ function App() {
       if (filters.synced === false) params.synced = 'false';
       params.sort = 'date_desc';
       Object.assign(params, getAuthParams());
+      rememberRequest('dashboard.list', { method: 'GET', url: `${API_BASE_URL}/api/practices`, params, headers: getHeaders() });
 
       const [practicesRes, statsRes] = await Promise.all([
         fetchWithRetry(() => axios.get(`${API_BASE_URL}/api/practices`, { params, headers: getHeaders(), timeout: 15000 })),
@@ -717,7 +790,9 @@ function App() {
 
       setPractices(practicesRes.data?.data || practicesRes.data || []);
       setStats(statsRes.data?.data || statsRes.data || { total: 0, this_month: 0, pending_sync: 0 });
+      rememberResponse('dashboard.list');
     } catch (err) {
+      rememberError('dashboard.list', err);
       addToast(classifyError(err), 'error');
     } finally {
       setDashboardLoading(false);
@@ -771,11 +846,14 @@ function App() {
     setDetailLoading(true);
     setDetailData(null);
     try {
+      rememberRequest('practice.detail', { method: 'GET', url: `${API_BASE_URL}/api/practices/${id}`, params: getAuthParams(), headers: getHeaders() });
       const res = await fetchWithRetry(() =>
         axios.get(`${API_BASE_URL}/api/practices/${id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 })
       );
       setDetailData(res.data?.data || res.data);
+      rememberResponse('practice.detail');
     } catch (err) {
+      rememberError('practice.detail', err);
       addToast(classifyError(err), 'error');
       navigateBack();
     } finally {
@@ -825,6 +903,15 @@ function App() {
         const fd = new FormData();
         fd.append('file', formPhotos[i].file);
         const query = currentTelegramUserId ? `?user_id=${encodeURIComponent(currentTelegramUserId)}` : '';
+        rememberRequest('photo.upload', {
+          method: 'POST',
+          url: `${API_BASE_URL}/api/practices/${practiceId}/photos`,
+          params: currentTelegramUserId ? { user_id: currentTelegramUserId } : {},
+          headers: {
+            ...(initData ? { 'X-Telegram-Init-Data': initData } : {}),
+            ...(currentTelegramUserId ? { 'X-Telegram-User-Id': currentTelegramUserId } : {}),
+          }
+        });
         const res = await fetch(`${API_BASE_URL}/api/practices/${practiceId}/photos${query}`, {
           method: 'POST',
           headers: {
@@ -833,10 +920,16 @@ function App() {
           },
           body: fd
         });
-        if (res.ok) successCount++;
-        else failCount++;
-      } catch {
+        if (res.ok) {
+          successCount++;
+          rememberResponse('photo.upload');
+        } else {
+          failCount++;
+          rememberError('photo.upload', { message: `HTTP ${res.status}`, response: { status: res.status, data: { detail: `upload_failed_${res.status}` } } });
+        }
+      } catch (err) {
         failCount++;
+        rememberError('photo.upload', err);
       }
     }
     setFormPhotoUploadProgress('');
@@ -850,13 +943,16 @@ function App() {
   // --- Toggle sync ---
   const toggleSync = useCallback(async (id, currentSynced) => {
     try {
+      rememberRequest('practice.sync', { method: 'PATCH', url: `${API_BASE_URL}/api/practices/${id}/sync`, params: getAuthParams(), headers: getHeaders() });
       await fetchWithRetry(() =>
         axios.patch(`${API_BASE_URL}/api/practices/${id}/sync`, { synced: !currentSynced }, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 })
       );
       setDetailData(prev => prev ? { ...prev, synced: !currentSynced } : prev);
       setPractices(prev => prev.map(p => p.id === id ? { ...p, synced: !currentSynced } : p));
+      rememberResponse('practice.sync');
       addToast(currentSynced ? 'Pratica segnata come non sincronizzata' : 'Pratica segnata come sincronizzata', 'success');
     } catch (err) {
+      rememberError('practice.sync', err);
       addToast(classifyError(err), 'error');
     }
   }, [getAuthParams, getHeaders, addToast]);
@@ -865,6 +961,15 @@ function App() {
   const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '', currentTelegramUserId = '') => {
     startSlowTimer();
     try {
+      rememberRequest('miniapp.load_practice', {
+        method: 'GET',
+        url: `${API_BASE_URL}/mini-app/data`,
+        params: { practice_id: practiceId, ...(currentTelegramUserId ? { user_id: currentTelegramUserId } : {}) },
+        headers: {
+          ...(currentInitData ? { 'X-Telegram-Init-Data': currentInitData } : {}),
+          ...(currentTelegramUserId ? { 'X-Telegram-User-Id': currentTelegramUserId } : {}),
+        }
+      });
       const response = await fetchWithRetry(() =>
         axios.get(`${API_BASE_URL}/mini-app/data`, {
           params: { practice_id: practiceId, ...(currentTelegramUserId ? { user_id: currentTelegramUserId } : {}) },
@@ -877,6 +982,7 @@ function App() {
       );
 
       if (response.data.success) {
+        rememberResponse('miniapp.load_practice');
         const practiceData = response.data.data.practice;
         setPractice(practiceData);
         const isDraft = practiceData.status === 'draft';
@@ -915,6 +1021,7 @@ function App() {
         }
       }
     } catch (err) {
+      rememberError('miniapp.load_practice', err);
       const status = err.response?.status;
       if (status === 404) {
         setPractice(null);
@@ -991,6 +1098,11 @@ function App() {
         setCurrentView('form');
         if (practiceId) {
           if (!currentInitData && !currentTelegramUserId) {
+            rememberError('miniapp.bootstrap', { response: { status: 401, data: { detail: 'bootstrap_missing_auth' } }, message: 'Bootstrap missing Telegram auth' }, {
+              method: 'BOOT',
+              url: window.location.href,
+              params: { practice_id: practiceId, plate: plate || '' },
+            });
             setError('Autenticazione Telegram assente. Riapri la Mini App dal pulsante del bot.');
             setLoading(false);
             return;
@@ -1028,6 +1140,11 @@ function App() {
         setCurrentView('form');
         if (practiceId) {
           if (!currentTelegramUserId) {
+            rememberError('miniapp.bootstrap', { response: { status: 401, data: { detail: 'standalone_missing_auth' } }, message: 'Standalone bootstrap missing Telegram auth' }, {
+              method: 'BOOT',
+              url: window.location.href,
+              params: { practice_id: practiceId, plate: plate || '' },
+            });
             setError('Autenticazione Telegram assente. Riapri la Mini App dal pulsante del bot.');
             setLoading(false);
             return;
@@ -1234,16 +1351,19 @@ function App() {
 
       let response;
       if (practice) {
+        rememberRequest('practice.update', { method: 'PUT', url: `${API_BASE_URL}/practices/${practice.id}/full`, params: getAuthParams(), headers: getHeaders() });
         response = await fetchWithRetry(() =>
             axios.put(`${API_BASE_URL}/practices/${practice.id}/full`, payload, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 })
         );
       } else {
+        rememberRequest('practice.create', { method: 'POST', url: `${API_BASE_URL}/practices/full`, params: getAuthParams(), headers: getHeaders() });
         response = await fetchWithRetry(() =>
             axios.post(`${API_BASE_URL}/practices/full`, payload, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 })
         );
       }
 
       if (response.data.success) {
+        rememberResponse(practice ? 'practice.update' : 'practice.create');
         const responseData = response.data.data || {};
         const practiceId = responseData.id || (practice && practice.id);
 
@@ -1274,6 +1394,7 @@ function App() {
         }
       }
     } catch (err) {
+      rememberError(practice ? 'practice.update' : 'practice.create', err);
       setError(classifyError(err));
       addToast(classifyError(err), 'error');
     } finally {
@@ -1340,6 +1461,7 @@ function App() {
         <div className="field-hint" style={{ marginBottom: 12 }}>
           Auth: <strong>{authMode}</strong>
         </div>
+        <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} lastApiDebug={lastApiDebug} />
 
         {/* Stats */}
         <div className="stats-row">
@@ -1677,6 +1799,7 @@ function App() {
           <div className="field-hint" style={{ marginBottom: 12 }}>
             Auth: <strong>{authMode}</strong>
           </div>
+          <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} lastApiDebug={lastApiDebug} />
 
           {showDraftBanner && (
             <div className="draft-banner">
