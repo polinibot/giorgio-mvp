@@ -40,7 +40,8 @@ function classifyError(err) {
   const status = err.response.status;
   const detail = err.response.data?.detail;
   if (status === 422 || status === 400) return detail || 'Dati non validi. Controlla i campi e riprova.';
-  if (status === 401 || status === 403) return 'Sessione scaduta. Chiudi e riapri la Mini App.';
+  if (status === 403) return detail || 'Utente non autorizzato. Contatta l\'amministratore.';
+  if (status === 401) return 'Sessione scaduta. Chiudi e riapri la Mini App.';
   if (status === 404) return detail || 'Risorsa non trovata.';
   if (status >= 500) return 'Errore del server. Riprova tra qualche istante.';
   return detail || 'Errore sconosciuto. Riprova.';
@@ -336,6 +337,22 @@ const normalizeContexts = (contexts) => {
   if (Array.isArray(contexts)) return contexts;
   if (typeof contexts === 'string') return contexts.split(',').map(c => c.trim()).filter(Boolean);
   return [];
+};
+
+const extractTelegramInitDataFromLocation = () => {
+  try {
+    const searchParams = new URLSearchParams(window.location.search);
+    const fromSearch = searchParams.get('tgWebAppData');
+    if (fromSearch) return decodeURIComponent(fromSearch);
+
+    const hashRaw = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : (window.location.hash || '');
+    const hashParams = new URLSearchParams(hashRaw);
+    const fromHash = hashParams.get('tgWebAppData');
+    if (fromHash) return decodeURIComponent(fromHash);
+  } catch (_) {
+    // no-op
+  }
+  return '';
 };
 
 // --- Main App ---
@@ -800,7 +817,7 @@ function App() {
       webApp.setHeaderColor('#0f0f1a');
       webApp.setBackgroundColor('#0f0f1a');
 
-      const currentInitData = webApp.initData;
+      const currentInitData = webApp.initData || extractTelegramInitDataFromLocation();
       setInitData(currentInitData);
 
       const urlParams = new URLSearchParams(window.location.search);
@@ -1206,6 +1223,17 @@ function App() {
           </button>
         </div>
 
+        <div className="detail-actions" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={seedDemoPractices}
+            disabled={seedingDemoPractices}
+          >
+            {seedingDemoPractices ? 'Creazione pratiche demo...' : 'Aggiungi 2 pratiche demo complete'}
+          </button>
+        </div>
+
         {/* Practice list */}
         {dashboardLoading ? (
           <DashboardSkeleton />
@@ -1214,14 +1242,6 @@ function App() {
             <div className="empty-icon">📋</div>
             <h3>Nessuna pratica trovata</h3>
             <p>Prova a modificare i filtri o crea una nuova pratica.</p>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={seedDemoPractices}
-              disabled={seedingDemoPractices}
-            >
-              {seedingDemoPractices ? 'Creazione pratiche demo...' : 'Aggiungi 2 pratiche demo complete'}
-            </button>
           </div>
         ) : (
           <div className="practice-list">
