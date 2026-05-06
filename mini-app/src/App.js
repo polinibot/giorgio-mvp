@@ -1812,7 +1812,14 @@ function App() {
             <button
               className="button-submit"
               type="button"
-              onClick={() => navigateTo('form', { editingPractice: practice, existingPhotos: photos })}
+              onClick={() => navigateTo('form', {
+                editingPractice: {
+                  ...practice,
+                  sections: dSections,
+                  parts: dParts,
+                },
+                existingPhotos: photos
+              })}
             >
               ✏️ Modifica
             </button>

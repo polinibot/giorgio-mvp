@@ -352,6 +352,89 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.querySelectorAll('.practice-card').length === 2);
   });
 
+  test('editing an existing practice preserves section rows when updating notes only', async () => {
+    axios.put.mockResolvedValueOnce({ data: { success: true, data: { id: 1 } } });
+
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 1 } } });
+      }
+      if (url.includes('/api/practices/1')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 1,
+                status: 'confirmed',
+                plate_confirmed: 'EG487YR',
+                phone: '3331112222',
+                customer_name: 'Cliente Demo',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-06-10T09:00:00.000Z',
+                appointment_time: '09:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                internal_notes: 'Nota iniziale',
+                synced: false,
+              },
+              sections: [
+                { context: 'officina', description_rows: ['Tagliando completo'], man_hours: 1, mac_hours: null, materials_amount: null, waste_apply: false, waste_percentage: null, notes: 'OK' },
+              ],
+              parts: [
+                { context: 'officina', name: 'Filtro olio', quantity: '1 pz' },
+              ],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [
+              {
+                id: 1,
+                plate: 'EG487YR',
+                customer_name: 'Cliente Demo',
+                contexts: ['officina'],
+                synced: false,
+                appointment_date: '2026-06-10T09:00:00.000Z',
+                created_at: '2026-06-10T09:00:00.000Z',
+              },
+            ],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    clickElement(document.querySelector('.practice-card'));
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+
+    clickElement(document.querySelector('.detail-actions .button-submit'));
+    await waitFor(() => document.querySelector('form'));
+
+    const officinaSection = getSection('Officina');
+    expect(officinaSection).toBeTruthy();
+    expect(officinaSection.querySelector('input[placeholder="Descrizione lavoro..."]').value).toBe('Tagliando completo');
+
+    setValueWithin(officinaSection, 'textarea#notes_officina', 'Nota aggiornata');
+    clickElement(document.querySelector('form button[type="submit"]'));
+
+    await waitFor(() => axios.put.mock.calls.length === 1);
+    const payload = axios.put.mock.calls[0][1];
+    expect(payload.sections).toHaveLength(1);
+    expect(payload.sections[0].description_rows).toEqual(['Tagliando completo']);
+    expect(payload.sections[0].notes).toBe('Nota aggiornata');
+    expect(document.body.textContent).not.toContain('Inserisci almeno una riga descrittiva per officina');
+  });
+
   test('renders the form, reveals dependent checkboxes/fields, and never shows placeholder text', async () => {
     mount('?plate=AB123CD');
 
