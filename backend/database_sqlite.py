@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum, text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum, text, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -28,6 +28,10 @@ def enum_values(enum_cls):
 
 class Practice(Base):
     __tablename__ = "practices"
+    __table_args__ = (
+        Index("ix_practices_owner_status_created", "created_by_telegram_id", "status", "created_at"),
+        Index("ix_practices_owner_status_synced", "created_by_telegram_id", "status", "synced"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -36,9 +40,9 @@ class Practice(Base):
     updated_by_telegram_id = Column(Integer, nullable=True)
     status = Column(Enum(PracticeStatus, values_callable=enum_values), default=PracticeStatus.DRAFT)
     plate_detected = Column(String(20), nullable=True)
-    plate_confirmed = Column(String(20), nullable=False)
-    phone = Column(String(20), nullable=False)
-    customer_name = Column(String(200), nullable=False)
+    plate_confirmed = Column(String(20), nullable=True)
+    phone = Column(String(20), nullable=True)
+    customer_name = Column(String(200), nullable=True)
     customer_type = Column(Enum(CustomerType, values_callable=enum_values), nullable=False)
     billing_to_complete = Column(Boolean, default=False)
     appointment_date = Column(DateTime, nullable=False)
@@ -70,9 +74,12 @@ class Practice(Base):
 
 class PracticePhoto(Base):
     __tablename__ = "practice_photos"
+    __table_args__ = (
+        Index("ix_practice_photos_practice_created", "practice_id", "created_at"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False, index=True)
+    practice_id = Column(Integer, ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
     telegram_file_id = Column(String(500), nullable=False)
     storage_path = Column(String(500), nullable=False)
     ocr_result = Column(String(20), nullable=True)
@@ -82,9 +89,12 @@ class PracticePhoto(Base):
 
 class PracticeSection(Base):
     __tablename__ = "practice_sections"
+    __table_args__ = (
+        Index("ix_practice_sections_practice_context", "practice_id", "context"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False, index=True)
+    practice_id = Column(Integer, ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
     context = Column(Enum(Context, values_callable=enum_values), nullable=False)
     # SQLite non supporta array, usiamo JSON string
     description_rows = Column(Text, nullable=False)  # JSON string
@@ -115,9 +125,12 @@ class PracticeSection(Base):
 
 class PracticePart(Base):
     __tablename__ = "practice_parts"
+    __table_args__ = (
+        Index("ix_practice_parts_practice_context", "practice_id", "context"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, nullable=False, index=True)
+    practice_id = Column(Integer, ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
     context = Column(Enum(Context, values_callable=enum_values), nullable=False)
     name = Column(String(200), nullable=False)
     quantity = Column(String(50), nullable=True)  # Testuale: "1 pz", "2 pz", "3,5 kg"
@@ -159,6 +172,111 @@ def create_tables():
             conn.execute(text("ALTER TABLE practice_sections ADD COLUMN notes TEXT"))
             conn.commit()
         logger.info("Migrated: added notes column to practice_sections")
+    # Migrate: make plate_confirmed, phone, customer_name nullable
+    try:
+        with engine.connect() as conn:
+            pragma_rows = conn.execute(text("PRAGMA table_info(practices)")).fetchall()
+            notnull_by_column = {row[1]: row[3] for row in pragma_rows}  # row[1]=name, row[3]=notnull
+            needs_nullable_migration = any(
+                notnull_by_column.get(column_name, 0) == 1
+                for column_name in ("plate_confirmed", "phone", "customer_name")
+            )
+
+            if needs_nullable_migration:
+                conn.execute(text("DROP TABLE IF EXISTS practices_new"))
+                conn.execute(text("""
+                    CREATE TABLE practices_new (
+                        id INTEGER PRIMARY KEY,
+                        created_at DATETIME,
+                        updated_at DATETIME,
+                        created_by_telegram_id INTEGER NOT NULL,
+                        updated_by_telegram_id INTEGER,
+                        status VARCHAR,
+                        plate_detected VARCHAR(20),
+                        plate_confirmed VARCHAR(20),
+                        phone VARCHAR(20),
+                        customer_name VARCHAR(200),
+                        customer_type VARCHAR,
+                        billing_to_complete BOOLEAN DEFAULT 0,
+                        appointment_date DATETIME NOT NULL,
+                        appointment_time VARCHAR(5) NOT NULL,
+                        practice_type VARCHAR,
+                        contexts VARCHAR(100) NOT NULL,
+                        internal_notes TEXT,
+                        management_external_id VARCHAR(100),
+                        management_sync_status VARCHAR(50),
+                        management_last_sync_at DATETIME,
+                        synced BOOLEAN DEFAULT 0 NOT NULL
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO practices_new (
+                        id,
+                        created_at,
+                        updated_at,
+                        created_by_telegram_id,
+                        updated_by_telegram_id,
+                        status,
+                        plate_detected,
+                        plate_confirmed,
+                        phone,
+                        customer_name,
+                        customer_type,
+                        billing_to_complete,
+                        appointment_date,
+                        appointment_time,
+                        practice_type,
+                        contexts,
+                        internal_notes,
+                        management_external_id,
+                        management_sync_status,
+                        management_last_sync_at,
+                        synced
+                    )
+                    SELECT
+                        id,
+                        created_at,
+                        updated_at,
+                        created_by_telegram_id,
+                        updated_by_telegram_id,
+                        status,
+                        plate_detected,
+                        plate_confirmed,
+                        phone,
+                        customer_name,
+                        customer_type,
+                        billing_to_complete,
+                        appointment_date,
+                        appointment_time,
+                        practice_type,
+                        contexts,
+                        internal_notes,
+                        management_external_id,
+                        management_sync_status,
+                        management_last_sync_at,
+                        synced
+                    FROM practices
+                """))
+                conn.execute(text("DROP TABLE practices"))
+                conn.execute(text("ALTER TABLE practices_new RENAME TO practices"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_id ON practices (id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_created_by_telegram_id ON practices (created_by_telegram_id)"))
+                conn.commit()
+                logger.info("Migrated: made plate_confirmed, phone, customer_name nullable")
+    except Exception as e:
+        logger.warning("Migration to nullable columns failed (may already exist): %s", e)
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_owner_status_created ON practices (created_by_telegram_id, status, created_at)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_owner_status_synced ON practices (created_by_telegram_id, status, synced)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practice_sections_practice_context ON practice_sections (practice_id, context)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practice_parts_practice_context ON practice_parts (practice_id, context)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practice_photos_practice_created ON practice_photos (practice_id, created_at)"))
+            conn.commit()
+    except Exception as e:
+        logger.warning("Index optimization migration failed (may already exist): %s", e)
+
     logger.info("Database SQLite creato con successo")
 
 

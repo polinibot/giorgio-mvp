@@ -72,8 +72,8 @@ def build_practice_summary(db, practice_id: int, telegram_user_id: Optional[int]
 
     return PracticeSummary(
         practice_id=practice.id,
-        plate=practice.plate_confirmed,
-        phone=practice.phone,
+        plate=practice.plate_confirmed or "",
+        phone=practice.phone or "",
         appointment=f"{practice.appointment_date.strftime('%d/%m/%Y')} {practice.appointment_time}",
         practice_type=_enum_value(practice.practice_type),
         contexts=[_enum_value(c) for c in practice.contexts_list],
@@ -88,50 +88,23 @@ class TelegramFormatter:
 
     @staticmethod
     def format_practice_summary(summary: PracticeSummary) -> str:
-        text = f"Pratica #{summary.practice_id} creata\n\n"
-        text += f"Targa: <b>{summary.plate}</b>\n"
-        text += f"Telefono: {summary.phone}\n"
-        text += f"Appuntamento: {summary.appointment}\n"
-        text += f"Tipo: <b>{summary.practice_type.upper()}</b>\n"
-        text += f"Contesti: {', '.join([c.title() for c in summary.contexts])}\n\n"
-
-        for context, data in summary.sections_summary.items():
-            text += f"<b>{context.title()}</b>:\n"
-            for row in data.get("description_rows") or []:
-                if str(row).strip():
-                    text += f"- {row}\n"
-            if data.get("man_hours") is not None:
-                text += f"MAN: {data['man_hours']} ore\n"
-            if data.get("mac_hours") is not None:
-                text += f"MAC: {data['mac_hours']} ore\n"
-            if data.get("materials_amount") is not None:
-                text += f"Materiali: EUR {data['materials_amount']:.2f}\n"
-            if data.get("waste_apply"):
-                percentage = data.get("waste_percentage", 2)
-                text += f"Smaltimento: {percentage}%\n"
-            if data.get("parts"):
-                text += "Pezzi:\n"
-                for part in data["parts"]:
-                    text += f"  - {part}\n"
-            text += "\n"
-
-        if summary.billing_warning:
-            text += f"{summary.billing_warning}\n\n"
-        if summary.internal_notes:
-            text += f"Note: {summary.internal_notes}\n\n"
-        return text
+        contexts = ", ".join([c.title() for c in summary.contexts]) if summary.contexts else "N/D"
+        return (
+            f"✅ Pratica #{summary.practice_id} creata\n"
+            f"Targa: <b>{summary.plate or 'N/D'}</b>\n"
+            f"Contesti: {contexts}\n"
+            "Apri la Mini App per gestire tutti i dettagli."
+        )
 
     @staticmethod
     def format_practice_modification_summary(summary: PracticeSummary) -> str:
-        text = f"Pratica #{summary.practice_id} aggiornata\n\n"
-        text += f"Targa: <b>{summary.plate}</b>\n"
-        text += f"Appuntamento: {summary.appointment}\n"
-        text += f"Tipo: <b>{summary.practice_type.upper()}</b>\n"
-        text += f"Contesti: {', '.join([c.title() for c in summary.contexts])}\n\n"
-        if summary.internal_notes:
-            text += f"Note: {summary.internal_notes}\n\n"
-        text += "Tutte le modifiche sono state salvate."
-        return text
+        contexts = ", ".join([c.title() for c in summary.contexts]) if summary.contexts else "N/D"
+        return (
+            f"✏️ Pratica #{summary.practice_id} aggiornata\n"
+            f"Targa: <b>{summary.plate or 'N/D'}</b>\n"
+            f"Contesti: {contexts}\n"
+            "Apri la Mini App per vedere il riepilogo completo."
+        )
 
     @staticmethod
     def create_practice_keyboard(practice_id: int) -> Dict[str, List[Dict[str, str]]]:

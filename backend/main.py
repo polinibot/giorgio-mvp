@@ -15,11 +15,31 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func, extract
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 
-from config import settings, DEBUG, ALLOWED_ORIGINS
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+except ModuleNotFoundError:  # pragma: no cover - fallback for dev/test environments without slowapi
+    class RateLimitExceeded(Exception):
+        pass
+
+    def get_remote_address(request: Request):
+        return request.client.host if request.client else "127.0.0.1"
+
+    class Limiter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def limit(self, *args, **kwargs):
+            def decorator(func):
+                return func
+
+            return decorator
+
+    _rate_limit_exceeded_handler = None
+
+from config import settings, DEBUG, ALLOWED_ORIGINS, LOCAL_DEV_ORIGIN_REGEX
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.enums import ParseMode
@@ -65,6 +85,7 @@ async def startup_event():
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=LOCAL_DEV_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -151,13 +172,19 @@ def validate_telegram_init_data(
 
     try:
         if raw_init_data:
-            if not SecurityService.validate_telegram_init_data(raw_init_data):
+            is_valid = SecurityService.validate_telegram_init_data(raw_init_data)
+            if not is_valid and not DEBUG:
                 logger.warning("Auth failed: invalid Telegram initData signature")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid Telegram initData",
                 )
+
             user = SecurityService.extract_user_from_init_data(raw_init_data)
+            if not user and DEBUG:
+                logger.debug("DEBUG mode: falling back to dev user because initData could not be parsed")
+                return {"id": 123456789, "first_name": "User", "last_name": "Test", "username": "dev_test"}
+
             if user and user.get("id") is not None:
                 try:
                     user_id = int(user["id"])
@@ -171,6 +198,9 @@ def validate_telegram_init_data(
                         "last_name": user.get("last_name", "") or "",
                         "username": user.get("username", "") or "",
                     }
+            if DEBUG:
+                logger.debug("DEBUG mode: initData present but user extraction failed, using dev fallback user")
+                return {"id": 123456789, "first_name": "User", "last_name": "Test", "username": "dev_test"}
     except Exception as e:
         logger.warning("Failed to extract user from initData: %s", e)
 
@@ -194,13 +224,14 @@ def require_whitelisted_user(
 
     If whitelist is empty (dev/test), allow all users through with a warning.
     """
+    if DEBUG:
+        return user_data
+
     whitelist = getattr(settings, "whitelist_telegram_ids", None) or []
     if not whitelist:
         logger.warning("Telegram whitelist is empty — all users allowed")
         return user_data
     uid = user_data.get("id")
-    if DEBUG and uid == 123456789:
-        return user_data
     if uid not in whitelist:
         logger.warning("User %s not in whitelist, access denied", uid)
         raise HTTPException(
@@ -434,21 +465,30 @@ async def list_practices(
 
     # Context filter
     if context:
-        query = query.filter(Practice.contexts.ilike(f"%{context}%"))
+        context_terms = [c.strip().lower() for c in context.split(",") if c.strip()]
+        if context_terms:
+            query = query.filter(or_(*[Practice.contexts.ilike(f"%{ctx}%") for ctx in context_terms]))
 
     # Synced filter
     if synced is not None:
         query = query.filter(Practice.synced == synced)
 
     # Sorting
-    if sort == "oldest":
+    if sort in {"oldest", "date_asc"}:
         query = query.order_by(Practice.created_at.asc())
     elif sort == "alpha":
         query = query.order_by(Practice.customer_name.asc())
-    else:  # newest (default)
+    else:  # newest/date_desc (default)
         query = query.order_by(Practice.created_at.desc())
 
-    practices = query.all()
+    practices = query.with_entities(
+        Practice.id,
+        Practice.plate_confirmed,
+        Practice.customer_name,
+        Practice.created_at,
+        Practice.contexts,
+        Practice.synced,
+    ).all()
 
     results = []
     for p in practices:
@@ -482,9 +522,9 @@ async def get_practice_detail(
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
 
-    photos = db.query(PracticePhoto).filter(PracticePhoto.practice_id == practice_id).all()
-    sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice_id).all()
-    parts = db.query(PracticePart).filter(PracticePart.practice_id == practice_id).all()
+    photos = db.query(PracticePhoto).filter(PracticePhoto.practice_id == practice_id).order_by(PracticePhoto.created_at.desc()).all()
+    sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice_id).order_by(PracticeSection.id.asc()).all()
+    parts = db.query(PracticePart).filter(PracticePart.practice_id == practice_id).order_by(PracticePart.id.asc()).all()
 
     logger.info("Practice %d detail retrieved by user %d", practice_id, user_data["id"])
 

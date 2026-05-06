@@ -66,6 +66,13 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+function formatDateForBackend(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
 // --- Sub-components ---
 
 /** Toast notification */
@@ -168,9 +175,101 @@ const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 // Form fields that are actually sent to the backend
 const FORM_FIELDS = ['plate_confirmed', 'phone', 'customer_name', 'customer_type', 'billing_to_complete', 'appointment_date', 'appointment_time', 'practice_type', 'internal_notes'];
 
+// Precompiled demo data used for fast QA testing in browser/Telegram preview
+const DEMO_DRAFT = {
+  plate_confirmed: 'AB123CD',
+  phone: '3331234567',
+  customer_name: 'Mario Rossi',
+  customer_type: 'azienda',
+  billing_to_complete: true,
+  appointment_date: '2026-06-20',
+  appointment_time: '09:30',
+  practice_type: 'preventivo',
+  internal_notes: 'Demo QA precompilata',
+  company_name: 'Rossi SRL',
+  vat_number: 'IT12345678901',
+  fiscal_code: 'RSSMRA80A01H501U',
+  billing_address: 'Via Roma 1',
+  billing_city: 'Milano',
+  billing_zip: '20100',
+};
+
+const DEMO_CONTEXTS = ['officina', 'carrozzeria', 'revisione'];
+
+const DEMO_SECTIONS = {
+  officina: {
+    description_rows: ['Tagliando completo', 'Controllo freni'],
+    man_hours: 2.5,
+    mac_hours: '',
+    materials_amount: '',
+    waste_apply: false,
+    waste_percentage: 2,
+    notes: 'Demo officina',
+  },
+  carrozzeria: {
+    description_rows: ['Ripristino paraurti', 'Lucidatura finale'],
+    man_hours: '',
+    mac_hours: 1.5,
+    materials_amount: 120,
+    waste_apply: true,
+    waste_percentage: 7.5,
+    notes: 'Demo carrozzeria',
+  },
+  revisione: {
+    description_rows: ['Controllo pre-revisione'],
+    man_hours: '',
+    mac_hours: '',
+    materials_amount: '',
+    waste_apply: false,
+    waste_percentage: 2,
+    notes: 'Demo revisione',
+  },
+};
+
+const DEMO_PARTS = {
+  officina: [
+    { name: 'Filtro olio', quantity: '1 pz' },
+    { name: 'Pastiglie freno', quantity: '1 set' },
+  ],
+  carrozzeria: [
+    { name: 'Stucco', quantity: '1 confezione' },
+  ],
+};
+
+/** Normalize sections data: ensure description_rows is always an array */
+const normalizeSections = (rawSections) => {
+  if (!rawSections || !Array.isArray(rawSections)) return {};
+  const result = {};
+  rawSections.forEach(s => {
+    result[s.context] = {
+      ...s,
+      description_rows: Array.isArray(s.description_rows)
+        ? (s.description_rows.length > 0 ? s.description_rows : [''])
+        : typeof s.description_rows === 'string'
+          ? (s.description_rows.trim() ? s.description_rows.split('\n') : [''])
+          : [''],
+      man_hours: s.man_hours || '',
+      mac_hours: s.mac_hours || '',
+      materials_amount: s.materials_amount || '',
+      waste_apply: s.waste_apply || false,
+      waste_percentage: s.waste_percentage || 2,
+      notes: s.notes || '',
+    };
+  });
+  return result;
+};
+
+const normalizeContexts = (contexts) => {
+  if (Array.isArray(contexts)) return contexts;
+  if (typeof contexts === 'string') return contexts.split(',').map(c => c.trim()).filter(Boolean);
+  return [];
+};
+
 // --- Main App ---
 
 function App() {
+  const standaloneBrowserMode = typeof window !== 'undefined' && !window.Telegram?.WebApp;
+
   // Navigation state
   const [currentView, setCurrentView] = useState('dashboard');
   const [selectedPracticeId, setSelectedPracticeId] = useState(null);
@@ -195,9 +294,6 @@ function App() {
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [deletingPhotoId, setDeletingPhotoId] = useState(null);
-  const detailFileInputRef = useRef(null);
 
   // Form state
   const [loading, setLoading] = useState(true);
@@ -221,35 +317,6 @@ function App() {
   const toastIdRef = useRef(0);
   const formRef = useRef(null);
   const searchTimerRef = useRef(null);
-
-  /** Normalize sections data: ensure description_rows is always an array */
-  const normalizeSections = (rawSections) => {
-    if (!rawSections || !Array.isArray(rawSections)) return {};
-    const result = {};
-    rawSections.forEach(s => {
-      result[s.context] = {
-        ...s,
-        description_rows: Array.isArray(s.description_rows)
-          ? (s.description_rows.length > 0 ? s.description_rows : [''])
-          : typeof s.description_rows === 'string'
-            ? (s.description_rows.trim() ? s.description_rows.split('\n') : [''])
-            : [''],
-        man_hours: s.man_hours || '',
-        mac_hours: s.mac_hours || '',
-        materials_amount: s.materials_amount || '',
-        waste_apply: s.waste_apply || false,
-        waste_percentage: s.waste_percentage || 2,
-        notes: s.notes || '',
-      };
-    });
-    return result;
-  };
-
-  const normalizeContexts = (contexts) => {
-    if (Array.isArray(contexts)) return contexts;
-    if (typeof contexts === 'string') return contexts.split(',').map(c => c.trim()).filter(Boolean);
-    return [];
-  };
 
   const { register, control, handleSubmit, setValue, watch, getValues, formState: { errors } } = useForm();
 
@@ -332,6 +399,33 @@ function App() {
     try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
   }, []);
 
+  const applyDemoTemplate = useCallback(() => {
+    setPractice(null);
+    setEditingPractice(null);
+    setStartedFromBot(false);
+    setSuccessDone(false);
+    setError('');
+    setShowDraftBanner(false);
+    setFieldErrors({});
+    setSelectedContexts([...DEMO_CONTEXTS]);
+    setSections(normalizeSections(DEMO_CONTEXTS.map(context => ({ context, ...DEMO_SECTIONS[context] }))));
+    setParts({
+      officina: DEMO_PARTS.officina.map((part) => ({ ...part, _key: Date.now() + Math.random() })),
+      carrozzeria: DEMO_PARTS.carrozzeria.map((part) => ({ ...part, _key: Date.now() + Math.random() })),
+    });
+
+    Object.entries(DEMO_DRAFT).forEach(([key, value]) => {
+      if (key === 'appointment_date' && value) {
+        setValue(key, new Date(`${value}T00:00:00`));
+      } else {
+        setValue(key, value);
+      }
+    });
+
+    setLoading(false);
+    setCurrentView('form');
+  }, [setValue]);
+
   const restoreDraft = useCallback(() => {
     try {
       const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
@@ -371,7 +465,6 @@ function App() {
 
   // --- Dashboard: Load practices ---
   const loadDashboard = useCallback(async (search = '', filters = {}) => {
-    if (!initData) return;
     setDashboardLoading(true);
     try {
       const params = {};
@@ -394,14 +487,14 @@ function App() {
     } finally {
       setDashboardLoading(false);
     }
-  }, [initData, getHeaders, addToast]);
+  }, [getHeaders, addToast]);
 
   // Load dashboard on view mount
   useEffect(() => {
-    if (currentView === 'dashboard' && initData) {
+    if (currentView === 'dashboard' && (initData || standaloneBrowserMode)) {
       loadDashboard(searchQuery, activeFilters);
     }
-  }, [currentView, initData]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentView, initData, standaloneBrowserMode, loadDashboard, searchQuery, activeFilters]);
 
   // Debounced search
   useEffect(() => {
@@ -415,7 +508,7 @@ function App() {
 
   // --- Detail: Load practice ---
   const loadDetail = useCallback(async (id) => {
-    if (!initData || !id) return;
+    if (!id) return;
     setDetailLoading(true);
     setDetailData(null);
     try {
@@ -429,82 +522,13 @@ function App() {
     } finally {
       setDetailLoading(false);
     }
-  }, [initData, getHeaders, addToast, navigateBack]);
+  }, [getHeaders, addToast, navigateBack]);
 
   useEffect(() => {
     if (currentView === 'detail' && selectedPracticeId) {
       loadDetail(selectedPracticeId);
     }
   }, [currentView, selectedPracticeId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // --- Photo upload (detail view) ---
-
-  const validateFile = useCallback((file) => {
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      addToast('Tipo file non supportato. Usa JPG, PNG o WebP.', 'error');
-      return false;
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      addToast('File troppo grande. Massimo 10MB.', 'error');
-      return false;
-    }
-    return true;
-  }, [addToast]);
-
-  const uploadPhotoToDetail = useCallback(async (file) => {
-    const practiceObj = detailData?.practice || detailData;
-    if (!practiceObj?.id || !validateFile(file)) return;
-    setUploadingPhoto(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await fetch(`${API_BASE_URL}/api/practices/${practiceObj.id}/photos`, {
-        method: 'POST',
-        headers: { 'X-Telegram-Init-Data': initData },
-        body: formData
-      });
-      if (!res.ok) throw new Error('Upload failed');
-      const json = await res.json();
-      if (json.success) {
-        setDetailData(prev => ({ ...prev, photos: [...(prev.photos || []), json.data] }));
-        addToast('Foto caricata con successo!', 'success');
-      } else {
-        throw new Error(json.detail || 'Upload failed');
-      }
-    } catch (err) {
-      addToast('Errore durante il caricamento della foto.', 'error');
-    } finally {
-      setUploadingPhoto(false);
-      if (detailFileInputRef.current) detailFileInputRef.current.value = '';
-    }
-  }, [detailData, initData, addToast, validateFile]);
-
-  const deletePhoto = useCallback((photoId) => {
-    const practiceObj = detailData?.practice || detailData;
-    if (!practiceObj?.id) return;
-    setConfirmModal({
-      title: '🗑 Eliminare questa foto?',
-      message: 'La foto verrà rimossa definitivamente.',
-      onConfirm: async () => {
-        setConfirmModal(null);
-        setDeletingPhotoId(photoId);
-        try {
-          const res = await fetch(`${API_BASE_URL}/api/practices/${practiceObj.id}/photos/${photoId}`, {
-            method: 'DELETE',
-            headers: { 'X-Telegram-Init-Data': initData }
-          });
-          if (!res.ok) throw new Error('Delete failed');
-          setDetailData(prev => ({ ...prev, photos: (prev.photos || []).filter(p => p.id !== photoId) }));
-          addToast('Foto eliminata.', 'success');
-        } catch (err) {
-          addToast('Errore durante l\'eliminazione della foto.', 'error');
-        } finally {
-          setDeletingPhotoId(null);
-        }
-      },
-      onCancel: () => setConfirmModal(null)
-    });
-  }, [detailData, initData, addToast]);
 
   // --- Form photo queue ---
   const addFormPhotos = useCallback((files) => {
@@ -683,8 +707,14 @@ function App() {
       setInitData(currentInitData);
 
       const urlParams = new URLSearchParams(window.location.search);
+      const demoMode = urlParams.get('demo');
       const practiceId = urlParams.get('practice_id');
       const plate = urlParams.get('plate');
+
+      if (demoMode === 'complete' || demoMode === 'full') {
+        applyDemoTemplate();
+        return;
+      }
 
       if (practiceId || plate) {
         // Opened from bot with params -> show form
@@ -705,10 +735,35 @@ function App() {
         setLoading(false);
       }
     } else {
-      setError('Mini App deve essere eseguita in Telegram');
-      setLoading(false);
+      // Standalone browser/dev mode: allow the real backend to load with an empty initData header.
+      setInitData('');
+      const urlParams = new URLSearchParams(window.location.search);
+      const demoMode = urlParams.get('demo');
+      const practiceId = urlParams.get('practice_id');
+      const plate = urlParams.get('plate');
+
+      if (demoMode === 'complete' || demoMode === 'full') {
+        applyDemoTemplate();
+        return;
+      }
+
+      if (practiceId || plate) {
+        setStartedFromBot(true);
+        setCurrentView('form');
+        if (practiceId) {
+          loadPractice(practiceId, '', plate || '');
+        } else {
+          if (plate) setValue('plate_confirmed', plate);
+          const hadDraft = restoreDraft();
+          if (hadDraft) setShowDraftBanner(true);
+          setLoading(false);
+        }
+      } else {
+        setCurrentView('dashboard');
+        setLoading(false);
+      }
     }
-  }, [loadPractice, setValue, restoreDraft]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadPractice, setValue, restoreDraft, applyDemoTemplate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Contexts ---
   const toggleContext = (context) => {
@@ -865,11 +920,11 @@ function App() {
         customer_name: data.customer_name,
         customer_type: data.customer_type,
         billing_to_complete: data.billing_to_complete || false,
-        appointment_date: data.appointment_date.toISOString().split('T')[0],
+        appointment_date: formatDateForBackend(data.appointment_date),
         appointment_time: data.appointment_time,
         practice_type: data.practice_type,
         contexts: selectedContexts,
-        internal_notes: data.internal_notes || null,
+        internal_notes: practice?.internal_notes || null,
       };
 
       const sectionPayloads = selectedContexts.map(context => {
@@ -1073,18 +1128,25 @@ function App() {
               >
                 <div className="practice-card-header">
                   <span className="practice-plate">{p.plate || '—'}</span>
-                  <span className={`sync-dot ${p.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
+                  <span className={`sync-pill ${p.synced ? 'sync-pill-green' : 'sync-pill-red'}`}>
+                    <span className={`sync-dot ${p.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
+                    {p.synced ? 'Sincronizzata' : 'Da sincronizzare'}
+                  </span>
                 </div>
-                <div className="practice-card-customer">{p.customer_name || '—'}</div>
+                <div className="practice-card-customer-row">
+                  <div className="practice-card-customer">{p.customer_name || '—'}</div>
+                  <div className="practice-card-id">#{p.id}</div>
+                </div>
+                <div className="practice-card-badges">
+                  {normalizeContexts(p.contexts).map(ctx => (
+                    <span key={ctx} className="context-badge" style={{ background: CONTEXT_COLORS[ctx]?.bg, color: CONTEXT_COLORS[ctx]?.color, borderColor: CONTEXT_COLORS[ctx]?.border }}>
+                      {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
+                    </span>
+                  ))}
+                </div>
                 <div className="practice-card-footer">
                   <span className="practice-card-date">📅 {formatDate(p.appointment_date || p.created_at)}</span>
-                  <div className="practice-card-badges">
-                    {normalizeContexts(p.contexts).map(ctx => (
-                      <span key={ctx} className="context-badge" style={{ background: CONTEXT_COLORS[ctx]?.bg, color: CONTEXT_COLORS[ctx]?.color, borderColor: CONTEXT_COLORS[ctx]?.border }}>
-                        {ctx.charAt(0).toUpperCase() + ctx.slice(1).substring(0, 4)}
-                      </span>
-                    ))}
-                  </div>
+                  <span className="practice-card-open">Apri dettagli →</span>
                 </div>
               </div>
             ))}
@@ -1122,6 +1184,14 @@ function App() {
     const photos = d.photos || [];
     const dSections = d.sections || [];
     const dParts = d.parts || [];
+    const contexts = normalizeContexts(practice.contexts);
+    const appointmentLabel = `${formatDate(practice.appointment_date || practice.created_at)}${practice.appointment_time ? ` • ${practice.appointment_time}` : ''}`;
+    const partsByContext = dParts.reduce((acc, part) => {
+      const ctx = part.context || 'generale';
+      if (!acc[ctx]) acc[ctx] = [];
+      acc[ctx].push(part);
+      return acc;
+    }, {});
 
     return (
       <div className="view-detail view-enter">
@@ -1133,7 +1203,25 @@ function App() {
             <div className="detail-plate">{practice.plate_confirmed || practice.plate || '—'}</div>
             <div className="detail-customer">{practice.customer_name || '—'}</div>
             {practice.phone && <div className="detail-phone">📞 {practice.phone}</div>}
-            <div className="detail-date">📅 {formatDate(practice.appointment_date || practice.created_at)}</div>
+            <div className="detail-date">📅 {appointmentLabel}</div>
+            <div className="detail-meta-grid">
+              <div className="detail-meta-item">
+                <span className="detail-meta-label">Tipo pratica</span>
+                <span className="detail-meta-value">{practice.practice_type ? practice.practice_type.replaceAll('_', ' ') : '—'}</span>
+              </div>
+              <div className="detail-meta-item">
+                <span className="detail-meta-label">Tipo cliente</span>
+                <span className="detail-meta-value">{practice.customer_type || '—'}</span>
+              </div>
+              <div className="detail-meta-item">
+                <span className="detail-meta-label">Stato pratica</span>
+                <span className="detail-meta-value">{practice.status || '—'}</span>
+              </div>
+              <div className="detail-meta-item">
+                <span className="detail-meta-label">Contesti</span>
+                <span className="detail-meta-value">{contexts.length ? contexts.join(', ') : '—'}</span>
+              </div>
+            </div>
           </div>
 
           {/* Sync status */}
@@ -1150,15 +1238,27 @@ function App() {
             <div className="section">
               <h2>📋 Sezioni</h2>
               {dSections.map((s, i) => (
-                <div key={i} className="detail-section-item">
-                  <span className="context-badge" style={{ background: CONTEXT_COLORS[s.context]?.bg, color: CONTEXT_COLORS[s.context]?.color, borderColor: CONTEXT_COLORS[s.context]?.border }}>
-                    {s.context?.charAt(0).toUpperCase() + s.context?.slice(1)}
-                  </span>
-                  <div className="detail-section-hours">
-                    {s.man_hours ? `Ore MAN: ${s.man_hours}` : ''}
-                    {s.man_hours && s.mac_hours ? ' | ' : ''}
-                    {s.mac_hours ? `Ore MAC: ${s.mac_hours}` : ''}
+                <div key={i} className="detail-section-card">
+                  <div className="detail-section-head">
+                    <span className="context-badge" style={{ background: CONTEXT_COLORS[s.context]?.bg, color: CONTEXT_COLORS[s.context]?.color, borderColor: CONTEXT_COLORS[s.context]?.border }}>
+                      {s.context?.charAt(0).toUpperCase() + s.context?.slice(1)}
+                    </span>
+                    <div className="detail-section-hours">
+                      {s.man_hours ? `MAN ${s.man_hours}h` : ''}
+                      {s.man_hours && s.mac_hours ? ' • ' : ''}
+                      {s.mac_hours ? `MAC ${s.mac_hours}h` : ''}
+                      {s.materials_amount ? ` • Materiali €${s.materials_amount}` : ''}
+                      {s.waste_apply ? ` • Smalt. ${s.waste_percentage || 2}%` : ''}
+                    </div>
                   </div>
+                  {Array.isArray(s.description_rows) && s.description_rows.length > 0 && (
+                    <ul className="detail-description-list">
+                      {s.description_rows.filter(Boolean).map((row, idx) => (
+                        <li key={idx}>{row}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {s.notes && <div className="detail-section-notes">📝 {s.notes}</div>}
                 </div>
               ))}
             </div>
@@ -1168,15 +1268,20 @@ function App() {
           {dParts.length > 0 && (
             <div className="section">
               <h2>🔩 Ricambi</h2>
-              {dParts.map((p, i) => (
-                <div key={i} className="detail-part-item">
-                  <span>• {p.name}</span>
-                  {p.context && (
-                    <span className="context-badge-small" style={{ background: CONTEXT_COLORS[p.context]?.bg, color: CONTEXT_COLORS[p.context]?.color }}>
-                      {p.context?.substring(0, 4)}
+              {Object.entries(partsByContext).map(([context, items]) => (
+                <div key={context} className="detail-parts-group">
+                  <div className="detail-parts-group-head">
+                    <span className="context-badge" style={{ background: CONTEXT_COLORS[context]?.bg || 'rgba(255,255,255,0.06)', color: CONTEXT_COLORS[context]?.color || '#cbd5e1', borderColor: CONTEXT_COLORS[context]?.border || 'rgba(255,255,255,0.15)' }}>
+                      {context?.charAt(0).toUpperCase() + context?.slice(1)}
                     </span>
-                  )}
-                  {p.quantity && <span className="detail-part-qty">×{p.quantity}</span>}
+                    <span className="detail-parts-count">{items.length} pezzi</span>
+                  </div>
+                  {items.map((p, i) => (
+                    <div key={`${context}-${i}`} className="detail-part-item">
+                      <span>• {p.name}</span>
+                      {p.quantity && <span className="detail-part-qty">× {p.quantity}</span>}
+                    </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -1194,36 +1299,13 @@ function App() {
                       alt={`Foto ${i + 1}`}
                       onClick={() => setLightboxPhoto(photo.url)}
                     />
-                    <button
-                      className="photo-remove-btn"
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); deletePhoto(photo.id); }}
-                      disabled={deletingPhotoId === photo.id}
-                    >
-                      ✕
-                    </button>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="photo-empty-state">Nessuna foto. Aggiungi la prima foto.</div>
+              <div className="photo-empty-state">Nessuna foto disponibile.</div>
             )}
-            <input
-              type="file"
-              ref={detailFileInputRef}
-              className="photo-file-input"
-              accept="image/jpeg,image/png,image/webp"
-              capture="environment"
-              onChange={(e) => { if (e.target.files[0]) uploadPhotoToDetail(e.target.files[0]); }}
-            />
-            <button
-              className="photo-upload-btn"
-              type="button"
-              disabled={uploadingPhoto}
-              onClick={() => detailFileInputRef.current?.click()}
-            >
-              {uploadingPhoto ? <><span className="loading-spinner sm"></span> Caricamento...</> : '📷 Aggiungi foto'}
-            </button>
+            <div className="photo-view-note">In modalità visualizzazione non è possibile aggiungere o eliminare foto. Usa Modifica pratica.</div>
           </div>
 
           {/* Notes */}
@@ -1584,7 +1666,10 @@ function App() {
                 <h2>📋 {context.charAt(0).toUpperCase() + context.slice(1)}</h2>
 
                 <div className="form-group">
-                  <label>Righe Descrittive*</label>
+                  <div className="section-inline-actions">
+                    <label>Righe Descrittive*</label>
+                    <button type="button" onClick={() => addDescriptionRow(context)} className="button-add">+ Aggiungi riga</button>
+                  </div>
                   {sections[context]?.description_rows?.map((row, index) => (
                     <div key={`${context}-row-${index}-${sections[context].description_rows.length}`} className="description-row">
                       <input
@@ -1599,7 +1684,6 @@ function App() {
                       )}
                     </div>
                   ))}
-                  <button type="button" onClick={() => addDescriptionRow(context)} className="button-add">+ Aggiungi riga</button>
                 </div>
 
                 {context === 'officina' && (
@@ -1657,22 +1741,12 @@ function App() {
                   </>
                 )}
 
-                <div className="form-group">
-                  <label htmlFor={`notes_${context}`}>Note interne</label>
-                  <textarea
-                    id={`notes_${context}`}
-                    value={sections[context]?.notes || ''}
-                    onChange={(e) => updateSection(context, 'notes', e.target.value)}
-                    className="textarea"
-                    rows="3"
-                    placeholder="Note per questo reparto..."
-                    aria-label={`Note interne ${context}`}
-                  />
-                </div>
-
                 {(context === 'officina' || context === 'carrozzeria') && (
                   <div className="form-group">
-                    <label>Pezzi / ricambi</label>
+                    <div className="section-inline-actions">
+                      <label>Pezzi / ricambi</label>
+                      <button type="button" onClick={() => addPart(context)} className="button-add">+ Aggiungi pezzo</button>
+                    </div>
                     {getPartsForContext(context).map((part, index) => (
                       <div key={part._key || index} className="description-row">
                         <input
@@ -1689,22 +1763,23 @@ function App() {
                         <button type="button" onClick={() => removePart(context, index)} className="button-remove">✕</button>
                       </div>
                     ))}
-                    <button type="button" onClick={() => addPart(context)} className="button-add">+ Aggiungi pezzo</button>
                   </div>
                 )}
+
+                <div className="form-group">
+                  <label htmlFor={`notes_${context}`}>Note interne</label>
+                  <textarea
+                    id={`notes_${context}`}
+                    value={sections[context]?.notes || ''}
+                    onChange={(e) => updateSection(context, 'notes', e.target.value)}
+                    className="textarea"
+                    rows="3"
+                    placeholder="Note per questo reparto..."
+                    aria-label={`Note interne ${context}`}
+                  />
+                </div>
               </div>
             ))}
-
-            {/* Note generali */}
-            <div className="section">
-              <h2>📝 Note Generali</h2>
-              <textarea
-                {...register('internal_notes')}
-                className="textarea"
-                rows="3"
-                placeholder="Note generali per la pratica..."
-              />
-            </div>
 
             <button
               type="submit"

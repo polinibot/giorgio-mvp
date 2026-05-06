@@ -288,7 +288,7 @@ h2 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 .practice-plate {
@@ -318,13 +318,32 @@ h2 {
 .practice-card-customer {
   font-size: 14px;
   color: var(--text-secondary);
+  margin-bottom: 0;
+  font-weight: 600;
+}
+
+.practice-card-customer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+.practice-card-id {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 3px 8px;
 }
 
 .practice-card-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  margin-top: 10px;
 }
 
 .practice-card-date {
@@ -335,6 +354,36 @@ h2 {
 .practice-card-badges {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
+}
+
+.practice-card-open {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.sync-pill-green {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.sync-pill-red {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
 }
 
 .context-badge {
@@ -444,6 +493,39 @@ h2 {
 .detail-date {
   font-size: 14px;
   color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.detail-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.detail-meta-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: left;
+}
+
+.detail-meta-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  margin-bottom: 4px;
+}
+
+.detail-meta-value {
+  display: block;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-transform: capitalize;
 }
 
 /* --- Sync toggle --- */
@@ -489,21 +571,48 @@ h2 {
 }
 
 /* --- Detail sections --- */
-.detail-section-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border-subtle);
+.detail-section-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+  margin-bottom: 10px;
 }
 
-.detail-section-item:last-child {
-  border-bottom: none;
+.detail-section-card:last-child {
+  margin-bottom: 0;
+}
+
+.detail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .detail-section-hours {
   font-size: 13px;
   color: var(--text-secondary);
+  text-align: right;
+}
+
+.detail-description-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.detail-description-list li {
+  margin-bottom: 3px;
+}
+
+.detail-section-notes {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* --- Detail parts --- */
@@ -524,8 +633,33 @@ h2 {
 .detail-part-qty {
   margin-left: auto;
   font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.detail-parts-group {
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.detail-parts-group:last-child {
+  margin-bottom: 0;
+}
+
+.detail-parts-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.detail-parts-count {
+  font-size: 12px;
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 /* --- Photo grid --- */
@@ -573,6 +707,18 @@ h2 {
 
 .detail-actions .button-submit {
   margin-top: 0;
+}
+
+.section-inline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.section-inline-actions label {
+  margin-bottom: 0;
 }
 
 /* --- Lightbox --- */
@@ -1586,6 +1732,12 @@ label {
   color: var(--text-muted);
   font-size: 14px;
   font-style: italic;
+}
+
+.photo-view-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 /* --- Photo thumb with delete overlay --- */
