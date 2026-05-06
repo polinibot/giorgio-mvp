@@ -10,6 +10,11 @@ logger = logging.getLogger(__name__)
 
 class SecurityService:
     """Servizio per la sicurezza minima del bot e Mini App."""
+
+    @staticmethod
+    def _practice_access_secret() -> bytes:
+        secret = (settings.secret_key or settings.telegram_bot_token or "").encode("utf-8")
+        return secret
     
     @staticmethod
     def is_user_whitelisted(telegram_user_id: int) -> bool:
@@ -83,3 +88,19 @@ class SecurityService:
             return None
         except Exception:
             return None
+
+    @staticmethod
+    def generate_practice_access_token(practice_id: int, telegram_user_id: int) -> str:
+        payload = f"{practice_id}:{telegram_user_id}".encode("utf-8")
+        return hmac.new(
+            SecurityService._practice_access_secret(),
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+
+    @staticmethod
+    def validate_practice_access_token(practice_id: int, telegram_user_id: int, token: Optional[str]) -> bool:
+        if not token:
+            return False
+        expected = SecurityService.generate_practice_access_token(practice_id, telegram_user_id)
+        return hmac.compare_digest(expected, token)

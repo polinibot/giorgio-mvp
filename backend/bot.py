@@ -116,9 +116,9 @@ class TelegramBot:
                         created_by_telegram_id=message.from_user.id,
                         status=PracticeStatus.DRAFT,
                         plate_detected=ocr_result.plate,
-                        plate_confirmed=ocr_result.plate or "DA_COMPLETARE",
-                        phone="DA_COMPLETARE",
-                        customer_name="DA_COMPLETARE",
+                        plate_confirmed=ocr_result.plate if ocr_result.plate else None,
+                        phone=None,
+                        customer_name=None,
                         customer_type=CustomerType.PRIVATO,
                         appointment_date=datetime.utcnow(),
                         appointment_time="09:00",
@@ -200,8 +200,9 @@ class TelegramBot:
 
             practice_id = int(callback.data.split("_")[2])
 
+            access_token = SecurityService.generate_practice_access_token(practice_id, callback.from_user.id)
             # Crea Mini App URL per modifica
-            mini_app_url = f"https://giorgio-mvp-nine.vercel.app?practice_id={practice_id}&user_id={callback.from_user.id}"
+            mini_app_url = f"https://giorgio-mvp-nine.vercel.app?practice_id={practice_id}&user_id={callback.from_user.id}&access_token={access_token}"
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
@@ -394,8 +395,9 @@ class TelegramBot:
                 message_target = source
                 from_user_id = source.from_user.id
 
+            access_token = SecurityService.generate_practice_access_token(practice_id, from_user_id)
             # Crea Mini App button con dati precompilati
-            mini_app_url = f"https://giorgio-mvp-nine.vercel.app?practice_id={practice_id}&plate={practice.plate_confirmed}&user_id={from_user_id}"
+            mini_app_url = f"https://giorgio-mvp-nine.vercel.app?practice_id={practice_id}&plate={practice.plate_confirmed}&user_id={from_user_id}&access_token={access_token}"
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(

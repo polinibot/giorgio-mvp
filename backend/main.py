@@ -204,6 +204,51 @@ def _log_auth_debug(stage: str, payload: Dict[str, Any], level: str = "warning")
     else:
         logger.warning(message, stage, payload)
 
+
+def _can_access_practice(practice: Practice, user_data: dict, access_token: Optional[str]) -> bool:
+    if practice.created_by_telegram_id == user_data["id"]:
+        return True
+    return SecurityService.validate_practice_access_token(practice.id, user_data["id"], access_token)
+
+
+def _repair_practice_owner_if_needed(db: Session, practice: Practice, user_data: dict, access_token: Optional[str]) -> None:
+    if practice.created_by_telegram_id == user_data["id"]:
+        return
+    if SecurityService.validate_practice_access_token(practice.id, user_data["id"], access_token):
+        previous_owner = practice.created_by_telegram_id
+        practice.created_by_telegram_id = user_data["id"]
+        practice.updated_by_telegram_id = user_data["id"]
+        db.commit()
+        db.refresh(practice)
+        logger.warning(
+            "Practice owner repaired via access token for practice %d: %s -> %s",
+            practice.id,
+            previous_owner,
+            user_data["id"],
+        )
+
+
+def _can_access_draft_via_plate_compat(practice: Practice, plate_confirmed: Optional[str]) -> bool:
+    if practice.status != PracticeStatus.DRAFT:
+        return False
+    if not plate_confirmed or not practice.plate_confirmed:
+        return False
+    return practice.plate_confirmed.strip().upper() == plate_confirmed.strip().upper()
+
+
+def _repair_practice_owner_via_plate_compat(db: Session, practice: Practice, user_data: dict) -> None:
+    previous_owner = practice.created_by_telegram_id
+    practice.created_by_telegram_id = user_data["id"]
+    practice.updated_by_telegram_id = user_data["id"]
+    db.commit()
+    db.refresh(practice)
+    logger.warning(
+        "Practice owner repaired via draft+plate compatibility for practice %d: %s -> %s",
+        practice.id,
+        previous_owner,
+        user_data["id"],
+    )
+
 def validate_telegram_init_data(
     request: Request,
     init_data: str = None,
@@ -583,17 +628,17 @@ async def list_practices(
 async def get_practice_detail(
     request: Request,
     practice_id: int,
+    access_token: Optional[str] = None,
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
     """Get full practice details including photos, sections, parts, and synced status."""
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-    ).first()
+    practice = db.query(Practice).filter(Practice.id == practice_id).first()
 
-    if not practice:
+    if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     photos = db.query(PracticePhoto).filter(PracticePhoto.practice_id == practice_id).order_by(PracticePhoto.created_at.desc()).all()
     sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice_id).order_by(PracticeSection.id.asc()).all()
@@ -633,17 +678,17 @@ async def toggle_practice_sync(
     request: Request,
     practice_id: int,
     body: SyncToggleRequest,
+    access_token: Optional[str] = None,
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
     """Toggle the synced status of a practice."""
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-    ).first()
+    practice = db.query(Practice).filter(Practice.id == practice_id).first()
 
-    if not practice:
+    if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     try:
         practice.synced = body.synced
@@ -672,18 +717,17 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 async def upload_practice_photo(
     request: Request,
     practice_id: int,
+    access_token: Optional[str] = None,
     file: UploadFile = File(...),
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
     """Upload a photo for a practice via multipart form."""
     # Validate practice ownership
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-    ).first()
-    if not practice:
+    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+    _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     # Validate content type
     if file.content_type not in ALLOWED_IMAGE_TYPES:
@@ -761,17 +805,16 @@ async def delete_practice_photo(
     request: Request,
     practice_id: int,
     photo_id: int,
+    access_token: Optional[str] = None,
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
     """Delete a photo from a practice."""
     # Validate practice ownership
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-    ).first()
-    if not practice:
+    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+    _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     # Validate photo belongs to practice
     photo = db.query(PracticePhoto).filter(
@@ -802,17 +845,23 @@ async def delete_practice_photo(
 async def get_mini_app_data(
     request: Request,
     practice_id: Optional[int] = None,
+    access_token: Optional[str] = None,
+    plate_confirmed: Optional[str] = None,
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
     """Return data for the Telegram Mini App."""
     if practice_id:
-        practice = db.query(Practice).filter(
-            Practice.id == practice_id,
-            Practice.created_by_telegram_id == user_data["id"],
-        ).first()
+        practice = db.query(Practice).filter(Practice.id == practice_id).first()
 
         if not practice:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+        if _can_access_practice(practice, user_data, access_token):
+            _repair_practice_owner_if_needed(db, practice, user_data, access_token)
+        elif _can_access_draft_via_plate_compat(practice, plate_confirmed):
+            _repair_practice_owner_via_plate_compat(db, practice, user_data)
+        else:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
 
         photos = db.query(PracticePhoto).filter(PracticePhoto.practice_id == practice_id).all()
@@ -869,17 +918,16 @@ async def update_practice_full(
     request: Request,
     practice_id: int,
     body: PracticeFullSave,
+    access_token: Optional[str] = None,
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
     """Update a practice with sections and parts in one transaction."""
     _validate_full_payload(body)
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-    ).first()
-    if not practice:
+    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+    _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     try:
         _apply_practice_data(practice, body.practice, user_data["id"])
@@ -1037,17 +1085,16 @@ async def update_practice(
     request: Request,
     practice_id: int,
     practice_data: PracticeUpdate,
+    access_token: Optional[str] = None,
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
     """Update an existing practice."""
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-    ).first()
+    practice = db.query(Practice).filter(Practice.id == practice_id).first()
 
-    if not practice:
+    if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+    _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     try:
         update_data = practice_data.dict(exclude_unset=True)
@@ -1091,17 +1138,16 @@ async def update_practice(
 async def delete_practice(
     request: Request,
     practice_id: int,
+    access_token: Optional[str] = None,
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
     """Soft-delete a practice."""
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-    ).first()
+    practice = db.query(Practice).filter(Practice.id == practice_id).first()
 
-    if not practice:
+    if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+    _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     try:
         practice.status = PracticeStatus.DELETED

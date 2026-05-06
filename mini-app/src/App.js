@@ -486,7 +486,23 @@ const extractTelegramUserIdFromRuntime = () => {
   return '';
 };
 
-function DebugPanel({ authMode, initData, telegramUserId, lastApiDebug }) {
+const extractPracticeAccessTokenFromLocation = () => {
+  try {
+    const searchParams = new URLSearchParams(window.location.search);
+    const fromSearch = searchParams.get('access_token');
+    if (fromSearch) return fromSearch;
+
+    const hashRaw = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : (window.location.hash || '');
+    const hashParams = new URLSearchParams(hashRaw);
+    const fromHash = hashParams.get('access_token');
+    if (fromHash) return fromHash;
+  } catch (_) {
+    // no-op
+  }
+  return '';
+};
+
+function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, lastApiDebug }) {
   const search = typeof window !== 'undefined' ? window.location.search : '';
   const hash = typeof window !== 'undefined' ? window.location.hash : '';
 
@@ -498,6 +514,8 @@ function DebugPanel({ authMode, initData, telegramUserId, lastApiDebug }) {
       <div className="debug-panel-line">initData len: {initData?.length || 0}</div>
       <div className="debug-panel-line">initData hash=: {initData?.includes('hash=') ? 'si' : 'no'}</div>
       <div className="debug-panel-line">telegramUserId: {telegramUserId || '-'}</div>
+      <div className="debug-panel-line">accessToken presente: {practiceAccessToken ? 'si' : 'no'}</div>
+      <div className="debug-panel-line">accessToken len: {practiceAccessToken?.length || 0}</div>
       <div className="debug-panel-line">search: {search || '-'}</div>
       <div className="debug-panel-line">hash: {hash || '-'}</div>
       {lastApiDebug && (
@@ -530,6 +548,7 @@ function App() {
   // Shared state
   const [initData, setInitData] = useState('');
   const [telegramUserId, setTelegramUserId] = useState('');
+  const [practiceAccessToken, setPracticeAccessToken] = useState('');
   const [lastApiDebug, setLastApiDebug] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [confirmModal, setConfirmModal] = useState(null);
@@ -767,8 +786,9 @@ function App() {
   const getAuthParams = useCallback(() => {
     const params = {};
     if (telegramUserId) params.user_id = telegramUserId;
+    if (practiceAccessToken) params.access_token = practiceAccessToken;
     return params;
-  }, [telegramUserId]);
+  }, [telegramUserId, practiceAccessToken]);
 
   // --- Dashboard: Load practices ---
   const loadDashboard = useCallback(async (search = '', filters = {}) => {
@@ -962,13 +982,18 @@ function App() {
   }, [getAuthParams, getHeaders, addToast]);
 
   // --- Form: Load practice for editing ---
-  const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '', currentTelegramUserId = '') => {
+  const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '', currentTelegramUserId = '', currentPracticeAccessToken = '') => {
     startSlowTimer();
     try {
       rememberRequest('miniapp.load_practice', {
         method: 'GET',
         url: `${API_BASE_URL}/mini-app/data`,
-        params: { practice_id: practiceId, ...(currentTelegramUserId ? { user_id: currentTelegramUserId } : {}) },
+        params: {
+          practice_id: practiceId,
+          ...(plateFromUrl ? { plate_confirmed: plateFromUrl } : {}),
+          ...(currentTelegramUserId ? { user_id: currentTelegramUserId } : {}),
+          ...(currentPracticeAccessToken ? { access_token: currentPracticeAccessToken } : {}),
+        },
         headers: {
           ...(currentInitData ? { 'X-Telegram-Init-Data': currentInitData } : {}),
           ...(currentTelegramUserId ? { 'X-Telegram-User-Id': currentTelegramUserId } : {}),
@@ -976,7 +1001,12 @@ function App() {
       });
       const response = await fetchWithRetry(() =>
         axios.get(`${API_BASE_URL}/mini-app/data`, {
-          params: { practice_id: practiceId, ...(currentTelegramUserId ? { user_id: currentTelegramUserId } : {}) },
+          params: {
+            practice_id: practiceId,
+            ...(plateFromUrl ? { plate_confirmed: plateFromUrl } : {}),
+            ...(currentTelegramUserId ? { user_id: currentTelegramUserId } : {}),
+            ...(currentPracticeAccessToken ? { access_token: currentPracticeAccessToken } : {}),
+          },
           headers: {
             ...(currentInitData ? { 'X-Telegram-Init-Data': currentInitData } : {}),
             ...(currentTelegramUserId ? { 'X-Telegram-User-Id': currentTelegramUserId } : {}),
@@ -1083,8 +1113,10 @@ function App() {
 
       const currentInitData = webApp.initData || extractTelegramInitDataFromLocation();
       const currentTelegramUserId = extractTelegramUserIdFromLocation() || extractTelegramUserIdFromRuntime();
+      const currentPracticeAccessToken = extractPracticeAccessTokenFromLocation();
       setInitData(currentInitData);
       setTelegramUserId(currentTelegramUserId);
+      setPracticeAccessToken(currentPracticeAccessToken);
 
       const urlParams = new URLSearchParams(window.location.search);
       const demoMode = urlParams.get('demo');
@@ -1113,7 +1145,7 @@ function App() {
             setBootstrapped(true);
             return;
           }
-          loadPractice(practiceId, currentInitData, plate || '', currentTelegramUserId);
+          loadPractice(practiceId, currentInitData, plate || '', currentTelegramUserId, currentPracticeAccessToken);
         } else {
           if (plate) setValue('plate_confirmed', plate);
           const hadDraft = restoreDraft();
@@ -1132,7 +1164,9 @@ function App() {
       // Standalone browser/dev mode: allow the real backend to load with an empty initData header.
       setInitData('');
       const currentTelegramUserId = extractTelegramUserIdFromLocation() || extractTelegramUserIdFromRuntime();
+      const currentPracticeAccessToken = extractPracticeAccessTokenFromLocation();
       setTelegramUserId(currentTelegramUserId);
+      setPracticeAccessToken(currentPracticeAccessToken);
       const urlParams = new URLSearchParams(window.location.search);
       const demoMode = urlParams.get('demo');
       const practiceId = urlParams.get('practice_id');
@@ -1159,7 +1193,7 @@ function App() {
             setBootstrapped(true);
             return;
           }
-          loadPractice(practiceId, '', plate || '', currentTelegramUserId);
+          loadPractice(practiceId, '', plate || '', currentTelegramUserId, currentPracticeAccessToken);
         } else {
           if (plate) setValue('plate_confirmed', plate);
           const hadDraft = restoreDraft();
@@ -1473,7 +1507,7 @@ function App() {
         <div className="field-hint" style={{ marginBottom: 12 }}>
           Auth: <strong>{authMode}</strong>
         </div>
-        <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} lastApiDebug={lastApiDebug} />
+        <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} practiceAccessToken={practiceAccessToken} lastApiDebug={lastApiDebug} />
 
         {/* Stats */}
         <div className="stats-row">
@@ -1811,7 +1845,7 @@ function App() {
           <div className="field-hint" style={{ marginBottom: 12 }}>
             Auth: <strong>{authMode}</strong>
           </div>
-          <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} lastApiDebug={lastApiDebug} />
+          <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} practiceAccessToken={practiceAccessToken} lastApiDebug={lastApiDebug} />
 
           {showDraftBanner && (
             <div className="draft-banner">
