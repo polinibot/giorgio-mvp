@@ -88,19 +88,49 @@ class TelegramFormatter:
 
     @staticmethod
     def format_practice_summary(summary: PracticeSummary) -> str:
-        text = f"✅ <b>Pratica #{summary.practice_id} creata con successo!</b>\n\n"
-        text += f"🚗 Targa: <b>{summary.plate}</b>\n"
-        text += f"📅 Appuntamento: <b>{summary.appointment}</b>\n"
-        text += f"🔧 Tipo: <b>{summary.practice_type.upper()}</b>\n\n"
-        text += "<i>Tutti i dettagli sono stati salvati. Clicca su 'Apri Pratica' per visualizzarli o modificarli.</i>"
+        text = f"Pratica #{summary.practice_id} creata\n\n"
+        text += f"Targa: <b>{summary.plate}</b>\n"
+        text += f"Telefono: {summary.phone}\n"
+        text += f"Appuntamento: {summary.appointment}\n"
+        text += f"Tipo: <b>{summary.practice_type.upper()}</b>\n"
+        text += f"Contesti: {', '.join([c.title() for c in summary.contexts])}\n\n"
+
+        for context, data in summary.sections_summary.items():
+            text += f"<b>{context.title()}</b>:\n"
+            for row in data.get("description_rows") or []:
+                if str(row).strip():
+                    text += f"- {row}\n"
+            if data.get("man_hours") is not None:
+                text += f"MAN: {data['man_hours']} ore\n"
+            if data.get("mac_hours") is not None:
+                text += f"MAC: {data['mac_hours']} ore\n"
+            if data.get("materials_amount") is not None:
+                text += f"Materiali: EUR {data['materials_amount']:.2f}\n"
+            if data.get("waste_apply"):
+                percentage = data.get("waste_percentage", 2)
+                text += f"Smaltimento: {percentage}%\n"
+            if data.get("parts"):
+                text += "Pezzi:\n"
+                for part in data["parts"]:
+                    text += f"  - {part}\n"
+            text += "\n"
+
+        if summary.billing_warning:
+            text += f"{summary.billing_warning}\n\n"
+        if summary.internal_notes:
+            text += f"Note: {summary.internal_notes}\n\n"
         return text
 
     @staticmethod
     def format_practice_modification_summary(summary: PracticeSummary) -> str:
-        text = f"✏️ <b>Pratica #{summary.practice_id} aggiornata!</b>\n\n"
-        text += f"🚗 Targa: <b>{summary.plate}</b>\n"
-        text += f"📅 Appuntamento: <b>{summary.appointment}</b>\n\n"
-        text += "<i>Le tue modifiche sono state salvate con successo.</i>"
+        text = f"Pratica #{summary.practice_id} aggiornata\n\n"
+        text += f"Targa: <b>{summary.plate}</b>\n"
+        text += f"Appuntamento: {summary.appointment}\n"
+        text += f"Tipo: <b>{summary.practice_type.upper()}</b>\n"
+        text += f"Contesti: {', '.join([c.title() for c in summary.contexts])}\n\n"
+        if summary.internal_notes:
+            text += f"Note: {summary.internal_notes}\n\n"
+        text += "Tutte le modifiche sono state salvate."
         return text
 
     @staticmethod
@@ -108,7 +138,8 @@ class TelegramFormatter:
         return {
             "inline_keyboard": [
                 [
-                    {"text": "Apri Pratica", "callback_data": f"edit_practice_{practice_id}"},
+                    {"text": "Modifica pratica", "callback_data": f"edit_practice_{practice_id}"},
+                    {"text": "Apri riepilogo", "callback_data": f"summary_practice_{practice_id}"},
                 ],
                 [{"text": "Nuova pratica", "callback_data": "new_practice"}],
             ]

@@ -205,14 +205,14 @@ class TelegramBot:
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text="📝 Apri Pratica",
+                    text="📝 Modifica pratica",
                     web_app=WebAppInfo(url=mini_app_url)
                 )]
             ])
 
             await callback.message.answer(
-                f"✏️ Gestione Pratica #{practice_id}\n\n"
-                f"Premi il pulsante sotto per visualizzare o modificare i dati:",
+                f"✏️ Modifica pratica #{practice_id}\n\n"
+                f"Premi il pulsante sotto per modificare i dati:",
                 reply_markup=keyboard,
                 parse_mode=ParseMode.HTML
             )
@@ -399,14 +399,14 @@ class TelegramBot:
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(
-                    text="📝 Apri Pratica",
+                    text="📝 Compila dati pratica",
                     web_app=WebAppInfo(url=mini_app_url)
                 )]
             ])
 
             await message_target.answer(
                 f"✅ Targa confermata: <b>{practice.plate_confirmed}</b>\n\n"
-                f"Premi il pulsante sotto per gestire la pratica:",
+                f"Premi il pulsante sotto per compilare i dati della pratica:",
                 reply_markup=keyboard,
                 parse_mode=ParseMode.HTML
             )
