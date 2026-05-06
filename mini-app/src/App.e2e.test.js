@@ -435,6 +435,157 @@ describe('Mini App user-simulation suite', () => {
     expect(document.body.textContent).not.toContain('Inserisci almeno una riga descrittiva per officina');
   });
 
+  test('draft restore preserves contexts, section rows, parts, and appointment values after remount', async () => {
+    mount('?plate=AB123CD');
+
+    await waitFor(() => document.querySelector('form'));
+
+    setValueBySelector('#phone', '3331234567');
+    setValueBySelector('#customer_name', 'Bozza Cliente');
+    setValueBySelector('#appointment_date', '2026-07-01');
+    setValueBySelector('#appointment_time', '10:30');
+
+    clickElement(getCheckboxLabel('Officina').querySelector('input[type="checkbox"]'));
+    await waitFor(() => getSection('Officina'));
+
+    setValueWithin(getSection('Officina'), 'input[placeholder="Descrizione lavoro..."]', 'Controllo generale');
+    clickElement(getButton('Aggiungi pezzo'));
+    setValueWithin(getSection('Officina'), 'input[placeholder="Es. Pastiglie freno"]', 'Filtro aria');
+    setValueWithin(getSection('Officina'), 'input[placeholder="1 pz"]', '1 pz');
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    });
+
+    act(() => {
+      currentRoot.unmount();
+    });
+    currentRoot = null;
+
+    mount('?plate=AB123CD');
+
+    await waitFor(() => document.querySelector('form'));
+    await waitFor(() => getSection('Officina'));
+
+    expect(getFormInput('phone').value).toBe('3331234567');
+    expect(getFormInput('customer_name').value).toBe('Bozza Cliente');
+    expect(getFormInput('appointment_time').value).toBe('10:30');
+    expect(getSection('Officina').querySelector('input[placeholder="Descrizione lavoro..."]').value).toBe('Controllo generale');
+    expect(getSection('Officina').querySelector('input[placeholder="Es. Pastiglie freno"]').value).toBe('Filtro aria');
+    expect(getSection('Officina').querySelector('input[placeholder="1 pz"]').value).toBe('1 pz');
+  });
+
+  test('toggling a context off and on does not silently lose previously entered section content', async () => {
+    mount('?plate=AB123CD');
+
+    await waitFor(() => document.querySelector('form'));
+
+    clickElement(getCheckboxLabel('Officina').querySelector('input[type="checkbox"]'));
+    await waitFor(() => getSection('Officina'));
+
+    setValueWithin(getSection('Officina'), 'input[placeholder="Descrizione lavoro..."]', 'Sostituzione olio');
+    setValueWithin(getSection('Officina'), 'textarea#notes_officina', 'Da riconfermare col cliente');
+
+    clickElement(getCheckboxLabel('Officina').querySelector('input[type="checkbox"]'));
+    await waitFor(() => !getSection('Officina'));
+
+    clickElement(getCheckboxLabel('Officina').querySelector('input[type="checkbox"]'));
+    await waitFor(() => getSection('Officina'));
+
+    expect(getSection('Officina').querySelector('input[placeholder="Descrizione lavoro..."]').value).toBe('Sostituzione olio');
+    expect(getSection('Officina').querySelector('textarea#notes_officina').value).toBe('Da riconfermare col cliente');
+  });
+
+  test('editing an existing multi-context practice preserves all contexts and parts on submit', async () => {
+    axios.put.mockResolvedValueOnce({ data: { success: true, data: { id: 7 } } });
+
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 0 } } });
+      }
+      if (url.includes('/api/practices/7')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 7,
+                status: 'confirmed',
+                plate_confirmed: 'ZZ123YY',
+                phone: '3390001122',
+                customer_name: 'Flotta Test',
+                customer_type: 'azienda',
+                billing_to_complete: false,
+                appointment_date: '2026-07-05T08:30:00.000Z',
+                appointment_time: '08:30',
+                practice_type: 'ordine_di_lavoro',
+                contexts: 'officina,carrozzeria',
+                internal_notes: 'Pratica complessa',
+                synced: true,
+              },
+              sections: [
+                { context: 'officina', description_rows: ['Diagnosi iniziale'], man_hours: 1, mac_hours: null, materials_amount: null, waste_apply: false, waste_percentage: null, notes: 'Off note' },
+                { context: 'carrozzeria', description_rows: ['Ripresa paraurti'], man_hours: null, mac_hours: 2, materials_amount: 120, waste_apply: true, waste_percentage: 5, notes: 'Car note' },
+              ],
+              parts: [
+                { context: 'officina', name: 'Filtro olio', quantity: '1 pz' },
+                { context: 'carrozzeria', name: 'Primer', quantity: '1 kit' },
+              ],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [
+              {
+                id: 7,
+                plate: 'ZZ123YY',
+                customer_name: 'Flotta Test',
+                contexts: ['officina', 'carrozzeria'],
+                synced: true,
+                appointment_date: '2026-07-05T08:30:00.000Z',
+                created_at: '2026-07-05T08:30:00.000Z',
+              },
+            ],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    clickElement(document.querySelector('.practice-card'));
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+
+    clickElement(document.querySelector('.detail-actions .button-submit'));
+    await waitFor(() => document.querySelector('form'));
+
+    expect(getSection('Officina')).toBeTruthy();
+    expect(getSection('Carrozzeria')).toBeTruthy();
+    expect(getSection('Officina').querySelector('input[placeholder="Es. Pastiglie freno"]').value).toBe('Filtro olio');
+    expect(getSection('Carrozzeria').querySelector('input[placeholder="Es. Pastiglie freno"]').value).toBe('Primer');
+
+    setValueBySelector('#customer_name', 'Flotta Test Aggiornata');
+    clickElement(document.querySelector('form button[type="submit"]'));
+
+    await waitFor(() => axios.put.mock.calls.length === 1);
+    const payload = axios.put.mock.calls[0][1];
+    expect(payload.practice.contexts).toEqual(['officina', 'carrozzeria']);
+    expect(payload.sections).toHaveLength(2);
+    expect(payload.parts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ context: 'officina', name: 'Filtro olio' }),
+        expect.objectContaining({ context: 'carrozzeria', name: 'Primer' }),
+      ])
+    );
+  });
+
   test('renders the form, reveals dependent checkboxes/fields, and never shows placeholder text', async () => {
     mount('?plate=AB123CD');
 

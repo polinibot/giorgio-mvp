@@ -788,7 +788,11 @@ function App() {
         });
       }
       if (draft.selectedContexts) setSelectedContexts(draft.selectedContexts);
-      if (draft.sections) setSections(normalizeSections(Object.values(draft.sections)));
+      if (draft.sections) {
+        setSections(normalizeSections(
+          Object.entries(draft.sections).map(([context, section]) => ({ context, ...section }))
+        ));
+      }
       if (draft.parts) setParts(draft.parts);
       return true;
     } catch (_) { return false; }
@@ -1178,7 +1182,6 @@ function App() {
           if (plate) setValue('plate_confirmed', plate);
           const hadDraft = restoreDraft();
           if (hadDraft) setShowDraftBanner(true);
-          setSelectedContexts(prev => prev.length ? prev : []);
           setLoading(false);
         }
         setBootstrapped(true);
