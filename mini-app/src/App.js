@@ -236,6 +236,79 @@ const DEMO_PARTS = {
   ],
 };
 
+const DASHBOARD_DEMO_PRACTICES = [
+  {
+    practice: {
+      plate_confirmed: 'GF456LM',
+      phone: '3391122334',
+      customer_name: 'Luca Bianchi',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-06-24T09:00:00',
+      appointment_time: '09:00',
+      practice_type: 'preventivo',
+      contexts: ['officina', 'revisione'],
+      internal_notes: 'Pratica demo completa #1',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Cambio olio e filtro', 'Controllo impianto frenante'],
+        man_hours: 2,
+        mac_hours: null,
+        materials_amount: 85,
+        waste_apply: true,
+        waste_percentage: 4,
+        notes: 'Cliente in attesa in sede',
+      },
+      {
+        context: 'revisione',
+        description_rows: ['Pre-check revisione ministeriale'],
+        man_hours: 0.5,
+        mac_hours: null,
+        materials_amount: null,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Scadenza revisione tra 10 giorni',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Olio 5W30', quantity: '4 L' },
+      { context: 'officina', name: 'Filtro olio', quantity: '1 pz' },
+    ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'ZT890PR',
+      phone: '3479988776',
+      customer_name: 'Autonoleggio Nord SRL',
+      customer_type: 'azienda',
+      billing_to_complete: true,
+      appointment_date: '2026-06-25T14:30:00',
+      appointment_time: '14:30',
+      practice_type: 'ordine_di_lavoro',
+      contexts: ['carrozzeria'],
+      internal_notes: 'Pratica demo completa #2',
+    },
+    sections: [
+      {
+        context: 'carrozzeria',
+        description_rows: ['Ripristino fiancata dx', 'Verniciatura parafango posteriore'],
+        man_hours: 4,
+        mac_hours: 1,
+        materials_amount: 260,
+        waste_apply: true,
+        waste_percentage: 7.5,
+        notes: 'Consegna prevista entro 48h',
+      },
+    ],
+    parts: [
+      { context: 'carrozzeria', name: 'Primer', quantity: '1 barattolo' },
+      { context: 'carrozzeria', name: 'Trasparente', quantity: '1 kit' },
+    ],
+  },
+];
+
 /** Normalize sections data: ensure description_rows is always an array */
 const normalizeSections = (rawSections) => {
   if (!rawSections || !Array.isArray(rawSections)) return {};
@@ -287,6 +360,7 @@ function App() {
   const [practices, setPractices] = useState([]);
   const [stats, setStats] = useState({ total: 0, this_month: 0, pending_sync: 0 });
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [seedingDemoPractices, setSeedingDemoPractices] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState({ officina: false, carrozzeria: false, revisione: false, synced: null });
 
@@ -488,6 +562,29 @@ function App() {
       setDashboardLoading(false);
     }
   }, [getHeaders, addToast]);
+
+  const seedDemoPractices = useCallback(async () => {
+    if (seedingDemoPractices) return;
+    setSeedingDemoPractices(true);
+    try {
+      await Promise.all(
+        DASHBOARD_DEMO_PRACTICES.map((payload) =>
+          fetchWithRetry(() =>
+            axios.post(`${API_BASE_URL}/practices/full`, payload, {
+              headers: getHeaders(),
+              timeout: 30000,
+            })
+          )
+        )
+      );
+      addToast('Ho creato 2 pratiche demo complete', 'success');
+      await loadDashboard(searchQuery, activeFilters);
+    } catch (err) {
+      addToast(classifyError(err), 'error');
+    } finally {
+      setSeedingDemoPractices(false);
+    }
+  }, [seedingDemoPractices, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
 
   // Load dashboard on view mount
   useEffect(() => {
@@ -1117,6 +1214,14 @@ function App() {
             <div className="empty-icon">📋</div>
             <h3>Nessuna pratica trovata</h3>
             <p>Prova a modificare i filtri o crea una nuova pratica.</p>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={seedDemoPractices}
+              disabled={seedingDemoPractices}
+            >
+              {seedingDemoPractices ? 'Creazione pratiche demo...' : 'Aggiungi 2 pratiche demo complete'}
+            </button>
           </div>
         ) : (
           <div className="practice-list">

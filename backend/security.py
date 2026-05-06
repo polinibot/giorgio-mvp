@@ -1,6 +1,6 @@
 import hmac
 import hashlib
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 from typing import Dict, Optional
 from config import settings
 
@@ -30,21 +30,23 @@ class SecurityService:
             if not init_data:
                 return False
 
-            # Parse dei dati init
-            data = parse_qs(init_data)
+            pairs = [chunk for chunk in init_data.split('&') if chunk]
+            raw_data = {}
+            hash_value = None
+            for pair in pairs:
+                key, sep, value = pair.partition('=')
+                if not sep:
+                    continue
+                if key == 'hash':
+                    hash_value = value
+                else:
+                    raw_data[key] = value
 
-            # Estrai l'hash dalla firma
-            hash_value = data.get('hash', [None])[0]
             if not hash_value:
                 return False
 
-            # Rimuovi l'hash dai dati per la verifica
-            auth_data = {k: v[0] for k, v in data.items() if k != 'hash'}
+            sorted_data = sorted(raw_data.items())
 
-            # Ordina i dati per chiave
-            sorted_data = sorted(auth_data.items())
-
-            # Costruisci la stringa di verifica (key=value per ogni riga)
             data_check_string = '\n'.join(f"{k}={v}" for k, v in sorted_data)
 
             # Algoritmo Telegram WebApp:
@@ -75,11 +77,11 @@ class SecurityService:
         Estrae i dati utente dall'initData validato.
         """
         try:
-            data = parse_qs(init_data)
+            data = parse_qs(init_data, keep_blank_values=True)
             user_data = data.get('user', [None])[0]
             if user_data:
                 import json
-                return json.loads(user_data)
+                return json.loads(unquote(user_data))
             return None
         except Exception:
             return None
