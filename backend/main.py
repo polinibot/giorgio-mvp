@@ -77,9 +77,17 @@ app = FastAPI(
 app.state.limiter = limiter
 
 
+def _initialize_database() -> None:
+    try:
+        create_tables()
+        logger.info("Database initialization completed")
+    except Exception as exc:
+        logger.exception("Database initialization failed: %s", exc)
+
+
 @app.on_event("startup")
 async def startup_event():
-    create_tables()
+    asyncio.create_task(asyncio.to_thread(_initialize_database))
 
 # --- CORS ---
 app.add_middleware(
