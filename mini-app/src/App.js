@@ -418,7 +418,7 @@ function App() {
     setTimeout(() => {
       setToasts(prev => prev.map(t => t.id === id ? { ...t, exiting: true } : t));
       setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 350);
-    }, duration);
+    }, type === 'error' ? 8000 : duration);
   }, []);
 
   const removeToast = useCallback((id) => {

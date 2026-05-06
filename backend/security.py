@@ -28,11 +28,13 @@ class SecurityService:
         """
         try:
             if not init_data:
+                logger.warning("validate_telegram_init_data: initData is empty")
                 return False
 
             data = parse_qs(init_data, keep_blank_values=True)
             hash_value = data.get('hash', [None])[0]
             if not hash_value:
+                logger.warning("validate_telegram_init_data: no hash in initData")
                 return False
 
             auth_data = {k: unquote(v[0]) for k, v in data.items() if k != 'hash'}
@@ -40,6 +42,8 @@ class SecurityService:
             sorted_data = sorted(auth_data.items())
 
             data_check_string = '\n'.join(f"{k}={v}" for k, v in sorted_data)
+
+            logger.debug("validate_telegram_init_data: data_check_string length=%d", len(data_check_string))
 
             # Algoritmo Telegram WebApp:
             # secret_key = HMAC_SHA256("WebAppData", bot_token)
