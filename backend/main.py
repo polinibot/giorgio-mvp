@@ -40,9 +40,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for dev/test environm
     _rate_limit_exceeded_handler = None
 
 from config import settings, DEBUG, ALLOWED_ORIGINS, LOCAL_DEV_ORIGIN_REGEX
-from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup
-from aiogram.enums import ParseMode
 from database_sqlite import (
     get_db, create_tables, Practice, PracticePhoto, PracticeSection, PracticePart,
 )
@@ -51,7 +48,6 @@ from models import (
     Practice as PracticeModel,
     PracticeCreate,
     PracticeUpdate,
-    PracticeSummary,
     APIResponse,
     TelegramMiniAppData,
     ValidationError,
@@ -347,7 +343,7 @@ def require_whitelisted_user(
 
     whitelist = getattr(settings, "whitelist_telegram_ids", None) or []
     if not whitelist:
-        logger.warning("Telegram whitelist is empty — all users allowed")
+        logger.warning("Telegram whitelist is empty - all users allowed")
         return user_data
     uid = user_data.get("id")
     if uid not in whitelist:
@@ -363,7 +359,7 @@ def require_whitelisted_user(
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint — no auth required."""
+    """Health check endpoint - no auth required."""
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 
@@ -901,7 +897,6 @@ async def create_practice_full(
         db.refresh(practice)
 
         logger.info("Full practice %d created by user %d", practice.id, user_data["id"])
-        _send_practice_telegram_notification_full(practice.id, user_data)
         return APIResponse(success=True, data=serialize(practice))
     except HTTPException:
         db.rollback()
@@ -936,7 +931,6 @@ async def update_practice_full(
         db.refresh(practice)
 
         logger.info("Full practice %d updated by user %d", practice_id, user_data["id"])
-        _send_practice_telegram_notification_full(practice.id, user_data)
         return APIResponse(success=True, data=serialize(practice))
     except HTTPException:
         db.rollback()
@@ -995,9 +989,6 @@ async def create_practice(
 
         logger.info("Practice %d created by user %d", practice.id, user_data["id"])
 
-        # Fire-and-forget Telegram notification
-        _send_practice_telegram_notification(practice, user_data)
-
         return APIResponse(success=True, data=serialize(practice))
 
     except HTTPException:
@@ -1009,74 +1000,6 @@ async def create_practice(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Errore creazione pratica",
         )
-
-
-def _send_practice_telegram_notification(practice, user_data: dict):
-    """Fire-and-forget Telegram summary. Errors are logged, never propagated."""
-    try:
-        from telegram_utils import TelegramFormatter
-
-        summary_data = {
-            "practice_id": practice.id,
-            "plate": practice.plate_confirmed,
-            "phone": practice.phone,
-            "appointment": f"{practice.appointment_date.strftime('%d/%m/%Y')} {practice.appointment_time}",
-            "practice_type": practice.practice_type.value,
-            "contexts": [c.value for c in practice.contexts_list],
-            "sections_summary": {},
-            "billing_warning": "⚠ Dati fatturazione da completare" if practice.billing_to_complete else None,
-            "internal_notes": practice.internal_notes,
-        }
-
-        summary = PracticeSummary(**summary_data)
-        message_text = TelegramFormatter.format_practice_summary(summary)
-        keyboard = TelegramFormatter.create_practice_keyboard(practice.id)
-
-        async def _send():
-            try:
-                bot_instance = Bot(token=settings.telegram_bot_token)
-                await bot_instance.send_message(
-                    chat_id=user_data["id"],
-                    text=message_text,
-                    reply_markup=InlineKeyboardMarkup(**keyboard),
-                    parse_mode=ParseMode.HTML,
-                )
-                logger.info("Telegram summary sent for practice %d", practice.id)
-            except Exception as e:
-                logger.error("Failed to send Telegram summary for practice %d: %s", practice.id, e)
-
-        asyncio.create_task(_send())
-    except Exception as e:
-        logger.error("Failed to prepare Telegram notification for practice %d: %s", practice.id, e)
-
-
-def _send_practice_telegram_notification_full(practice_id: int, user_data: dict):
-    """Send a Telegram summary built after all related data has been committed."""
-    try:
-        from telegram_utils import TelegramFormatter
-
-        async def _send():
-            db = next(get_db())
-            try:
-                summary = build_practice_summary(db, practice_id, user_data["id"])
-                message_text = TelegramFormatter.format_practice_summary(summary)
-                keyboard = TelegramFormatter.create_practice_keyboard(practice_id)
-                bot_instance = Bot(token=settings.telegram_bot_token)
-                await bot_instance.send_message(
-                    chat_id=user_data["id"],
-                    text=message_text,
-                    reply_markup=InlineKeyboardMarkup(**keyboard),
-                    parse_mode=ParseMode.HTML,
-                )
-                logger.info("Telegram summary sent for practice %d", practice_id)
-            except Exception as e:
-                logger.error("Failed to send Telegram summary for practice %d: %s", practice_id, e)
-            finally:
-                db.close()
-
-        asyncio.create_task(_send())
-    except Exception as e:
-        logger.error("Failed to prepare Telegram notification for practice %d: %s", practice_id, e)
 
 
 @app.put("/practices/{practice_id}")
@@ -1451,3 +1374,4 @@ async def pydantic_validation_handler(request: Request, exc: PydanticValidationE
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+

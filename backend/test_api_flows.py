@@ -6,8 +6,6 @@ from datetime import datetime
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-import main as main_module
 from database_sqlite import Base, Practice, PracticePart, PracticePhoto, PracticeSection
 from main import app, get_db, require_whitelisted_user
 from models import Context, CustomerType, PracticeStatus, PracticeType
@@ -27,10 +25,6 @@ class ApiFlowTests(unittest.TestCase):
         Base.metadata.create_all(bind=cls.engine)
 
         cls.current_user = {"id": 761118078, "first_name": "Test", "last_name": "", "username": "tester"}
-        cls.original_send_full = main_module._send_practice_telegram_notification_full
-        cls.original_send_simple = main_module._send_practice_telegram_notification
-        main_module._send_practice_telegram_notification_full = lambda *_args, **_kwargs: None
-        main_module._send_practice_telegram_notification = lambda *_args, **_kwargs: None
 
         def override_get_db():
             db = cls.SessionLocal()
@@ -50,8 +44,6 @@ class ApiFlowTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         app.dependency_overrides.clear()
-        main_module._send_practice_telegram_notification_full = cls.original_send_full
-        main_module._send_practice_telegram_notification = cls.original_send_simple
         cls.client.close()
         cls.engine.dispose()
         if os.path.exists(cls.db_path):
