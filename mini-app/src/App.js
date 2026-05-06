@@ -535,6 +535,7 @@ function App() {
   const [confirmModal, setConfirmModal] = useState(null);
 
   const [startedFromBot, setStartedFromBot] = useState(false);
+  const [bootstrapped, setBootstrapped] = useState(false);
 
   // Dashboard state
   const [practices, setPractices] = useState([]);
@@ -825,20 +826,23 @@ function App() {
 
   // Load dashboard on view mount
   useEffect(() => {
+    if (!bootstrapped) return;
     if (currentView === 'dashboard' && (initData || telegramUserId || standaloneBrowserMode)) {
       loadDashboard(searchQuery, activeFilters);
     }
-  }, [currentView, initData, telegramUserId, standaloneBrowserMode, loadDashboard, searchQuery, activeFilters]);
+  }, [bootstrapped, currentView, initData, telegramUserId, standaloneBrowserMode, loadDashboard, searchQuery, activeFilters]);
 
   // Debounced search
   useEffect(() => {
+    if (!bootstrapped) return;
     if (currentView !== 'dashboard') return;
+    if (!initData && !telegramUserId && !standaloneBrowserMode) return;
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
       loadDashboard(searchQuery, activeFilters);
     }, 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [searchQuery, activeFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bootstrapped, currentView, initData, telegramUserId, standaloneBrowserMode, searchQuery, activeFilters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Detail: Load practice ---
   const loadDetail = useCallback(async (id) => {
@@ -1088,6 +1092,7 @@ function App() {
       const plate = urlParams.get('plate');
 
       if (demoMode === 'complete' || demoMode === 'full') {
+        setBootstrapped(true);
         applyDemoTemplate();
         return;
       }
@@ -1105,6 +1110,7 @@ function App() {
             });
             setError('Autenticazione Telegram assente. Riapri la Mini App dal pulsante del bot.');
             setLoading(false);
+            setBootstrapped(true);
             return;
           }
           loadPractice(practiceId, currentInitData, plate || '', currentTelegramUserId);
@@ -1115,10 +1121,12 @@ function App() {
           setSelectedContexts(prev => prev.length ? prev : []);
           setLoading(false);
         }
+        setBootstrapped(true);
       } else {
         // Opened from menu -> show dashboard
         setCurrentView('dashboard');
         setLoading(false);
+        setBootstrapped(true);
       }
     } else {
       // Standalone browser/dev mode: allow the real backend to load with an empty initData header.
@@ -1131,6 +1139,7 @@ function App() {
       const plate = urlParams.get('plate');
 
       if (demoMode === 'complete' || demoMode === 'full') {
+        setBootstrapped(true);
         applyDemoTemplate();
         return;
       }
@@ -1147,6 +1156,7 @@ function App() {
             });
             setError('Autenticazione Telegram assente. Riapri la Mini App dal pulsante del bot.');
             setLoading(false);
+            setBootstrapped(true);
             return;
           }
           loadPractice(practiceId, '', plate || '', currentTelegramUserId);
@@ -1156,9 +1166,11 @@ function App() {
           if (hadDraft) setShowDraftBanner(true);
           setLoading(false);
         }
+        setBootstrapped(true);
       } else {
         setCurrentView('dashboard');
         setLoading(false);
+        setBootstrapped(true);
       }
     }
   }, [loadPractice, setValue, restoreDraft, applyDemoTemplate]); // eslint-disable-line react-hooks/exhaustive-deps
