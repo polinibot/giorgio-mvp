@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum, text, ForeignKey, Index
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum, text, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -79,7 +79,7 @@ class PracticePhoto(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
+    practice_id = Column(Integer, nullable=False, index=True)
     telegram_file_id = Column(String(500), nullable=False)
     storage_path = Column(String(500), nullable=False)
     ocr_result = Column(String(20), nullable=True)
@@ -94,7 +94,7 @@ class PracticeSection(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
+    practice_id = Column(Integer, nullable=False, index=True)
     context = Column(Enum(Context, values_callable=enum_values), nullable=False)
     # SQLite non supporta array, usiamo JSON string
     description_rows = Column(Text, nullable=False)  # JSON string
@@ -130,7 +130,7 @@ class PracticePart(Base):
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    practice_id = Column(Integer, ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
+    practice_id = Column(Integer, nullable=False, index=True)
     context = Column(Enum(Context, values_callable=enum_values), nullable=False)
     name = Column(String(200), nullable=False)
     quantity = Column(String(50), nullable=True)  # Testuale: "1 pz", "2 pz", "3,5 kg"
