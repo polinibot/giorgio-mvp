@@ -282,9 +282,9 @@ const DASHBOARD_DEMO_PRACTICES = [
     practice: {
       plate_confirmed: 'ZT890PR',
       phone: '3479988776',
-      customer_name: 'Autonoleggio Nord SRL',
+      customer_name: 'Autonoleggio Nord Srl',
       customer_type: 'azienda',
-      billing_to_complete: true,
+      billing_to_complete: false,
       appointment_date: '2026-06-25T14:30:00',
       appointment_time: '14:30',
       practice_type: 'ordine_di_lavoro',
@@ -307,6 +307,101 @@ const DASHBOARD_DEMO_PRACTICES = [
       { context: 'carrozzeria', name: 'Primer', quantity: '1 barattolo' },
       { context: 'carrozzeria', name: 'Trasparente', quantity: '1 kit' },
     ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'ER321TY',
+      phone: '3336655441',
+      customer_name: 'Giulia Ferri',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-06-26T11:00:00',
+      appointment_time: '11:00',
+      practice_type: 'preventivo',
+      contexts: ['officina'],
+      internal_notes: 'Pratica demo completa #3',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Diagnosi rumore avantreno', 'Sostituzione testina sterzo'],
+        man_hours: 2.5,
+        mac_hours: null,
+        materials_amount: 95,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Provare il veicolo prima della consegna',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Testina sterzo dx', quantity: '1 pz' },
+    ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'NM654KL',
+      phone: '3494433221',
+      customer_name: 'Studio Tecnico Verdi',
+      customer_type: 'azienda',
+      billing_to_complete: false,
+      appointment_date: '2026-06-27T08:30:00',
+      appointment_time: '08:30',
+      practice_type: 'ordine_di_lavoro',
+      contexts: ['revisione', 'officina'],
+      internal_notes: 'Pratica demo completa #4',
+    },
+    sections: [
+      {
+        context: 'revisione',
+        description_rows: ['Verifica impianto luci', 'Controllo emissioni preliminare'],
+        man_hours: 1,
+        mac_hours: null,
+        materials_amount: null,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Documenti veicolo già verificati',
+      },
+      {
+        context: 'officina',
+        description_rows: ['Sostituzione lampada anabbagliante sx'],
+        man_hours: 0.5,
+        mac_hours: null,
+        materials_amount: 18,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Ricambio disponibile in magazzino',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Lampada H7', quantity: '1 pz' },
+    ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'BC741QS',
+      phone: '3357788991',
+      customer_name: 'Elena Riva',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-06-27T16:00:00',
+      appointment_time: '16:00',
+      practice_type: 'preventivo',
+      contexts: ['carrozzeria'],
+      internal_notes: 'Pratica demo completa #5',
+    },
+    sections: [
+      {
+        context: 'carrozzeria',
+        description_rows: ['Rimozione graffi portiera posteriore sx', 'Lucidatura zona ripristinata'],
+        man_hours: 1.5,
+        mac_hours: 0.5,
+        materials_amount: 75,
+        waste_apply: true,
+        waste_percentage: 5,
+        notes: 'Cliente richiede finitura lucida',
+      },
+    ],
+    parts: [],
   },
 ];
 
@@ -355,6 +450,22 @@ const extractTelegramInitDataFromLocation = () => {
   return '';
 };
 
+const extractTelegramUserIdFromLocation = () => {
+  try {
+    const searchParams = new URLSearchParams(window.location.search);
+    const fromSearch = searchParams.get('user_id');
+    if (fromSearch) return fromSearch;
+
+    const hashRaw = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : (window.location.hash || '');
+    const hashParams = new URLSearchParams(hashRaw);
+    const fromHash = hashParams.get('user_id');
+    if (fromHash) return fromHash;
+  } catch (_) {
+    // no-op
+  }
+  return '';
+};
+
 // --- Main App ---
 
 function App() {
@@ -368,6 +479,7 @@ function App() {
 
   // Shared state
   const [initData, setInitData] = useState('');
+  const [telegramUserId, setTelegramUserId] = useState('');
   const [toasts, setToasts] = useState([]);
   const [confirmModal, setConfirmModal] = useState(null);
 
@@ -552,7 +664,12 @@ function App() {
   }, [watchedValues, selectedContexts, sections, parts, loading, successDone, saveDraft, currentView]);
 
   // --- API helpers ---
-  const getHeaders = useCallback(() => ({ 'X-Telegram-Init-Data': initData }), [initData]);
+  const getHeaders = useCallback(() => {
+    const headers = {};
+    if (initData) headers['X-Telegram-Init-Data'] = initData;
+    if (telegramUserId) headers['X-Telegram-User-Id'] = telegramUserId;
+    return headers;
+  }, [initData, telegramUserId]);
 
   // --- Dashboard: Load practices ---
   const loadDashboard = useCallback(async (search = '', filters = {}) => {
@@ -594,7 +711,7 @@ function App() {
           )
         )
       );
-      addToast('Ho creato 2 pratiche demo complete', 'success');
+      addToast(`Ho creato ${DASHBOARD_DEMO_PRACTICES.length} pratiche demo complete`, 'success');
       await loadDashboard(searchQuery, activeFilters);
     } catch (err) {
       addToast(classifyError(err), 'error');
@@ -680,7 +797,10 @@ function App() {
         fd.append('file', formPhotos[i].file);
         const res = await fetch(`${API_BASE_URL}/api/practices/${practiceId}/photos`, {
           method: 'POST',
-          headers: { 'X-Telegram-Init-Data': initData },
+          headers: {
+            ...(initData ? { 'X-Telegram-Init-Data': initData } : {}),
+            ...(telegramUserId ? { 'X-Telegram-User-Id': telegramUserId } : {}),
+          },
           body: fd
         });
         if (res.ok) successCount++;
@@ -695,7 +815,7 @@ function App() {
     // Cleanup previews
     formPhotos.forEach(p => URL.revokeObjectURL(p.preview));
     setFormPhotos([]);
-  }, [formPhotos, initData, addToast]);
+  }, [formPhotos, initData, telegramUserId, addToast]);
 
   // --- Toggle sync ---
   const toggleSync = useCallback(async (id, currentSynced) => {
@@ -718,7 +838,10 @@ function App() {
       const response = await fetchWithRetry(() =>
         axios.get(`${API_BASE_URL}/mini-app/data`, {
           params: { practice_id: practiceId },
-          headers: { 'X-Telegram-Init-Data': currentInitData },
+          headers: {
+            ...(currentInitData ? { 'X-Telegram-Init-Data': currentInitData } : {}),
+            ...(telegramUserId ? { 'X-Telegram-User-Id': telegramUserId } : {}),
+          },
           timeout: 30000
         })
       );
@@ -775,7 +898,7 @@ function App() {
       clearSlowTimer();
       setLoading(false);
     }
-  }, [setValue, startSlowTimer, clearSlowTimer]);
+  }, [setValue, startSlowTimer, clearSlowTimer, telegramUserId]);
 
   // Pre-fill form when editing from detail
   useEffect(() => {
@@ -818,7 +941,9 @@ function App() {
       webApp.setBackgroundColor('#0f0f1a');
 
       const currentInitData = webApp.initData || extractTelegramInitDataFromLocation();
+      const currentTelegramUserId = extractTelegramUserIdFromLocation();
       setInitData(currentInitData);
+      setTelegramUserId(currentTelegramUserId);
 
       const urlParams = new URLSearchParams(window.location.search);
       const demoMode = urlParams.get('demo');
@@ -851,6 +976,7 @@ function App() {
     } else {
       // Standalone browser/dev mode: allow the real backend to load with an empty initData header.
       setInitData('');
+      setTelegramUserId(extractTelegramUserIdFromLocation());
       const urlParams = new URLSearchParams(window.location.search);
       const demoMode = urlParams.get('demo');
       const practiceId = urlParams.get('practice_id');
@@ -1038,7 +1164,7 @@ function App() {
         appointment_time: data.appointment_time,
         practice_type: data.practice_type,
         contexts: selectedContexts,
-        internal_notes: practice?.internal_notes || null,
+        internal_notes: data.internal_notes || null,
       };
 
       const sectionPayloads = selectedContexts.map(context => {
@@ -1230,7 +1356,7 @@ function App() {
             onClick={seedDemoPractices}
             disabled={seedingDemoPractices}
           >
-            {seedingDemoPractices ? 'Creazione pratiche demo...' : 'Crea 2 pratiche esempio piene'}
+            {seedingDemoPractices ? 'Creazione pratiche demo...' : `Crea ${DASHBOARD_DEMO_PRACTICES.length} pratiche esempio piene`}
           </button>
         </div>
 
@@ -1543,7 +1669,10 @@ function App() {
                               if (practice?.id && photo.id) {
                                 fetch(`${API_BASE_URL}/api/practices/${practice.id}/photos/${photo.id}`, {
                                   method: 'DELETE',
-                                  headers: { 'X-Telegram-Init-Data': initData }
+                                  headers: {
+                                    ...(initData ? { 'X-Telegram-Init-Data': initData } : {}),
+                                    ...(telegramUserId ? { 'X-Telegram-User-Id': telegramUserId } : {}),
+                                  }
                                 }).catch(() => {});
                               }
                             },

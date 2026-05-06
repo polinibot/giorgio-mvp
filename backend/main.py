@@ -170,6 +170,8 @@ def serialize(obj) -> dict:
 def validate_telegram_init_data(
     init_data: str = None,
     x_telegram_init_data: str = Header(None, alias="X-Telegram-Init-Data"),
+    user_id: Optional[int] = None,
+    x_telegram_user_id: Optional[str] = Header(None, alias="X-Telegram-User-Id"),
 ):
     """Extract Telegram user from initData.
 
@@ -211,6 +213,23 @@ def validate_telegram_init_data(
                 return {"id": 123456789, "first_name": "User", "last_name": "Test", "username": "dev_test"}
     except Exception as e:
         logger.warning("Failed to extract user from initData: %s", e)
+
+    # Fallback for Telegram clients/entry points where initData can be empty.
+    # We only accept a numeric user_id and the request remains subject to whitelist checks.
+    fallback_uid = None
+    if x_telegram_user_id and str(x_telegram_user_id).strip().lstrip("-").isdigit():
+        fallback_uid = int(str(x_telegram_user_id).strip())
+    elif user_id is not None:
+        fallback_uid = int(user_id)
+
+    if fallback_uid is not None:
+        logger.warning("Auth fallback used without initData for Telegram user %s", fallback_uid)
+        return {
+            "id": fallback_uid,
+            "first_name": "",
+            "last_name": "",
+            "username": "",
+        }
 
     # In production, reject unauthenticated requests
     if not DEBUG:

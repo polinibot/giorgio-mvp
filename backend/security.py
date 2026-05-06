@@ -1,7 +1,7 @@
 import hmac
 import hashlib
 import logging
-from urllib.parse import parse_qs, unquote, unquote_plus
+from urllib.parse import parse_qsl, unquote
 from typing import Dict, Optional
 from config import settings
 
@@ -34,15 +34,14 @@ class SecurityService:
                 logger.warning("validate_telegram_init_data: initData is empty")
                 return False
 
-            data = parse_qs(init_data, keep_blank_values=True)
-            hash_value = data.get('hash', [None])[0]
+            pairs = parse_qsl(init_data, keep_blank_values=True)
+            hash_value = next((v for k, v in pairs if k == "hash"), None)
             if not hash_value:
                 logger.warning("validate_telegram_init_data: no hash in initData")
                 return False
 
-            auth_data = {k: unquote(v[0]) for k, v in data.items() if k != 'hash'}
-
-            sorted_data = sorted(auth_data.items())
+            auth_data = [(k, unquote(v)) for k, v in pairs if k != "hash"]
+            sorted_data = sorted(auth_data, key=lambda item: item[0])
 
             data_check_string = '\n'.join(f"{k}={v}" for k, v in sorted_data)
 
@@ -76,8 +75,8 @@ class SecurityService:
         Estrae i dati utente dall'initData validato.
         """
         try:
-            data = parse_qs(init_data, keep_blank_values=True)
-            user_data = data.get('user', [None])[0]
+            pairs = parse_qsl(init_data, keep_blank_values=True)
+            user_data = next((v for k, v in pairs if k == "user"), None)
             if user_data:
                 import json
                 return json.loads(unquote(user_data))
