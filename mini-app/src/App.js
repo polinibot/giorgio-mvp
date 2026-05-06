@@ -832,7 +832,7 @@ function App() {
   }, [getHeaders, addToast]);
 
   // --- Form: Load practice for editing ---
-  const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '') => {
+  const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '', currentTelegramUserId = '') => {
     startSlowTimer();
     try {
       const response = await fetchWithRetry(() =>
@@ -840,7 +840,7 @@ function App() {
           params: { practice_id: practiceId },
           headers: {
             ...(currentInitData ? { 'X-Telegram-Init-Data': currentInitData } : {}),
-            ...(telegramUserId ? { 'X-Telegram-User-Id': telegramUserId } : {}),
+            ...(currentTelegramUserId ? { 'X-Telegram-User-Id': currentTelegramUserId } : {}),
           },
           timeout: 30000
         })
@@ -898,7 +898,7 @@ function App() {
       clearSlowTimer();
       setLoading(false);
     }
-  }, [setValue, startSlowTimer, clearSlowTimer, telegramUserId]);
+  }, [setValue, startSlowTimer, clearSlowTimer]);
 
   // Pre-fill form when editing from detail
   useEffect(() => {
@@ -960,7 +960,7 @@ function App() {
         setStartedFromBot(true);
         setCurrentView('form');
         if (practiceId) {
-          loadPractice(practiceId, currentInitData, plate || '');
+          loadPractice(practiceId, currentInitData, plate || '', currentTelegramUserId);
         } else {
           if (plate) setValue('plate_confirmed', plate);
           const hadDraft = restoreDraft();
@@ -991,7 +991,7 @@ function App() {
         setStartedFromBot(true);
         setCurrentView('form');
         if (practiceId) {
-          loadPractice(practiceId, '', plate || '');
+          loadPractice(practiceId, '', plate || '', extractTelegramUserIdFromLocation());
         } else {
           if (plate) setValue('plate_confirmed', plate);
           const hadDraft = restoreDraft();
