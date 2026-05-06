@@ -41,7 +41,15 @@ function classifyError(err) {
   const detail = err.response.data?.detail;
   if (status === 422 || status === 400) return detail || 'Dati non validi. Controlla i campi e riprova.';
   if (status === 403) return detail || 'Utente non autorizzato. Contatta l\'amministratore.';
-  if (status === 401) return 'Sessione scaduta. Chiudi e riapri la Mini App.';
+  if (status === 401) {
+    if (detail === 'Invalid Telegram initData') {
+      return 'Sessione Telegram non valida. Chiudi e riapri la Mini App dal bot.';
+    }
+    if (detail === 'Authentication required') {
+      return 'Sessione Telegram mancante. Riapri la Mini App dal pulsante del bot.';
+    }
+    return 'Sessione scaduta. Chiudi e riapri la Mini App.';
+  }
   if (status === 404) return detail || 'Risorsa non trovata.';
   if (status >= 500) return 'Errore del server. Riprova tra qualche istante.';
   return detail || 'Errore sconosciuto. Riprova.';
@@ -460,6 +468,18 @@ const extractTelegramUserIdFromLocation = () => {
     const hashParams = new URLSearchParams(hashRaw);
     const fromHash = hashParams.get('user_id');
     if (fromHash) return fromHash;
+  } catch (_) {
+    // no-op
+  }
+  return '';
+};
+
+const extractTelegramUserIdFromRuntime = () => {
+  try {
+    const runtimeId = window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
+    if (runtimeId !== undefined && runtimeId !== null && String(runtimeId).trim()) {
+      return String(runtimeId).trim();
+    }
   } catch (_) {
     // no-op
   }
@@ -941,7 +961,7 @@ function App() {
       webApp.setBackgroundColor('#0f0f1a');
 
       const currentInitData = webApp.initData || extractTelegramInitDataFromLocation();
-      const currentTelegramUserId = extractTelegramUserIdFromLocation();
+      const currentTelegramUserId = extractTelegramUserIdFromLocation() || extractTelegramUserIdFromRuntime();
       setInitData(currentInitData);
       setTelegramUserId(currentTelegramUserId);
 
@@ -960,6 +980,11 @@ function App() {
         setStartedFromBot(true);
         setCurrentView('form');
         if (practiceId) {
+          if (!currentInitData && !currentTelegramUserId) {
+            setError('Autenticazione Telegram assente. Riapri la Mini App dal pulsante del bot.');
+            setLoading(false);
+            return;
+          }
           loadPractice(practiceId, currentInitData, plate || '', currentTelegramUserId);
         } else {
           if (plate) setValue('plate_confirmed', plate);
@@ -976,7 +1001,8 @@ function App() {
     } else {
       // Standalone browser/dev mode: allow the real backend to load with an empty initData header.
       setInitData('');
-      setTelegramUserId(extractTelegramUserIdFromLocation());
+      const currentTelegramUserId = extractTelegramUserIdFromLocation() || extractTelegramUserIdFromRuntime();
+      setTelegramUserId(currentTelegramUserId);
       const urlParams = new URLSearchParams(window.location.search);
       const demoMode = urlParams.get('demo');
       const practiceId = urlParams.get('practice_id');
@@ -991,7 +1017,12 @@ function App() {
         setStartedFromBot(true);
         setCurrentView('form');
         if (practiceId) {
-          loadPractice(practiceId, '', plate || '', extractTelegramUserIdFromLocation());
+          if (!currentTelegramUserId) {
+            setError('Autenticazione Telegram assente. Riapri la Mini App dal pulsante del bot.');
+            setLoading(false);
+            return;
+          }
+          loadPractice(practiceId, '', plate || '', currentTelegramUserId);
         } else {
           if (plate) setValue('plate_confirmed', plate);
           const hadDraft = restoreDraft();

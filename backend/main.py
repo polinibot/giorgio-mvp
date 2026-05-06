@@ -211,6 +211,8 @@ def validate_telegram_init_data(
             if DEBUG:
                 logger.debug("DEBUG mode: initData present but user extraction failed, using dev fallback user")
                 return {"id": 123456789, "first_name": "User", "last_name": "Test", "username": "dev_test"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning("Failed to extract user from initData: %s", e)
 
