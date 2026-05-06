@@ -691,6 +691,12 @@ function App() {
     return headers;
   }, [initData, telegramUserId]);
 
+  const getAuthParams = useCallback(() => {
+    const params = {};
+    if (telegramUserId) params.user_id = telegramUserId;
+    return params;
+  }, [telegramUserId]);
+
   // --- Dashboard: Load practices ---
   const loadDashboard = useCallback(async (search = '', filters = {}) => {
     setDashboardLoading(true);
@@ -702,10 +708,11 @@ function App() {
       if (filters.synced === true) params.synced = 'true';
       if (filters.synced === false) params.synced = 'false';
       params.sort = 'date_desc';
+      Object.assign(params, getAuthParams());
 
       const [practicesRes, statsRes] = await Promise.all([
         fetchWithRetry(() => axios.get(`${API_BASE_URL}/api/practices`, { params, headers: getHeaders(), timeout: 15000 })),
-        fetchWithRetry(() => axios.get(`${API_BASE_URL}/api/practices/stats`, { headers: getHeaders(), timeout: 15000 }))
+        fetchWithRetry(() => axios.get(`${API_BASE_URL}/api/practices/stats`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 }))
       ]);
 
       setPractices(practicesRes.data?.data || practicesRes.data || []);
@@ -715,7 +722,7 @@ function App() {
     } finally {
       setDashboardLoading(false);
     }
-  }, [getHeaders, addToast]);
+  }, [getAuthParams, getHeaders, addToast]);
 
   const seedDemoPractices = useCallback(async () => {
     if (seedingDemoPractices) return;
@@ -725,6 +732,7 @@ function App() {
         DASHBOARD_DEMO_PRACTICES.map((payload) =>
           fetchWithRetry(() =>
             axios.post(`${API_BASE_URL}/practices/full`, payload, {
+              params: getAuthParams(),
               headers: getHeaders(),
               timeout: 30000,
             })
@@ -738,14 +746,14 @@ function App() {
     } finally {
       setSeedingDemoPractices(false);
     }
-  }, [seedingDemoPractices, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
+  }, [seedingDemoPractices, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
 
   // Load dashboard on view mount
   useEffect(() => {
-    if (currentView === 'dashboard' && (initData || standaloneBrowserMode)) {
+    if (currentView === 'dashboard' && (initData || telegramUserId || standaloneBrowserMode)) {
       loadDashboard(searchQuery, activeFilters);
     }
-  }, [currentView, initData, standaloneBrowserMode, loadDashboard, searchQuery, activeFilters]);
+  }, [currentView, initData, telegramUserId, standaloneBrowserMode, loadDashboard, searchQuery, activeFilters]);
 
   // Debounced search
   useEffect(() => {
@@ -764,7 +772,7 @@ function App() {
     setDetailData(null);
     try {
       const res = await fetchWithRetry(() =>
-        axios.get(`${API_BASE_URL}/api/practices/${id}`, { headers: getHeaders(), timeout: 15000 })
+        axios.get(`${API_BASE_URL}/api/practices/${id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 })
       );
       setDetailData(res.data?.data || res.data);
     } catch (err) {
@@ -773,7 +781,7 @@ function App() {
     } finally {
       setDetailLoading(false);
     }
-  }, [getHeaders, addToast, navigateBack]);
+  }, [getAuthParams, getHeaders, addToast, navigateBack]);
 
   useEffect(() => {
     if (currentView === 'detail' && selectedPracticeId) {
@@ -808,6 +816,7 @@ function App() {
 
   const uploadQueuedPhotos = useCallback(async (practiceId) => {
     if (formPhotos.length === 0) return;
+    const currentTelegramUserId = telegramUserId;
     let successCount = 0;
     let failCount = 0;
     for (let i = 0; i < formPhotos.length; i++) {
@@ -815,11 +824,12 @@ function App() {
       try {
         const fd = new FormData();
         fd.append('file', formPhotos[i].file);
-        const res = await fetch(`${API_BASE_URL}/api/practices/${practiceId}/photos`, {
+        const query = currentTelegramUserId ? `?user_id=${encodeURIComponent(currentTelegramUserId)}` : '';
+        const res = await fetch(`${API_BASE_URL}/api/practices/${practiceId}/photos${query}`, {
           method: 'POST',
           headers: {
             ...(initData ? { 'X-Telegram-Init-Data': initData } : {}),
-            ...(telegramUserId ? { 'X-Telegram-User-Id': telegramUserId } : {}),
+            ...(currentTelegramUserId ? { 'X-Telegram-User-Id': currentTelegramUserId } : {}),
           },
           body: fd
         });
@@ -841,7 +851,7 @@ function App() {
   const toggleSync = useCallback(async (id, currentSynced) => {
     try {
       await fetchWithRetry(() =>
-        axios.patch(`${API_BASE_URL}/api/practices/${id}/sync`, { synced: !currentSynced }, { headers: getHeaders(), timeout: 10000 })
+        axios.patch(`${API_BASE_URL}/api/practices/${id}/sync`, { synced: !currentSynced }, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 })
       );
       setDetailData(prev => prev ? { ...prev, synced: !currentSynced } : prev);
       setPractices(prev => prev.map(p => p.id === id ? { ...p, synced: !currentSynced } : p));
@@ -849,7 +859,7 @@ function App() {
     } catch (err) {
       addToast(classifyError(err), 'error');
     }
-  }, [getHeaders, addToast]);
+  }, [getAuthParams, getHeaders, addToast]);
 
   // --- Form: Load practice for editing ---
   const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '', currentTelegramUserId = '') => {
@@ -857,7 +867,7 @@ function App() {
     try {
       const response = await fetchWithRetry(() =>
         axios.get(`${API_BASE_URL}/mini-app/data`, {
-          params: { practice_id: practiceId },
+          params: { practice_id: practiceId, ...(currentTelegramUserId ? { user_id: currentTelegramUserId } : {}) },
           headers: {
             ...(currentInitData ? { 'X-Telegram-Init-Data': currentInitData } : {}),
             ...(currentTelegramUserId ? { 'X-Telegram-User-Id': currentTelegramUserId } : {}),
@@ -1110,7 +1120,7 @@ function App() {
         startSlowTimer();
         try {
           await fetchWithRetry(() =>
-            axios.delete(`${API_BASE_URL}/practices/${p.id}`, { headers: getHeaders(), timeout: 30000 })
+            axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 })
           );
           clearDraft();
           addToast('Pratica cancellata con successo', 'success');
@@ -1225,11 +1235,11 @@ function App() {
       let response;
       if (practice) {
         response = await fetchWithRetry(() =>
-          axios.put(`${API_BASE_URL}/practices/${practice.id}/full`, payload, { headers: getHeaders(), timeout: 30000 })
+            axios.put(`${API_BASE_URL}/practices/${practice.id}/full`, payload, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 })
         );
       } else {
         response = await fetchWithRetry(() =>
-          axios.post(`${API_BASE_URL}/practices/full`, payload, { headers: getHeaders(), timeout: 30000 })
+            axios.post(`${API_BASE_URL}/practices/full`, payload, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 })
         );
       }
 
@@ -1705,7 +1715,8 @@ function App() {
                               setConfirmModal(null);
                               setExistingPhotos(prev => prev.filter(p => p.id !== photo.id));
                               if (practice?.id && photo.id) {
-                                fetch(`${API_BASE_URL}/api/practices/${practice.id}/photos/${photo.id}`, {
+                                const query = telegramUserId ? `?user_id=${encodeURIComponent(telegramUserId)}` : '';
+                                fetch(`${API_BASE_URL}/api/practices/${practice.id}/photos/${photo.id}${query}`, {
                                   method: 'DELETE',
                                   headers: {
                                     ...(initData ? { 'X-Telegram-Init-Data': initData } : {}),
