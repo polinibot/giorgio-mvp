@@ -503,6 +503,9 @@ const extractPracticeAccessTokenFromLocation = () => {
 };
 
 function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, lastApiDebug }) {
+  const showDebugUi = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug_ui') === '1';
+  if (!showDebugUi) return null;
+
   const search = typeof window !== 'undefined' ? window.location.search : '';
   const hash = typeof window !== 'undefined' ? window.location.hash : '';
 
@@ -593,6 +596,31 @@ function App() {
   const searchTimerRef = useRef(null);
 
   const { register, control, handleSubmit, setValue, watch, getValues, formState: { errors } } = useForm();
+  const authMode = initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hiddenDebug = {
+      authMode,
+      initDataPresent: Boolean(initData),
+      initDataLength: initData?.length || 0,
+      initDataHasHash: Boolean(initData?.includes('hash=')),
+      telegramUserId: telegramUserId || '',
+      practiceAccessTokenPresent: Boolean(practiceAccessToken),
+      practiceAccessTokenLength: practiceAccessToken?.length || 0,
+      search: window.location.search || '',
+      hash: window.location.hash || '',
+      lastApiDebug,
+      updatedAt: new Date().toISOString(),
+    };
+
+    window.__GIORGIO_DEBUG__ = hiddenDebug;
+    try {
+      sessionStorage.setItem('giorgio_hidden_debug', JSON.stringify(hiddenDebug));
+    } catch (_) {
+      // no-op
+    }
+  }, [authMode, initData, telegramUserId, practiceAccessToken, lastApiDebug]);
 
   const rememberRequest = (label, { method = 'GET', url, params = {}, headers = {} } = {}) => {
     setLastApiDebug(prev => ({
@@ -1495,7 +1523,6 @@ function App() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const minAppointmentDate = practice ? null : today;
-  const authMode = initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato');
 
   // ==================== RENDER ====================
 
