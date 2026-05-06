@@ -1287,6 +1287,7 @@ function App() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const minAppointmentDate = practice ? null : today;
+  const authMode = initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato');
 
   // ==================== RENDER ====================
 
@@ -1295,6 +1296,9 @@ function App() {
     <div className="view-dashboard view-enter">
       <div className="container">
         <h1>🔧 Giorgio</h1>
+        <div className="field-hint" style={{ marginBottom: 12 }}>
+          Auth: <strong>{authMode}</strong>
+        </div>
 
         {/* Stats */}
         <div className="stats-row">
@@ -1629,6 +1633,9 @@ function App() {
           )}
 
           <h1>🔧 Dati Pratica</h1>
+          <div className="field-hint" style={{ marginBottom: 12 }}>
+            Auth: <strong>{authMode}</strong>
+          </div>
 
           {showDraftBanner && (
             <div className="draft-banner">
