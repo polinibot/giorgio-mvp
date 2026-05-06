@@ -1,8 +1,11 @@
 import hmac
 import hashlib
+import logging
 from urllib.parse import parse_qs, unquote, unquote_plus
 from typing import Dict, Optional
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class SecurityService:

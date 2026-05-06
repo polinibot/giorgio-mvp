@@ -1230,7 +1230,7 @@ function App() {
             onClick={seedDemoPractices}
             disabled={seedingDemoPractices}
           >
-            {seedingDemoPractices ? 'Creazione pratiche demo...' : 'Aggiungi 2 pratiche demo complete'}
+            {seedingDemoPractices ? 'Creazione pratiche demo...' : 'Crea 2 pratiche esempio piene'}
           </button>
         </div>
 
