@@ -563,6 +563,7 @@ function App() {
   const [practices, setPractices] = useState([]);
   const [stats, setStats] = useState({ total: 0, this_month: 0, pending_sync: 0 });
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [preSyncByPractice, setPreSyncByPractice] = useState({});
   const [seedingDemoPractices, setSeedingDemoPractices] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState({ officina: false, carrozzeria: false, revisione: false, synced: null });
@@ -822,6 +823,33 @@ function App() {
     return params;
   }, [telegramUserId, practiceAccessToken]);
 
+  const loadPreSyncChecks = useCallback(async (practiceItems) => {
+    const list = Array.isArray(practiceItems) ? practiceItems : [];
+    if (!list.length) {
+      setPreSyncByPractice({});
+      return;
+    }
+
+    const entries = await Promise.all(
+      list.map(async (p) => {
+        try {
+          const res = await axios.get(`${API_BASE_URL}/practices/${p.id}/pre-sync-check`, {
+            params: getAuthParams(),
+            headers: getHeaders(),
+            timeout: 10000,
+          });
+          return [p.id, res.data?.data || null];
+        } catch (_) {
+          return [p.id, null];
+        }
+      })
+    );
+
+    const map = {};
+    entries.forEach(([id, value]) => { map[id] = value; });
+    setPreSyncByPractice(map);
+  }, [getAuthParams, getHeaders]);
+
   // --- Dashboard: Load practices ---
   const loadDashboard = useCallback(async (search = '', filters = {}) => {
     setDashboardLoading(true);
@@ -841,8 +869,10 @@ function App() {
         fetchWithRetry(() => axios.get(`${API_BASE_URL}/api/practices/stats`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 }))
       ]);
 
-      setPractices(practicesRes.data?.data || practicesRes.data || []);
+      const practiceItems = practicesRes.data?.data || practicesRes.data || [];
+      setPractices(practiceItems);
       setStats(statsRes.data?.data || statsRes.data || { total: 0, this_month: 0, pending_sync: 0 });
+      loadPreSyncChecks(practiceItems);
       rememberResponse('dashboard.list');
     } catch (err) {
       rememberError('dashboard.list', err);
@@ -850,7 +880,7 @@ function App() {
     } finally {
       setDashboardLoading(false);
     }
-  }, [getAuthParams, getHeaders, addToast]);
+  }, [getAuthParams, getHeaders, addToast, loadPreSyncChecks]);
 
   const seedDemoPractices = useCallback(async () => {
     if (seedingDemoPractices) return;
@@ -1529,6 +1559,15 @@ function App() {
 
   // ==================== RENDER ====================
 
+  const openDashboard = () => {
+    setCurrentView('dashboard');
+    setNavigationStack([]);
+    setSelectedPracticeId(null);
+    setEditingPractice(null);
+    setDetailData(null);
+    setLoading(false);
+  };
+
   // --- Dashboard View ---
   const renderDashboard = () => (
     <div className="view-dashboard view-enter">
@@ -1614,7 +1653,11 @@ function App() {
           </div>
         ) : (
           <div className="practice-list">
-            {practices.map(p => (
+            {practices.map(p => {
+              const preSync = preSyncByPractice[p.id];
+              const preSyncReady = preSync?.ready === true;
+              const preSyncScore = Number.isFinite(preSync?.score) ? preSync.score : null;
+              return (
               <div
                 key={p.id}
                 className="practice-card"
@@ -1637,13 +1680,20 @@ function App() {
                       {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
                     </span>
                   ))}
+                  {preSync && (
+                    <span className={`pre-sync-pill ${preSyncReady ? 'pre-sync-pill-ready' : 'pre-sync-pill-not-ready'}`}>
+                      {preSyncReady ? 'Ready' : 'Non ready'}
+                      {preSyncScore !== null ? ` • Score ${preSyncScore}/100` : ''}
+                    </span>
+                  )}
                 </div>
                 <div className="practice-card-footer">
                   <span className="practice-card-date">📅 {formatDate(p.appointment_date || p.created_at)}</span>
                   <span className="practice-card-open">Apri dettagli →</span>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -1802,14 +1852,6 @@ function App() {
             <div className="photo-view-note">In modalità visualizzazione non è possibile aggiungere o eliminare foto. Usa Modifica pratica.</div>
           </div>
 
-          {/* Notes */}
-          {(practice.internal_notes || practice.notes) && (
-            <div className="section">
-              <h2>📝 Note</h2>
-              <p className="detail-notes">{practice.internal_notes || practice.notes}</p>
-            </div>
-          )}
-
           {/* Actions */}
           <div className="detail-actions">
             <button
@@ -1875,7 +1917,7 @@ function App() {
             <button className="back-button" onClick={() => { navigateBack(); resetFormForNew(); }} type="button">← Indietro</button>
           )}
           {(currentView === 'form' && startedFromBot) && (
-            <button className="back-button" onClick={() => { setCurrentView('dashboard'); setNavigationStack([]); setStartedFromBot(false); setLoading(false); }} type="button">← Dashboard</button>
+            <button className="back-button" onClick={() => { openDashboard(); setStartedFromBot(false); }} type="button">← Dashboard</button>
           )}
 
           <h1>🔧 Dati Pratica</h1>
@@ -2338,6 +2380,16 @@ function App() {
       {currentView === 'dashboard' && renderDashboard()}
       {currentView === 'detail' && renderDetail()}
       {currentView === 'form' && renderForm()}
+      {typeof window !== 'undefined' && window.Telegram?.WebApp && currentView !== 'dashboard' && (
+        <button
+          type="button"
+          className="telegram-dashboard-fab"
+          onClick={openDashboard}
+          aria-label="Apri dashboard"
+        >
+          📋 Dashboard
+        </button>
+      )}
     </div>
   );
 }

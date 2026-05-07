@@ -1,13 +1,38 @@
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+import re
 from sqlalchemy.orm import Session
 from database_sqlite import Practice, PracticeSection, PracticePart, PracticePhoto
-from models import PracticeModel
 from telegram_utils import _parse_description_rows
 
 
 class AutomationService:
     """Servizio per preparare dati per automation futura del gestionale"""
+
+    @staticmethod
+    def _ensure_str(value: Any) -> str:
+        return str(value).strip() if value is not None else ""
+
+    @staticmethod
+    def _enum_value(value: Any) -> str:
+        return value.value if hasattr(value, "value") else str(value)
+
+    @staticmethod
+    def _normalize_phone(phone: Any) -> str:
+        raw = AutomationService._ensure_str(phone)
+        if not raw:
+            return ""
+        cleaned = re.sub(r"[^\d+]", "", raw)
+        if cleaned.startswith("00"):
+            cleaned = f"+{cleaned[2:]}"
+        if cleaned.startswith("3") and len(cleaned) in {9, 10}:
+            cleaned = f"+39{cleaned}"
+        return cleaned
+
+    @staticmethod
+    def _normalize_plate(plate: Any) -> str:
+        raw = AutomationService._ensure_str(plate).upper()
+        return re.sub(r"[^A-Z0-9]", "", raw)
     
     @staticmethod
     def prepare_automation_payload(practice_id: int, db: Session) -> Dict[str, Any]:
@@ -39,11 +64,11 @@ class AutomationService:
             
             # Dati cliente
             "customer": {
-                "name": practice.customer_name,
-                "phone": practice.phone,
-                "type": practice.customer_type.value,
+                "name": AutomationService._ensure_str(practice.customer_name),
+                "phone": AutomationService._normalize_phone(practice.phone),
+                "type": AutomationService._enum_value(practice.customer_type),
                 "billing_complete": not practice.billing_to_complete,
-                "plate": practice.plate_confirmed
+                "plate": AutomationService._normalize_plate(practice.plate_confirmed)
             },
             
             # Dati appuntamento (per trovare slot agenda)
@@ -51,11 +76,11 @@ class AutomationService:
                 "date": practice.appointment_date.strftime("%Y-%m-%d"),
                 "time": practice.appointment_time,  # HH:MM con minuti 00 o 30
                 "slot_duration": 30,  # minuti
-                "practice_type": practice.practice_type.value
+                "practice_type": AutomationService._enum_value(practice.practice_type)
             },
             
             # Contesti operativi
-            "contexts": [context.value for context in practice.contexts_list],
+            "contexts": [AutomationService._enum_value(context) for context in practice.contexts_list],
             
             # Foto per riferimento
             "photos": [
@@ -88,8 +113,9 @@ class AutomationService:
         for section in sections:
             context_parts = [part for part in parts if part.context == section.context]
             
-            payload["sections"][section.context.value] = {
-                "context": section.context.value,
+            section_context = AutomationService._enum_value(section.context)
+            payload["sections"][section_context] = {
+                "context": section_context,
                 "description_rows": _parse_description_rows(section.description_rows),
                 "man_hours": section.man_hours,
                 "mac_hours": section.mac_hours,
@@ -109,8 +135,49 @@ class AutomationService:
         
         # Aggiunge istruzioni specifiche per automation
         payload["automation_instructions"] = AutomationService._build_automation_instructions(payload)
-        
+
         return payload
+
+    @staticmethod
+    def map_payload_to_management(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Mapping finale payload -> campi gestionali (parte 2)."""
+        customer = payload.get("customer") or {}
+        appointment = payload.get("appointment") or {}
+        sections = payload.get("sections") or {}
+
+        management_sections = []
+        for context_key, section_data in sections.items():
+            management_sections.append({
+                "reparto": context_key,
+                "descrizioni": section_data.get("description_rows") or [],
+                "ore_man": section_data.get("man_hours"),
+                "ore_mac": section_data.get("mac_hours"),
+                "materiali_euro": section_data.get("materials_amount"),
+                "smaltimento_applica": (section_data.get("waste") or {}).get("apply"),
+                "smaltimento_percentuale": (section_data.get("waste") or {}).get("percentage"),
+                "ricambi": section_data.get("parts") or [],
+            })
+
+        return {
+            "anagrafica": {
+                "cliente_nome": customer.get("name", ""),
+                "cliente_telefono": customer.get("phone", ""),
+                "cliente_tipo": customer.get("type", ""),
+                "targa": customer.get("plate", ""),
+            },
+            "agenda": {
+                "data": appointment.get("date"),
+                "ora": appointment.get("time"),
+                "durata_minuti": appointment.get("slot_duration", 30),
+                "tipo_pratica": appointment.get("practice_type"),
+            },
+            "lavorazioni": management_sections,
+            "note_interne": payload.get("internal_notes"),
+            "meta": {
+                "practice_id": payload.get("practice_id"),
+                "external_id": payload.get("external_id"),
+            },
+        }
     
     @staticmethod
     def _build_automation_instructions(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -234,19 +301,72 @@ class AutomationService:
                 validation["ready"] = False
         
         # Controlli specifici
-        if payload.get("customer", {}).get("phone") == "":
+        customer = payload.get("customer") or {}
+        appointment = payload.get("appointment") or {}
+
+        if not str(customer.get("phone", "")).strip():
             validation["errors"].append("Telefono cliente obbligatorio")
             validation["ready"] = False
-        
+        if not str(customer.get("name", "")).strip():
+            validation["errors"].append("Nome cliente obbligatorio")
+            validation["ready"] = False
+        if not str(customer.get("plate", "")).strip():
+            validation["errors"].append("Targa obbligatoria")
+            validation["ready"] = False
+        if not str(appointment.get("date", "")).strip() or not str(appointment.get("time", "")).strip():
+            validation["errors"].append("Data e ora appuntamento obbligatorie")
+            validation["ready"] = False
+
+        time_value = str(appointment.get("time", "")).strip()
+        if time_value and (len(time_value) != 5 or time_value[2] != ":" or time_value[3:] not in {"00", "30"}):
+            validation["errors"].append("Orario non valido: sono ammessi solo slot da 30 minuti")
+            validation["ready"] = False
+
         if not payload.get("sections"):
             validation["errors"].append("Almeno una sezione lavoro richiesta")
             validation["ready"] = False
-        
+        else:
+            for context, section in payload["sections"].items():
+                rows = section.get("description_rows") or []
+                if not isinstance(rows, list) or not any(str(row).strip() for row in rows):
+                    validation["errors"].append(f"Sezione '{context}' senza righe descrittive")
+                    validation["ready"] = False
+
         # Controlli avvisi
-        if payload.get("customer", {}).get("billing_complete") == False:
+        if customer.get("billing_complete") is False:
             validation["warnings"].append("Dati fatturazione incompleti")
         
         if payload.get("internal_notes"):
             validation["warnings"].append("Presenti note interne da verificare")
-        
+
         return validation
+
+    @staticmethod
+    def pre_sync_check(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Controllo pre-sync con score e priorita errori per UI."""
+        readiness = AutomationService.validate_automation_readiness(payload)
+
+        issues: List[Dict[str, Any]] = []
+        for msg in readiness["errors"]:
+            issues.append({
+                "type": "error",
+                "priority": 1,
+                "blocking": True,
+                "message": msg,
+            })
+        for msg in readiness["warnings"]:
+            issues.append({
+                "type": "warning",
+                "priority": 2,
+                "blocking": False,
+                "message": msg,
+            })
+
+        total_penalty = len(readiness["errors"]) * 25 + len(readiness["warnings"]) * 8
+        score = max(0, 100 - total_penalty)
+
+        return {
+            "ready": readiness["ready"],
+            "score": score,
+            "issues": sorted(issues, key=lambda i: (i["priority"], i["type"])),
+        }

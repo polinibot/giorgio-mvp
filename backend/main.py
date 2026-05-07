@@ -1139,6 +1139,62 @@ async def get_automation_payload(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore export automation")
 
 
+@app.get("/practices/{practice_id}/pre-sync-check")
+@limiter.limit("30/minute")
+async def pre_sync_check(
+    request: Request,
+    practice_id: int,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Controllo pre-sync con score/priorita errori per UI."""
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+        Practice.status != PracticeStatus.DELETED,
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    try:
+        from automation_service import AutomationService
+
+        payload = AutomationService.prepare_automation_payload(practice_id, db)
+        check = AutomationService.pre_sync_check(payload)
+        return APIResponse(success=True, data=check)
+    except Exception as e:
+        logger.error("Error running pre-sync-check for practice %d: %s", practice_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore pre-sync-check")
+
+
+@app.get("/practices/{practice_id}/management-mapping")
+@limiter.limit("30/minute")
+async def get_management_mapping(
+    request: Request,
+    practice_id: int,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Restituisce mapping finale payload -> campi gestionali pronto all'uso."""
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+        Practice.status != PracticeStatus.DELETED,
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    try:
+        from automation_service import AutomationService
+
+        payload = AutomationService.prepare_automation_payload(practice_id, db)
+        mapped = AutomationService.map_payload_to_management(payload)
+        return APIResponse(success=True, data={"mapping": mapped})
+    except Exception as e:
+        logger.error("Error building management mapping for practice %d: %s", practice_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore mapping gestionale")
+
+
 # --- Sections ---
 
 @app.post("/practices/{practice_id}/sections")
