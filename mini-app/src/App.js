@@ -578,8 +578,12 @@ const extractPracticeAccessTokenFromLocation = () => {
   return '';
 };
 
+const isDebugUiEnabled = () => (
+  typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug_ui') === '1'
+);
+
 function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, lastApiDebug }) {
-  const showDebugUi = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug_ui') === '1';
+  const showDebugUi = isDebugUiEnabled();
   if (!showDebugUi) return null;
 
   const search = typeof window !== 'undefined' ? window.location.search : '';
@@ -682,6 +686,7 @@ function App() {
 
   const { register, control, handleSubmit, setValue, watch, getValues, formState: { errors } } = useForm();
   const authMode = browserPreviewMode ? 'preview browser' : (initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato'));
+  const showDeveloperUi = isDebugUiEnabled();
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1180,7 +1185,7 @@ function App() {
         if (String(practiceData.id) !== String(id)) return prev;
         return { ...prev, practice: { ...practiceData, synced: nextSynced } };
       });
-      addToast(nextSynced ? 'Preview: pratica segnata come sincronizzata' : 'Preview: pratica segnata come non sincronizzata', 'success');
+      addToast(nextSynced ? 'Pratica segnata come completata' : 'Pratica riaperta', 'success');
       return;
     }
 
@@ -1507,7 +1512,7 @@ function App() {
           setNavigationStack([]);
           setSelectedPracticeId(null);
           setDetailData(null);
-          addToast('Preview: pratica rimossa localmente', 'success');
+          addToast('Pratica rimossa', 'success');
           return;
         }
 
@@ -1656,7 +1661,7 @@ function App() {
             : [previewItem, ...prev]
         ));
         clearDraft();
-        addToast(practice ? 'Preview: pratica aggiornata localmente' : 'Preview: pratica creata localmente', 'success');
+        addToast(practice ? 'Pratica aggiornata' : 'Pratica creata', 'success');
 
         if (selectedPracticeId) {
           setSelectedPracticeId(previewId);
@@ -1791,13 +1796,17 @@ function App() {
     <div className="view-dashboard view-enter">
       <div className="container">
         <h1>🔧 Giorgio</h1>
-        <div className="field-hint" style={{ marginBottom: 12 }}>
-          Auth: <strong>{authMode}</strong>
-        </div>
-        {browserPreviewMode && (
-          <div className="preview-banner">
-            Modalita anteprima browser: dati demo/locali, nessun salvataggio reale nel gestionale.
-          </div>
+        {showDeveloperUi && (
+          <>
+            <div className="field-hint" style={{ marginBottom: 12 }}>
+              Auth: <strong>{authMode}</strong>
+            </div>
+            {browserPreviewMode && (
+              <div className="preview-banner">
+                Modalita anteprima browser: dati demo/locali, nessun salvataggio reale nel gestionale.
+              </div>
+            )}
+          </>
         )}
         <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} practiceAccessToken={practiceAccessToken} lastApiDebug={lastApiDebug} />
 
@@ -1811,10 +1820,12 @@ function App() {
             <div className="stat-number">{stats.this_month}</div>
             <div className="stat-label">Questo mese</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-number">{stats.pending_sync}</div>
-            <div className="stat-label">Da sincr.</div>
-          </div>
+          {showDeveloperUi && (
+            <div className="stat-card">
+              <div className="stat-number">{stats.pending_sync}</div>
+              <div className="stat-label">Da sincr.</div>
+            </div>
+          )}
         </div>
 
         {/* Search */}
@@ -1845,27 +1856,31 @@ function App() {
               {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
             </button>
           ))}
-          <button
-            type="button"
-            className={`filter-chip ${activeFilters.synced !== null ? 'filter-chip-active' : ''}`}
-            onClick={() => toggleFilter('synced')}
-          >
-            {activeFilters.synced === null ? 'Sincr.' : activeFilters.synced ? '🟢 Sincr.' : '🔴 Non sincr.'}
-          </button>
+          {showDeveloperUi && (
+            <button
+              type="button"
+              className={`filter-chip ${activeFilters.synced !== null ? 'filter-chip-active' : ''}`}
+              onClick={() => toggleFilter('synced')}
+            >
+              {activeFilters.synced === null ? 'Sincr.' : activeFilters.synced ? '🟢 Sincr.' : '🔴 Non sincr.'}
+            </button>
+          )}
         </div>
 
-        <div className="detail-actions" style={{ marginBottom: 12 }}>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={seedDemoPractices}
-            disabled={seedingDemoPractices}
-          >
-            {browserPreviewMode
-              ? 'Ricarica pratiche demo locali'
-              : (seedingDemoPractices ? 'Creazione pratiche demo...' : `Crea ${DASHBOARD_DEMO_PRACTICES.length} pratiche esempio piene`)}
-          </button>
-        </div>
+        {showDeveloperUi && (
+          <div className="detail-actions" style={{ marginBottom: 12 }}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={seedDemoPractices}
+              disabled={seedingDemoPractices}
+            >
+              {browserPreviewMode
+                ? 'Ricarica pratiche demo locali'
+                : (seedingDemoPractices ? 'Creazione pratiche demo...' : `Crea ${DASHBOARD_DEMO_PRACTICES.length} pratiche esempio piene`)}
+            </button>
+          </div>
+        )}
 
         {/* Practice list */}
         {dashboardLoading ? (
@@ -1897,7 +1912,7 @@ function App() {
                 </div>
                 <div className="practice-card-customer-row">
                   <div className="practice-card-customer">{p.customer_name || '—'}</div>
-                  <div className="practice-card-id">#{p.id}</div>
+                  {showDeveloperUi && <div className="practice-card-id">#{p.id}</div>}
                 </div>
                 <div className="practice-card-badges">
                   {normalizeContexts(p.contexts).map(ctx => (
@@ -1905,7 +1920,7 @@ function App() {
                       {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
                     </span>
                   ))}
-                  {preSync && (
+                  {showDeveloperUi && preSync && (
                     <span className={`pre-sync-pill ${preSyncReady ? 'pre-sync-pill-ready' : 'pre-sync-pill-not-ready'}`}>
                       {preSyncReady ? 'Ready' : 'Non ready'}
                       {preSyncScore !== null ? ` • Score ${preSyncScore}/100` : ''}
@@ -1942,7 +1957,7 @@ function App() {
         <div className="view-detail view-enter">
           <div className="container">
             <button className="back-button" onClick={navigateBack} type="button">← Indietro</button>
-            {browserPreviewMode && (
+            {showDeveloperUi && browserPreviewMode && (
               <div className="preview-banner">
                 Anteprima locale: puoi provare la logica, ma le modifiche non salvano dati reali.
               </div>
@@ -1971,7 +1986,7 @@ function App() {
       <div className="view-detail view-enter">
         <div className="container">
           <button className="back-button" onClick={navigateBack} type="button">← Indietro</button>
-          {browserPreviewMode && (
+          {showDeveloperUi && browserPreviewMode && (
             <div className="preview-banner">
               Anteprima locale: puoi provare la logica, ma le modifiche non salvano dati reali.
             </div>
@@ -1992,10 +2007,12 @@ function App() {
                 <span className="detail-meta-label">Tipo cliente</span>
                 <span className="detail-meta-value">{practice.customer_type || '—'}</span>
               </div>
-              <div className="detail-meta-item">
-                <span className="detail-meta-label">Stato pratica</span>
-                <span className="detail-meta-value">{practice.status || '—'}</span>
-              </div>
+              {showDeveloperUi && (
+                <div className="detail-meta-item">
+                  <span className="detail-meta-label">Stato pratica</span>
+                  <span className="detail-meta-value">{practice.status || '—'}</span>
+                </div>
+              )}
               <div className="detail-meta-item">
                 <span className="detail-meta-label">Contesti</span>
                 <span className="detail-meta-value">{contexts.length ? contexts.join(', ') : '—'}</span>
@@ -2004,13 +2021,15 @@ function App() {
           </div>
 
           {/* Sync status */}
-          <div className="section detail-sync-section" onClick={() => toggleSync(practice.id, practice.synced)}>
-            <div className="detail-sync-label">Stato sincronizzazione</div>
-            <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
-              <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
-              {practice.synced ? 'Sincronizzata' : 'Non sincronizzata'}
+          {showDeveloperUi && (
+            <div className="section detail-sync-section" onClick={() => toggleSync(practice.id, practice.synced)}>
+              <div className="detail-sync-label">Stato sincronizzazione</div>
+              <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
+                <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
+                {practice.synced ? 'Sincronizzata' : 'Non sincronizzata'}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Sections */}
           {dSections.length > 0 && (
@@ -2156,13 +2175,17 @@ function App() {
           )}
 
           <h1>🔧 Dati Pratica</h1>
-          <div className="field-hint" style={{ marginBottom: 12 }}>
-            Auth: <strong>{authMode}</strong>
-          </div>
-          {browserPreviewMode && (
-            <div className="preview-banner">
-              Anteprima locale: questo form simula il salvataggio senza inviare dati al backend.
-            </div>
+          {showDeveloperUi && (
+            <>
+              <div className="field-hint" style={{ marginBottom: 12 }}>
+                Auth: <strong>{authMode}</strong>
+              </div>
+              {browserPreviewMode && (
+                <div className="preview-banner">
+                  Anteprima locale: questo form simula il salvataggio senza inviare dati al backend.
+                </div>
+              )}
+            </>
           )}
           <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} practiceAccessToken={practiceAccessToken} lastApiDebug={lastApiDebug} />
 
