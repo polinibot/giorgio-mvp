@@ -719,6 +719,24 @@ function App() {
     }
   }, [currentView, navigateBack]);
 
+  // --- Telegram MainButton (fixed in-app CTA) ---
+  useEffect(() => {
+    if (!window.Telegram?.WebApp?.MainButton) return;
+    const mb = window.Telegram.WebApp.MainButton;
+    const handler = () => openDashboard();
+
+    mb.offClick(handler);
+    if (currentView !== 'dashboard') {
+      mb.setText('📋 Dashboard');
+      mb.show();
+      mb.onClick(handler);
+    } else {
+      mb.hide();
+    }
+
+    return () => mb.offClick(handler);
+  }, [currentView]);
+
   // --- Slow request indicator ---
   const startSlowTimer = useCallback(() => {
     slowTimerRef.current = setTimeout(() => setSlowRequest(true), 10000);
@@ -2380,7 +2398,7 @@ function App() {
       {currentView === 'dashboard' && renderDashboard()}
       {currentView === 'detail' && renderDetail()}
       {currentView === 'form' && renderForm()}
-      {typeof window !== 'undefined' && window.Telegram?.WebApp && currentView !== 'dashboard' && (
+      {typeof window !== 'undefined' && !window.Telegram?.WebApp && currentView !== 'dashboard' && (
         <button
           type="button"
           className="telegram-dashboard-fab"
