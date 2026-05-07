@@ -617,10 +617,12 @@ function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, l
 
 function App() {
   const standaloneBrowserMode = typeof window !== 'undefined' && !window.Telegram?.WebApp;
+  const telegramRuntimeInitData = typeof window !== 'undefined' ? (window.Telegram?.WebApp?.initData || '') : '';
   const browserPreviewMode = standaloneBrowserMode
+    || (!telegramRuntimeInitData
     && !extractTelegramInitDataFromLocation()
     && !extractTelegramUserIdFromLocation()
-    && !extractPracticeAccessTokenFromLocation();
+    && !extractPracticeAccessTokenFromLocation());
 
   // Navigation state
   const [currentView, setCurrentView] = useState('dashboard');
@@ -790,6 +792,7 @@ function App() {
 
   // --- Telegram BackButton ---
   useEffect(() => {
+    if (browserPreviewMode) return;
     if (!window.Telegram?.WebApp?.BackButton) return;
     const bb = window.Telegram.WebApp.BackButton;
     if (currentView === 'dashboard') {
@@ -800,10 +803,11 @@ function App() {
       bb.onClick(handler);
       return () => bb.offClick(handler);
     }
-  }, [currentView, navigateBack]);
+  }, [browserPreviewMode, currentView, navigateBack]);
 
   // --- Telegram MainButton (fixed in-app CTA) ---
   useEffect(() => {
+    if (browserPreviewMode) return;
     if (!window.Telegram?.WebApp?.MainButton) return;
     const mb = window.Telegram.WebApp.MainButton;
     const handler = () => openDashboard();
@@ -818,7 +822,7 @@ function App() {
     }
 
     return () => mb.offClick(handler);
-  }, [currentView]);
+  }, [browserPreviewMode, currentView]);
 
   // --- Slow request indicator ---
   const startSlowTimer = useCallback(() => {
@@ -1035,22 +1039,22 @@ function App() {
   // Load dashboard on view mount
   useEffect(() => {
     if (!bootstrapped) return;
-    if (currentView === 'dashboard' && (initData || telegramUserId || standaloneBrowserMode)) {
+    if (currentView === 'dashboard' && (initData || telegramUserId || standaloneBrowserMode || browserPreviewMode)) {
       loadDashboard(searchQuery, activeFilters);
     }
-  }, [bootstrapped, currentView, initData, telegramUserId, standaloneBrowserMode, loadDashboard, searchQuery, activeFilters]);
+  }, [bootstrapped, currentView, initData, telegramUserId, standaloneBrowserMode, browserPreviewMode, loadDashboard, searchQuery, activeFilters]);
 
   // Debounced search
   useEffect(() => {
     if (!bootstrapped) return;
     if (currentView !== 'dashboard') return;
-    if (!initData && !telegramUserId && !standaloneBrowserMode) return;
+    if (!initData && !telegramUserId && !standaloneBrowserMode && !browserPreviewMode) return;
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(() => {
       loadDashboard(searchQuery, activeFilters);
     }, 300);
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [bootstrapped, currentView, initData, telegramUserId, standaloneBrowserMode, searchQuery, activeFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bootstrapped, currentView, initData, telegramUserId, standaloneBrowserMode, browserPreviewMode, searchQuery, activeFilters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Detail: Load practice ---
   const loadDetail = useCallback(async (id) => {
@@ -2616,7 +2620,7 @@ function App() {
       {currentView === 'dashboard' && renderDashboard()}
       {currentView === 'detail' && renderDetail()}
       {currentView === 'form' && renderForm()}
-      {typeof window !== 'undefined' && !window.Telegram?.WebApp && currentView !== 'dashboard' && (
+      {typeof window !== 'undefined' && (!window.Telegram?.WebApp || browserPreviewMode) && currentView !== 'dashboard' && (
         <button
           type="button"
           className="telegram-dashboard-fab"
