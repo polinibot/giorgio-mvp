@@ -57,6 +57,22 @@ class TelegramBot:
             "Ti faccio confermare la targa e poi apri direttamente la Mini App."
         )
 
+    @staticmethod
+    def _dashboard_url(user_id: int) -> str:
+        return f"https://giorgio-mvp-nine.vercel.app?user_id={user_id}"
+
+    def _dashboard_keyboard(self, user_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="📋 Apri Dashboard",
+                        web_app=WebAppInfo(url=self._dashboard_url(user_id)),
+                    )
+                ]
+            ]
+        )
+
     def setup_handlers(self):
         """Configura il flusso Telegram minimale: foto -> targa -> Mini App."""
 
@@ -66,7 +82,21 @@ class TelegramBot:
                 await message.answer("⚠️ Accesso non autorizzato")
                 return
 
-            await message.answer(self._base_start_message())
+            await message.answer(
+                self._base_start_message(),
+                reply_markup=self._dashboard_keyboard(message.from_user.id),
+            )
+
+        @self.dp.message(Command("dashboard"))
+        async def cmd_dashboard(message: Message):
+            if not SecurityService.is_user_whitelisted(message.from_user.id):
+                await message.answer("⚠️ Accesso non autorizzato")
+                return
+
+            await message.answer(
+                "Apri la dashboard pratiche:",
+                reply_markup=self._dashboard_keyboard(message.from_user.id),
+            )
 
         @self.dp.message(F.photo)
         async def handle_photo(message: Message):
@@ -195,7 +225,10 @@ class TelegramBot:
                 finally:
                     db.close()
             else:
-                await message.answer(self._base_start_message())
+                await message.answer(
+                    self._base_start_message(),
+                    reply_markup=self._dashboard_keyboard(message.from_user.id),
+                )
 
     def _save_or_update_draft_practice(
         self,
