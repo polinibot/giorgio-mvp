@@ -187,6 +187,18 @@ h2 {
   font-weight: 500;
 }
 
+.preview-banner {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(251, 191, 36, 0.34);
+  border-radius: var(--radius-card);
+  background: linear-gradient(135deg, rgba(251, 191, 36, 0.13), rgba(79, 140, 255, 0.08));
+  color: #fde68a;
+  font-size: 13px;
+  line-height: 1.45;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
 .skeleton-stat {
   min-height: 70px;
   display: flex;

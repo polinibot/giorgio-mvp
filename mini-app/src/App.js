@@ -442,6 +442,82 @@ const normalizeContexts = (contexts) => {
   return [];
 };
 
+const BROWSER_PREVIEW_PRACTICES = DASHBOARD_DEMO_PRACTICES.map((item, index) => {
+  const id = `preview-${index + 1}`;
+  return {
+    id,
+    ...item.practice,
+    plate: item.practice.plate_confirmed,
+    synced: false,
+    status: 'preview',
+    created_at: item.practice.appointment_date,
+    sections: item.sections,
+    parts: item.parts,
+    photos: [],
+    _preview: true,
+  };
+});
+
+const buildPreviewStats = (items) => ({
+  total: items.length,
+  this_month: items.length,
+  pending_sync: items.filter(p => !p.synced).length,
+});
+
+const buildPreviewPreSyncMap = (items) => {
+  const map = {};
+  items.forEach((p) => {
+    const missing = [
+      ['plate', p.plate_confirmed || p.plate],
+      ['phone', p.phone],
+      ['customer_name', p.customer_name],
+      ['appointment_date', p.appointment_date],
+      ['appointment_time', p.appointment_time],
+      ['contexts', normalizeContexts(p.contexts).length],
+    ].filter(([, value]) => !value);
+    map[p.id] = {
+      ready: missing.length === 0,
+      score: Math.max(0, 100 - (missing.length * 18)),
+      errors: missing.map(([field]) => ({ field, priority: 1, message: `${field} mancante` })),
+    };
+  });
+  return map;
+};
+
+const filterPreviewPractices = (items, search = '', filters = {}) => {
+  const query = (search || '').trim().toLowerCase();
+  const contextFilters = Object.entries(filters)
+    .filter(([k, v]) => v === true && k !== 'synced')
+    .map(([k]) => k);
+
+  return items.filter((p) => {
+    if (filters.synced === true && !p.synced) return false;
+    if (filters.synced === false && p.synced) return false;
+
+    const contexts = normalizeContexts(p.contexts);
+    if (contextFilters.length && !contextFilters.some(ctx => contexts.includes(ctx))) return false;
+
+    if (!query) return true;
+    const haystack = [
+      p.plate,
+      p.plate_confirmed,
+      p.customer_name,
+      p.phone,
+      p.practice_type,
+      p.internal_notes,
+      ...contexts,
+      ...(p.sections || []).flatMap(s => [s.context, s.notes, ...(s.description_rows || [])]),
+      ...(p.parts || []).flatMap(part => [part.name, part.quantity]),
+    ].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(query);
+  });
+};
+
+const buildPreviewDetail = (p) => {
+  const { sections = [], parts = [], photos = [], ...practice } = p;
+  return { practice, sections, parts, photos };
+};
+
 const extractTelegramInitDataFromLocation = () => {
   try {
     const searchParams = new URLSearchParams(window.location.search);
@@ -541,6 +617,10 @@ function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, l
 
 function App() {
   const standaloneBrowserMode = typeof window !== 'undefined' && !window.Telegram?.WebApp;
+  const browserPreviewMode = standaloneBrowserMode
+    && !extractTelegramInitDataFromLocation()
+    && !extractTelegramUserIdFromLocation()
+    && !extractPracticeAccessTokenFromLocation();
 
   // Navigation state
   const [currentView, setCurrentView] = useState('dashboard');
@@ -565,6 +645,7 @@ function App() {
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [preSyncByPractice, setPreSyncByPractice] = useState({});
   const [seedingDemoPractices, setSeedingDemoPractices] = useState(false);
+  const [previewPractices, setPreviewPractices] = useState(BROWSER_PREVIEW_PRACTICES);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState({ officina: false, carrozzeria: false, revisione: false, synced: null });
 
@@ -595,14 +676,16 @@ function App() {
   const toastIdRef = useRef(0);
   const formRef = useRef(null);
   const searchTimerRef = useRef(null);
+  const previewSeqRef = useRef(BROWSER_PREVIEW_PRACTICES.length + 1);
 
   const { register, control, handleSubmit, setValue, watch, getValues, formState: { errors } } = useForm();
-  const authMode = initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato');
+  const authMode = browserPreviewMode ? 'preview browser' : (initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato'));
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const hiddenDebug = {
       authMode,
+      browserPreviewMode,
       initDataPresent: Boolean(initData),
       initDataLength: initData?.length || 0,
       initDataHasHash: Boolean(initData?.includes('hash=')),
@@ -621,7 +704,7 @@ function App() {
     } catch (_) {
       // no-op
     }
-  }, [authMode, initData, telegramUserId, practiceAccessToken, lastApiDebug]);
+  }, [authMode, browserPreviewMode, initData, telegramUserId, practiceAccessToken, lastApiDebug]);
 
   const rememberRequest = (label, { method = 'GET', url, params = {}, headers = {} } = {}) => {
     setLastApiDebug(prev => ({
@@ -871,6 +954,20 @@ function App() {
   // --- Dashboard: Load practices ---
   const loadDashboard = useCallback(async (search = '', filters = {}) => {
     setDashboardLoading(true);
+    if (browserPreviewMode) {
+      const previewItems = filterPreviewPractices(previewPractices, search, filters);
+      setPractices(previewItems);
+      setStats(buildPreviewStats(previewPractices));
+      setPreSyncByPractice(buildPreviewPreSyncMap(previewItems));
+      rememberResponse('dashboard.preview', {
+        method: 'LOCAL',
+        url: 'browser-preview',
+        params: { search, filters },
+      });
+      setDashboardLoading(false);
+      return;
+    }
+
     try {
       const params = {};
       if (search) params.search = search;
@@ -898,10 +995,21 @@ function App() {
     } finally {
       setDashboardLoading(false);
     }
-  }, [getAuthParams, getHeaders, addToast, loadPreSyncChecks]);
+  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, loadPreSyncChecks]);
 
   const seedDemoPractices = useCallback(async () => {
     if (seedingDemoPractices) return;
+    if (browserPreviewMode) {
+      const resetItems = BROWSER_PREVIEW_PRACTICES;
+      const visibleItems = filterPreviewPractices(resetItems, searchQuery, activeFilters);
+      setPreviewPractices(resetItems);
+      setPractices(visibleItems);
+      setStats(buildPreviewStats(resetItems));
+      setPreSyncByPractice(buildPreviewPreSyncMap(visibleItems));
+      addToast('Preview ripristinata con pratiche demo locali', 'success');
+      return;
+    }
+
     setSeedingDemoPractices(true);
     try {
       await Promise.all(
@@ -922,7 +1030,7 @@ function App() {
     } finally {
       setSeedingDemoPractices(false);
     }
-  }, [seedingDemoPractices, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
+  }, [seedingDemoPractices, browserPreviewMode, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
 
   // Load dashboard on view mount
   useEffect(() => {
@@ -949,6 +1057,18 @@ function App() {
     if (!id) return;
     setDetailLoading(true);
     setDetailData(null);
+    if (browserPreviewMode) {
+      const previewPractice = previewPractices.find(p => String(p.id) === String(id));
+      if (previewPractice) {
+        setDetailData(buildPreviewDetail(previewPractice));
+      } else {
+        addToast('Pratica preview non trovata', 'error');
+        navigateBack();
+      }
+      setDetailLoading(false);
+      return;
+    }
+
     try {
       rememberRequest('practice.detail', { method: 'GET', url: `${API_BASE_URL}/api/practices/${id}`, params: getAuthParams(), headers: getHeaders() });
       const res = await fetchWithRetry(() =>
@@ -963,7 +1083,7 @@ function App() {
     } finally {
       setDetailLoading(false);
     }
-  }, [getAuthParams, getHeaders, addToast, navigateBack]);
+  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, navigateBack]);
 
   useEffect(() => {
     if (currentView === 'detail' && selectedPracticeId) {
@@ -1046,6 +1166,20 @@ function App() {
 
   // --- Toggle sync ---
   const toggleSync = useCallback(async (id, currentSynced) => {
+    if (browserPreviewMode) {
+      const nextSynced = !currentSynced;
+      setPreviewPractices(prev => prev.map(p => String(p.id) === String(id) ? { ...p, synced: nextSynced } : p));
+      setPractices(prev => prev.map(p => String(p.id) === String(id) ? { ...p, synced: nextSynced } : p));
+      setDetailData(prev => {
+        if (!prev) return prev;
+        const practiceData = prev.practice || prev;
+        if (String(practiceData.id) !== String(id)) return prev;
+        return { ...prev, practice: { ...practiceData, synced: nextSynced } };
+      });
+      addToast(nextSynced ? 'Preview: pratica segnata come sincronizzata' : 'Preview: pratica segnata come non sincronizzata', 'success');
+      return;
+    }
+
     try {
       rememberRequest('practice.sync', { method: 'PATCH', url: `${API_BASE_URL}/api/practices/${id}/sync`, params: getAuthParams(), headers: getHeaders() });
       await fetchWithRetry(() =>
@@ -1059,7 +1193,7 @@ function App() {
       rememberError('practice.sync', err);
       addToast(classifyError(err), 'error');
     }
-  }, [getAuthParams, getHeaders, addToast]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast]);
 
   // --- Form: Load practice for editing ---
   const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '', currentTelegramUserId = '', currentPracticeAccessToken = '') => {
@@ -1358,6 +1492,21 @@ function App() {
       message: 'Questa operazione non è reversibile. Vuoi procedere?',
       onConfirm: async () => {
         setConfirmModal(null);
+        if (browserPreviewMode) {
+          const nextPreviewPractices = previewPractices.filter(pr => String(pr.id) !== String(p.id));
+          const visibleItems = filterPreviewPractices(nextPreviewPractices, searchQuery, activeFilters);
+          setPreviewPractices(nextPreviewPractices);
+          setPractices(visibleItems);
+          setStats(buildPreviewStats(nextPreviewPractices));
+          setPreSyncByPractice(buildPreviewPreSyncMap(visibleItems));
+          setCurrentView('dashboard');
+          setNavigationStack([]);
+          setSelectedPracticeId(null);
+          setDetailData(null);
+          addToast('Preview: pratica rimossa localmente', 'success');
+          return;
+        }
+
         setSaving(true);
         startSlowTimer();
         try {
@@ -1473,6 +1622,53 @@ function App() {
       }
 
       const payload = { practice: practicePayload, sections: sectionPayloads, parts: partPayloads };
+
+      if (browserPreviewMode) {
+        const previewId = practice?.id || `preview-${previewSeqRef.current++}`;
+        const previewPhotos = [
+          ...existingPhotos,
+          ...formPhotos.map((item, index) => ({
+            id: `${previewId}-photo-${Date.now()}-${index}`,
+            url: item.preview,
+            thumbnail: item.preview,
+          })),
+        ];
+        const previewItem = {
+          id: previewId,
+          ...practicePayload,
+          plate: practicePayload.plate_confirmed,
+          synced: practice?.synced || false,
+          status: 'preview',
+          created_at: practice?.created_at || new Date().toISOString(),
+          sections: sectionPayloads,
+          parts: partPayloads,
+          photos: previewPhotos,
+          _preview: true,
+        };
+
+        setPreviewPractices(prev => (
+          practice
+            ? prev.map(p => String(p.id) === String(practice.id) ? previewItem : p)
+            : [previewItem, ...prev]
+        ));
+        clearDraft();
+        addToast(practice ? 'Preview: pratica aggiornata localmente' : 'Preview: pratica creata localmente', 'success');
+
+        if (selectedPracticeId) {
+          setSelectedPracticeId(previewId);
+          setDetailData(buildPreviewDetail(previewItem));
+          setCurrentView('detail');
+          setNavigationStack(['dashboard']);
+        } else {
+          setCurrentView('dashboard');
+          setNavigationStack([]);
+        }
+        setEditingPractice(null);
+        setPractice(null);
+        setFormPhotos([]);
+        setExistingPhotos(previewPhotos);
+        return;
+      }
 
       let response;
       if (practice) {
@@ -1594,6 +1790,11 @@ function App() {
         <div className="field-hint" style={{ marginBottom: 12 }}>
           Auth: <strong>{authMode}</strong>
         </div>
+        {browserPreviewMode && (
+          <div className="preview-banner">
+            Modalita anteprima browser: dati demo/locali, nessun salvataggio reale nel gestionale.
+          </div>
+        )}
         <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} practiceAccessToken={practiceAccessToken} lastApiDebug={lastApiDebug} />
 
         {/* Stats */}
@@ -1656,7 +1857,9 @@ function App() {
             onClick={seedDemoPractices}
             disabled={seedingDemoPractices}
           >
-            {seedingDemoPractices ? 'Creazione pratiche demo...' : `Crea ${DASHBOARD_DEMO_PRACTICES.length} pratiche esempio piene`}
+            {browserPreviewMode
+              ? 'Ricarica pratiche demo locali'
+              : (seedingDemoPractices ? 'Creazione pratiche demo...' : `Crea ${DASHBOARD_DEMO_PRACTICES.length} pratiche esempio piene`)}
           </button>
         </div>
 
@@ -1735,6 +1938,11 @@ function App() {
         <div className="view-detail view-enter">
           <div className="container">
             <button className="back-button" onClick={navigateBack} type="button">← Indietro</button>
+            {browserPreviewMode && (
+              <div className="preview-banner">
+                Anteprima locale: puoi provare la logica, ma le modifiche non salvano dati reali.
+              </div>
+            )}
             <SkeletonLoader />
           </div>
         </div>
@@ -1759,6 +1967,11 @@ function App() {
       <div className="view-detail view-enter">
         <div className="container">
           <button className="back-button" onClick={navigateBack} type="button">← Indietro</button>
+          {browserPreviewMode && (
+            <div className="preview-banner">
+              Anteprima locale: puoi provare la logica, ma le modifiche non salvano dati reali.
+            </div>
+          )}
 
           {/* Header info */}
           <div className="detail-header section">
@@ -1942,6 +2155,11 @@ function App() {
           <div className="field-hint" style={{ marginBottom: 12 }}>
             Auth: <strong>{authMode}</strong>
           </div>
+          {browserPreviewMode && (
+            <div className="preview-banner">
+              Anteprima locale: questo form simula il salvataggio senza inviare dati al backend.
+            </div>
+          )}
           <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} practiceAccessToken={practiceAccessToken} lastApiDebug={lastApiDebug} />
 
           {showDraftBanner && (
