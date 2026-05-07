@@ -1,0 +1,35 @@
+{
+  "mapping": {
+    "anagrafica": {
+      "cliente_nome": "CLIENTE TEST",
+      "cliente_telefono": "+393331112233",
+      "cliente_tipo": "privato",
+      "targa": "AB123CD"
+    },
+    "agenda": {
+      "data": "2026-05-07",
+      "ora": "14:30",
+      "durata_minuti": 30,
+      "tipo_pratica": "preventivo"
+    },
+    "lavorazioni": [
+      {
+        "reparto": "officina",
+        "descrizioni": [
+          "Controllo veicolo"
+        ],
+        "ore_man": 1,
+        "ore_mac": null,
+        "materiali_euro": null,
+        "smaltimento_applica": false,
+        "smaltimento_percentuale": null,
+        "ricambi": []
+      }
+    ],
+    "note_interne": "",
+    "meta": {
+      "practice_id": "sample",
+      "external_id": null
+    }
+  }
+}

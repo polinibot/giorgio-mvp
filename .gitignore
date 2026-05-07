@@ -55,6 +55,11 @@ build/
 playwright-report/
 test-results/
 
+# Automation artifacts
+automation/artifacts/
+yap-*.png
+yap-storage.json
+
 # IDE
 .vscode/
 .idea/
