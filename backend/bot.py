@@ -10,6 +10,7 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonWebApp,
     Message,
     WebAppInfo,
 )
@@ -60,6 +61,10 @@ class TelegramBot:
     @staticmethod
     def _dashboard_url(user_id: int) -> str:
         return f"https://giorgio-mvp-nine.vercel.app?user_id={user_id}"
+
+    @staticmethod
+    def _dashboard_menu_url() -> str:
+        return "https://giorgio-mvp-nine.vercel.app"
 
     def _dashboard_keyboard(self, user_id: int) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(
@@ -414,6 +419,15 @@ class TelegramBot:
     async def start(self):
         logger.info("Starting Telegram bot...")
         await self.bot.delete_webhook(drop_pending_updates=True)
+        try:
+            await self.bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="Dashboard",
+                    web_app=WebAppInfo(url=self._dashboard_menu_url()),
+                )
+            )
+        except Exception as exc:
+            logger.warning("Unable to set Telegram menu button: %s", exc)
         await self.dp.start_polling(self.bot)
 
 
