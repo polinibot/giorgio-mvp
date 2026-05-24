@@ -755,6 +755,86 @@ h2 {
   font-weight: 600;
 }
 
+/* --- YAP preview (detail) --- */
+.yap-preview-section {
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: rgba(14, 165, 233, 0.06);
+}
+
+.yap-preview-intro {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+}
+
+.yap-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.yap-preview-field {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.yap-preview-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.yap-preview-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e0f2fe;
+}
+
+.yap-preview-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.yap-tag-chip {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+
+.yap-preview-readiness {
+  margin-top: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.yap-preview-readiness.ready {
+  background: rgba(34, 197, 94, 0.12);
+  color: #86efac;
+}
+
+.yap-preview-readiness.not-ready {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fcd34d;
+}
+
+.yap-preview-loading,
+.yap-preview-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 /* --- Photo grid --- */
 .photo-grid {
   display: grid;

@@ -172,6 +172,7 @@ class AutomationService:
                 "tipo_pratica": appointment.get("practice_type"),
             },
             "lavorazioni": management_sections,
+            "contexts": payload.get("contexts") or [],
             "note_interne": payload.get("internal_notes"),
             "meta": {
                 "practice_id": payload.get("practice_id"),

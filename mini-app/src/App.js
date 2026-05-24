@@ -6,7 +6,11 @@ import 'react-datepicker/dist/react-datepicker.css';
 import './App.css';
 
 // Configurazione axios
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://giorgio-mvp-production.up.railway.app';
+const API_BASE_URL = process.env.REACT_APP_API_URL
+  || (process.env.NODE_ENV === 'development'
+    ? 'http://127.0.0.1:8000'
+    : 'https://giorgio-mvp-production.up.railway.app');
+const DEV_TELEGRAM_USER_ID = process.env.REACT_APP_DEV_TELEGRAM_USER_ID || '761118078';
 
 const DRAFT_STORAGE_KEY = 'giorgio_draft';
 
@@ -65,6 +69,11 @@ function isValidItalianPhone(val) {
 function isValidItalianPlate(val) {
   const cleaned = val.replace(/[\s-]/g, '').toUpperCase();
   return /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(cleaned);
+}
+
+function isLocalDevHost() {
+  if (typeof window === 'undefined') return false;
+  return ['localhost', '127.0.0.1'].includes(window.location.hostname);
 }
 
 /** Format date to DD/MM/YYYY */
@@ -622,11 +631,17 @@ function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, l
 function App() {
   const standaloneBrowserMode = typeof window !== 'undefined' && !window.Telegram?.WebApp;
   const telegramRuntimeInitData = typeof window !== 'undefined' ? (window.Telegram?.WebApp?.initData || '') : '';
-  const browserPreviewMode = standaloneBrowserMode
-    || (!telegramRuntimeInitData
-    && !extractTelegramInitDataFromLocation()
-    && !extractTelegramUserIdFromLocation()
-    && !extractPracticeAccessTokenFromLocation());
+  const forcePreviewMode = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === '1';
+  const hasUrlAuth = Boolean(
+    extractTelegramInitDataFromLocation()
+    || extractTelegramUserIdFromLocation()
+    || extractPracticeAccessTokenFromLocation()
+  );
+  const localDevRealApiMode = standaloneBrowserMode && isLocalDevHost() && !forcePreviewMode && Boolean(DEV_TELEGRAM_USER_ID);
+  const browserPreviewMode = forcePreviewMode || (standaloneBrowserMode
+    && !telegramRuntimeInitData
+    && !hasUrlAuth
+    && !localDevRealApiMode);
 
   // Navigation state
   const [currentView, setCurrentView] = useState('dashboard');
@@ -658,6 +673,8 @@ function App() {
   // Detail state
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [yapPreview, setYapPreview] = useState(null);
+  const [yapPreviewLoading, setYapPreviewLoading] = useState(false);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
 
   // Form state
@@ -1066,6 +1083,7 @@ function App() {
     if (!id) return;
     setDetailLoading(true);
     setDetailData(null);
+    setYapPreview(null);
     if (browserPreviewMode) {
       const previewPractice = previewPractices.find(p => String(p.id) === String(id));
       if (previewPractice) {
@@ -1085,6 +1103,20 @@ function App() {
       );
       setDetailData(res.data?.data || res.data);
       rememberResponse('practice.detail');
+      setYapPreviewLoading(true);
+      try {
+        rememberRequest('yap.preview', { method: 'GET', url: `${API_BASE_URL}/practices/${id}/yap-mapping-preview`, params: getAuthParams(), headers: getHeaders() });
+        const yapRes = await fetchWithRetry(() =>
+          axios.get(`${API_BASE_URL}/practices/${id}/yap-mapping-preview`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 })
+        );
+        setYapPreview(yapRes.data?.data || yapRes.data);
+        rememberResponse('yap.preview');
+      } catch (yapErr) {
+        rememberError('yap.preview', yapErr);
+        setYapPreview(null);
+      } finally {
+        setYapPreviewLoading(false);
+      }
     } catch (err) {
       rememberError('practice.detail', err);
       addToast(classifyError(err), 'error');
@@ -1385,7 +1417,8 @@ function App() {
     } else {
       // Standalone browser/dev mode: allow the real backend to load with an empty initData header.
       setInitData('');
-      const currentTelegramUserId = extractTelegramUserIdFromLocation() || extractTelegramUserIdFromRuntime();
+      const currentTelegramUserId =
+        extractTelegramUserIdFromLocation() || extractTelegramUserIdFromRuntime() || (localDevRealApiMode ? DEV_TELEGRAM_USER_ID : '');
       const currentPracticeAccessToken = extractPracticeAccessTokenFromLocation();
       setTelegramUserId(currentTelegramUserId);
       setPracticeAccessToken(currentPracticeAccessToken);
@@ -2019,6 +2052,54 @@ function App() {
               </div>
             </div>
           </div>
+
+          {/* YAP agenda preview (pratica reale → gestionale) */}
+          {!browserPreviewMode && (
+            <div className="section yap-preview-section">
+              <h2>📅 Anteprima agenda YAP</h2>
+              <p className="yap-preview-intro">Cosa verrebbe scritto nel popup appuntamento (solo anteprima, nessuna modifica su YAP).</p>
+              {yapPreviewLoading && <div className="yap-preview-loading">Caricamento anteprima…</div>}
+              {!yapPreviewLoading && yapPreview?.proposedYap?.popup && (
+                <>
+                  <div className="yap-preview-grid">
+                    <div className="yap-preview-field">
+                      <span className="yap-preview-label">Cosa</span>
+                      <span className="yap-preview-value">{yapPreview.proposedYap.popup.cosa || '—'}</span>
+                    </div>
+                    <div className="yap-preview-field">
+                      <span className="yap-preview-label">Quando</span>
+                      <span className="yap-preview-value">{yapPreview.proposedYap.popup.quando || '—'}</span>
+                    </div>
+                    <div className="yap-preview-field">
+                      <span className="yap-preview-label">Dalle</span>
+                      <span className="yap-preview-value">{yapPreview.proposedYap.popup.dalle || '—'}</span>
+                    </div>
+                    <div className="yap-preview-field">
+                      <span className="yap-preview-label">Alle</span>
+                      <span className="yap-preview-value">{yapPreview.proposedYap.popup.alle || '—'}</span>
+                    </div>
+                  </div>
+                  {(yapPreview.proposedYap.popup.tag || []).length > 0 && (
+                    <div className="yap-preview-tags">
+                      {(yapPreview.proposedYap.popup.tag || []).map((tag) => (
+                        <span key={tag} className="yap-tag-chip">{tag}</span>
+                      ))}
+                    </div>
+                  )}
+                  {yapPreview.preSync && (
+                    <div className={`yap-preview-readiness ${yapPreview.preSync.ready ? 'ready' : 'not-ready'}`}>
+                      {yapPreview.preSync.ready
+                        ? `Pronta per sync • score ${yapPreview.preSync.score}/100`
+                        : `Non ancora pronta • score ${yapPreview.preSync.score}/100`}
+                    </div>
+                  )}
+                </>
+              )}
+              {!yapPreviewLoading && !yapPreview?.proposedYap?.popup && (
+                <div className="yap-preview-empty">Anteprima non disponibile (completa data, ora e sezioni lavoro).</div>
+              )}
+            </div>
+          )}
 
           {/* Sync status */}
           {showDeveloperUi && (

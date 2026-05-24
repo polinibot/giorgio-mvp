@@ -1195,6 +1195,37 @@ async def get_management_mapping(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore mapping gestionale")
 
 
+@app.get("/practices/{practice_id}/yap-mapping-preview")
+@limiter.limit("30/minute")
+async def get_yap_mapping_preview(
+    request: Request,
+    practice_id: int,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Anteprima campi YAP agenda da pratica reale (nessuna scrittura su YAP)."""
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+        Practice.status != PracticeStatus.DELETED,
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    try:
+        from automation_service import AutomationService
+        from yap_mapping import build_yap_preview
+
+        payload = AutomationService.prepare_automation_payload(practice_id, db)
+        mapped = AutomationService.map_payload_to_management(payload)
+        pre_sync = AutomationService.pre_sync_check(payload)
+        preview = build_yap_preview(mapped, pre_sync)
+        return APIResponse(success=True, data=preview)
+    except Exception as e:
+        logger.error("Error building YAP preview for practice %d: %s", practice_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore anteprima YAP")
+
+
 # --- Sections ---
 
 @app.post("/practices/{practice_id}/sections")
