@@ -4,6 +4,7 @@ import re
 from sqlalchemy.orm import Session
 from database_sqlite import Practice, PracticeSection, PracticePart, PracticePhoto
 from telegram_utils import _parse_description_rows
+from appointment_time import validate_appointment_time
 
 
 class AutomationService:
@@ -205,7 +206,7 @@ class AutomationService:
             
             "validation_rules": {
                 "required_fields": ["customer_name", "plate", "appointment_date", "practice_type"],
-                "time_slots": ["00", "30"],  # minuti validi
+                "time_format": "HH:MM",
                 "plate_format": "italian_standard"
             }
         }
@@ -319,9 +320,12 @@ class AutomationService:
             validation["ready"] = False
 
         time_value = str(appointment.get("time", "")).strip()
-        if time_value and (len(time_value) != 5 or time_value[2] != ":" or time_value[3:] not in {"00", "30"}):
-            validation["errors"].append("Orario non valido: sono ammessi solo slot da 30 minuti")
-            validation["ready"] = False
+        if time_value:
+            try:
+                validate_appointment_time(time_value)
+            except ValueError as exc:
+                validation["errors"].append(str(exc))
+                validation["ready"] = False
 
         if not payload.get("sections"):
             validation["errors"].append("Almeno una sezione lavoro richiesta")

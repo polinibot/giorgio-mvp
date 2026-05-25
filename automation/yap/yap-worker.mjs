@@ -555,36 +555,52 @@ async function runYapAutomation(job, args) {
       await page.screenshot({ path: beforeSavePath, fullPage: true });
     }
 
-    const putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
-      const saved = await page.evaluate(() => {
-        const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
-          .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
-        if (!popup) return false;
-        const isVisible = (el) => {
-          const rect = el.getBoundingClientRect();
-          const style = window.getComputedStyle(el);
-          return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
-        };
-        const btns = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button']")]
-          .filter(isVisible)
-          .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
-        const saveBtn = btns.find((el) => {
-          const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
-          return text.includes("salva") || text.includes("save") || text.includes("floppy") || text.includes("done") || text.includes("check");
-        }) || btns[0];
-        if (saveBtn) { saveBtn.click(); return true; }
-        return false;
-      });
-      if (!saved) {
-        throw new Error("Bottone salva non trovato nel popup YAP");
+    let putResponse = null;
+    let saveAttemptsUsed = 0;
+    let lastSaveError = null;
+    const maxSaveAttempts = 3;
+    for (let attempt = 1; attempt <= maxSaveAttempts; attempt += 1) {
+      saveAttemptsUsed = attempt;
+      try {
+        putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
+          const saved = await page.evaluate(() => {
+            const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+              .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
+            if (!popup) return false;
+            const isVisible = (el) => {
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+            };
+            const btns = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button']")]
+              .filter(isVisible)
+              .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
+            const saveBtn = btns.find((el) => {
+              const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
+              return text.includes("salva") || text.includes("save") || text.includes("floppy") || text.includes("done") || text.includes("check");
+            }) || btns[0];
+            if (saveBtn) { saveBtn.click(); return true; }
+            return false;
+          });
+          if (!saved) {
+            throw new Error("Bottone salva non trovato nel popup YAP");
+          }
+        }, 12000 + (attempt - 1) * 4000);
+        if (putResponse) break;
+        const stillOpenAttempt = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1200 }).catch(() => false);
+        if (!stillOpenAttempt) break;
+      } catch (error) {
+        lastSaveError = error;
       }
-    }, 12000);
+      await page.waitForTimeout(500 * attempt);
+    }
 
     const saved = Boolean(putResponse);
     if (!saved) {
       const stillOpen = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1000 }).catch(() => false);
       if (stillOpen) {
-        throw new Error("Salvataggio YAP non confermato: PrenotazionePutAction non rilevata");
+        const detail = lastSaveError?.message ? ` (${lastSaveError.message})` : "";
+        throw new Error(`Salvataggio YAP non confermato dopo ${maxSaveAttempts} tentativi${detail}`);
       }
     }
     await page.waitForTimeout(600);
@@ -603,6 +619,9 @@ async function runYapAutomation(job, args) {
         status: putResponse?.status(),
       },
       screenshot: afterSavePath,
+      telemetry: {
+        saveAttempts: saveAttemptsUsed,
+      },
       message: "Appuntamento salvato su YAP.",
     };
   } finally {
