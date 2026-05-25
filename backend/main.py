@@ -2,6 +2,7 @@ import logging
 import os
 import uuid
 import shutil
+import shutil as _shutil
 import json as _json
 import asyncio
 import traceback
@@ -726,8 +727,9 @@ def _practice_date_iso(practice: Practice) -> str:
 async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180) -> Dict[str, Any]:
     root = _project_root()
     script_path = os.path.join(root, "automation", "yap", script_name)
+    node_bin = os.getenv("NODE_BINARY") or (_shutil.which("node") or _shutil.which("nodejs") or "node")
     process = await asyncio.create_subprocess_exec(
-        "node",
+        node_bin,
         script_path,
         *args,
         cwd=root,
