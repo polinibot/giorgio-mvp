@@ -25,7 +25,7 @@ COPY mini-app/package.json ./mini-app/package.json
 COPY mini-app/package-lock.json ./mini-app/package-lock.json
 
 # Dipendenze Node per worker YAP (Playwright API)
-RUN cd mini-app && npm ci --include=dev --no-audit --no-fund
+RUN cd mini-app && npm install --include=dev --no-audit --no-fund
 
 # Crea directory storage (before switching user)
 RUN mkdir -p storage/photos temp
