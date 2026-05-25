@@ -7,6 +7,19 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 
+def _contexts_from_mapping(mapping: Dict[str, Any]) -> List[str]:
+    contexts = mapping.get("contexts") or []
+    if isinstance(contexts, str):
+        contexts = [c.strip() for c in contexts.split(",") if c.strip()]
+    if contexts:
+        return list(contexts)
+    return [
+        item.get("reparto")
+        for item in (mapping.get("lavorazioni") or [])
+        if item.get("reparto")
+    ]
+
+
 def _has_revisione_lavorazione(lavorazioni: List[Dict[str, Any]]) -> bool:
     for item in lavorazioni or []:
         if item.get("reparto") == "revisione":
@@ -32,7 +45,7 @@ def pick_cosa(mapping: Dict[str, Any]) -> str:
     override = meta.get("cosa_override") or anag.get("riferimento_breve")
     if override:
         return str(override).strip().upper()[:40]
-    contexts = mapping.get("contexts") or []
+    contexts = _contexts_from_mapping(mapping)
     lavorazioni = mapping.get("lavorazioni") or []
     if is_revisione_pura(contexts, lavorazioni):
         return "REVISIONE"
@@ -40,7 +53,7 @@ def pick_cosa(mapping: Dict[str, Any]) -> str:
 
 
 def pick_yap_tags(mapping: Dict[str, Any]) -> List[str]:
-    contexts = mapping.get("contexts") or []
+    contexts = _contexts_from_mapping(mapping)
     lavorazioni = mapping.get("lavorazioni") or []
     agenda = mapping.get("agenda") or {}
     tipo = agenda.get("tipo_pratica") or ""
@@ -60,7 +73,7 @@ def pick_yap_tags(mapping: Dict[str, Any]) -> List[str]:
         else:
             tags.append("pneumatici")
             if tipo == "preventivo":
-                tags.extend(["preventivo", "comunicato"])
+                tags.append("preventivo")
 
     if not tags and "pneumatici" in contexts:
         tags.append("pneumatici")
@@ -90,6 +103,7 @@ def add_minutes(time_str: str, minutes: int) -> str:
 def build_yap_preview(mapping: Dict[str, Any], pre_sync: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     agenda = mapping.get("agenda") or {}
     anag = mapping.get("anagrafica") or {}
+    contexts = _contexts_from_mapping(mapping)
     durata = int(agenda.get("durata_minuti") or agenda.get("slot_duration") or 20)
     ora = agenda.get("ora") or agenda.get("time") or ""
     tags = pick_yap_tags(mapping)
@@ -104,7 +118,7 @@ def build_yap_preview(mapping: Dict[str, Any], pre_sync: Optional[Dict[str, Any]
             "data": agenda.get("data"),
             "ora": ora,
             "durata_minuti": durata,
-            "contesti": mapping.get("contexts") or [],
+            "contesti": contexts,
             "tipo_pratica": agenda.get("tipo_pratica"),
         },
         "proposedYap": {
