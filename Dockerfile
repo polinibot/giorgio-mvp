@@ -4,6 +4,9 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-ita \
+    nodejs \
+    npm \
+    chromium \
     && rm -rf /var/lib/apt/lists/*
 
 # Setta working directory
@@ -15,8 +18,14 @@ COPY requirements.txt .
 # Installa dipendenze Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia codice backend
+# Copia codice backend + worker YAP
 COPY backend/ .
+COPY automation/ ./automation
+COPY mini-app/package.json ./mini-app/package.json
+COPY mini-app/package-lock.json ./mini-app/package-lock.json
+
+# Dipendenze Node per worker YAP (Playwright API)
+RUN cd mini-app && npm ci --include=dev --no-audit --no-fund
 
 # Crea directory storage (before switching user)
 RUN mkdir -p storage/photos temp

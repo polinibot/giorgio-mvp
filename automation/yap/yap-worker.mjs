@@ -26,7 +26,7 @@ import {
 } from "./lib/yap-dedup.mjs";
 
 const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
-const { chromium } = requireFromMiniApp("playwright");
+const { chromium } = requireFromMiniApp("@playwright/test");
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DEFAULT_ARTIFACT_DIR = path.join(ROOT_DIR, "automation", "artifacts", "yap");
@@ -477,7 +477,10 @@ async function runYapAutomation(job, args) {
   const password = ensureEnv("YAP_PASSWORD");
   await fs.mkdir(args.artifactDir, { recursive: true });
 
-  const browser = await chromium.launch({ headless: !args.headed });
+  const browser = await chromium.launch({
+    headless: !args.headed,
+    executablePath: process.env.YAP_CHROMIUM_EXECUTABLE || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || "/usr/bin/chromium",
+  });
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
 
