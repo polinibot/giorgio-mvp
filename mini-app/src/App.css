@@ -767,6 +767,68 @@ h2 {
   margin: 0 0 12px;
 }
 
+.yap-preview-hint {
+  font-size: 12px;
+  color: var(--warning);
+  margin: 0 0 10px;
+}
+
+.yap-preview-slot-end {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-top: 8px;
+}
+
+.yap-field-map-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.yap-field-map-summary {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0 0 12px;
+}
+
+.yap-field-map-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  margin-bottom: 14px;
+}
+
+.yap-field-map-table th,
+.yap-field-map-table td {
+  border: 1px solid var(--border-subtle);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.yap-field-map-table th {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+}
+
+.yap-fm-badge {
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(79, 140, 255, 0.15);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.yap-fm-v1_write .yap-fm-badge { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+.yap-fm-v2_optional .yap-fm-badge { background: rgba(251, 191, 36, 0.12); color: var(--warning); }
+
+.yap-odl-metric {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
 .yap-preview-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -829,10 +891,153 @@ h2 {
   color: #fcd34d;
 }
 
+.yap-preview-brief {
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.yap-preview-brief-hint {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.yap-preview-notes {
+  margin-top: 10px;
+}
+
+.yap-preview-notes-body {
+  margin: 4px 0 0;
+  padding: 8px;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: inherit;
+}
+
+.yap-odl-note-reparto {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.yap-odl-preview {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.yap-odl-title {
+  font-size: 0.95rem;
+  margin: 0 0 6px;
+}
+
+.yap-odl-reason {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+.yap-odl-reparto {
+  margin-bottom: 10px;
+}
+
+.yap-odl-badge {
+  display: inline-block;
+  margin-bottom: 4px;
+}
+
+.yap-odl-lines {
+  margin: 4px 0 0 1rem;
+  padding: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.yap-odl-ricambi {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
 .yap-preview-loading,
 .yap-preview-empty {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+/* --- YAP Automation Controls --- */
+.yap-controls-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.yap-control-button {
+  background: rgba(79, 140, 255, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(79, 140, 255, 0.3);
+  border-radius: var(--radius-input);
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.yap-control-button:hover:not(:disabled) {
+  background: rgba(79, 140, 255, 0.18);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.yap-control-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.yap-delete-button {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--error);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.yap-delete-button:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: var(--error);
+}
+
+.yap-result-banner {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.yap-result-banner.yap-success {
+  background: rgba(52, 211, 153, 0.12);
+  color: #86efac;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.yap-result-banner.yap-warning {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fcd34d;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.yap-result-banner.yap-info {
+  background: rgba(79, 140, 255, 0.12);
+  color: #93c5fd;
+  border: 1px solid rgba(79, 140, 255, 0.3);
 }
 
 /* --- Photo grid --- */

@@ -3,18 +3,40 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import {
+  loginYap,
+  openAgendaInApp,
+  gotoAgendaDate,
+  toItalianDate,
+  toYapTime,
+  addMinutes,
+  yapContextOptions,
+  waitForYapAction,
+} from "./lib/yap-shared.mjs";
+import {
+  pickCosaFromJob,
+  pickYapTagsFromJob,
+  buildNotesForPopup,
+  jobToMapping,
+} from "./lib/yap-mapping.mjs";
+import {
+  buildDedupKey,
+  findExistingAppointment,
+  buildSyncLogEntry,
+} from "./lib/yap-dedup.mjs";
 
 const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
 const { chromium } = requireFromMiniApp("playwright");
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DEFAULT_ARTIFACT_DIR = path.join(ROOT_DIR, "automation", "artifacts", "yap");
-const YAP_BASE_URL = process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it";
 
 function parseArgs(argv) {
   const args = {
     dryRun: true,
     headed: false,
+    debug: false,
+    freshLogin: false,
     artifactDir: process.env.YAP_ARTIFACT_DIR || DEFAULT_ARTIFACT_DIR,
   };
 
@@ -32,6 +54,8 @@ function parseArgs(argv) {
     else if (arg === "--commit") args.dryRun = false;
     else if (arg === "--dry-run") args.dryRun = true;
     else if (arg === "--headed") args.headed = true;
+    else if (arg === "--debug") args.debug = true;
+    else if (arg === "--fresh-login") args.freshLogin = true;
     else if (arg === "--payload-file") args.payloadFile = next();
     else if (arg === "--practice-id") args.practiceId = next();
     else if (arg === "--api-base-url") args.apiBaseUrl = next();
@@ -88,65 +112,21 @@ function toIsoDate(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
-function toItalianDate(isoDate) {
-  const [year, month, day] = String(isoDate).slice(0, 10).split("-");
-  if (!year || !month || !day) {
-    throw new Error(`Data non valida per YAP: ${isoDate}`);
-  }
-  return `${day}/${month}/${year}`;
-}
-
-function toYapTime(time) {
-  const raw = String(time || "").trim();
-  if (!/^\d{2}:\d{2}$/.test(raw)) {
-    throw new Error(`Ora non valida: ${raw}. Atteso formato HH:MM`);
-  }
-  return raw.replace(":", ".");
-}
-
-function addMinutes(time, minutes) {
-  const [hours, mins] = time.split(":").map(Number);
-  const date = new Date(Date.UTC(2000, 0, 1, hours, mins + minutes, 0));
-  return `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
-}
-
-function normalizeContext(context) {
-  return String(context || "").trim().toLowerCase();
-}
-
-function contextLabel(context) {
-  const normalized = normalizeContext(context);
-  if (normalized === "officina") return "OFFICINA";
-  if (normalized === "carrozzeria") return "CARROZZERIA";
-  if (normalized === "revisione") return "REVISIONE";
-  return normalized.toUpperCase();
-}
-
-function pickTag(contexts) {
-  const normalized = contexts.map(normalizeContext);
-  if (normalized.includes("officina")) return "officina";
-  if (normalized.includes("carrozzeria")) return "carrozzeria";
-  if (normalized.includes("revisione")) return "revisione";
-  return process.env.YAP_DEFAULT_TAG || "officina";
-}
-
-function buildAgendaTitle(job) {
-  const parts = [
-    job.customer.name,
-    job.customer.plate,
-    job.contexts.map(contextLabel).join("+"),
-  ].filter(Boolean);
-
-  return parts.join(" - ").slice(0, 120);
-}
-
 function normalizeJob(rawInput, overrides = {}) {
   const input = rawInput?.data?.mapping || rawInput?.mapping || rawInput?.data?.payload || rawInput?.payload || rawInput;
 
   if (input?.anagrafica && input?.agenda) {
-    const contexts = (input.lavorazioni || []).map((item) => item.reparto).filter(Boolean);
+    let contexts = input.contexts || [];
+    if (typeof contexts === "string") {
+      contexts = contexts.split(",").map((c) => c.trim()).filter(Boolean);
+    }
+    if (!contexts.length) {
+      contexts = (input.lavorazioni || []).map((item) => item.reparto).filter(Boolean);
+    }
     return {
       practiceId: input.meta?.practice_id || rawInput?.practice_id || null,
+      meta: input.meta || {},
+      cosaOverride: input.meta?.cosa_override || input.anagrafica?.riferimento_breve || null,
       customer: {
         name: input.anagrafica.cliente_nome || "",
         phone: input.anagrafica.cliente_telefono || "",
@@ -156,11 +136,14 @@ function normalizeJob(rawInput, overrides = {}) {
       appointment: {
         date: toIsoDate(overrides.date || input.agenda.data),
         time: overrides.time || input.agenda.ora,
-        duration: Number(overrides.duration || input.agenda.durata_minuti || 30),
+        duration: Number(overrides.duration || input.agenda.durata_minuti || 20),
         type: input.agenda.tipo_pratica || "",
       },
       contexts,
-      sections: input.lavorazioni || [],
+      sections: (input.lavorazioni || []).map((l) => ({
+        ...l,
+        note: l.note ?? l.notes ?? null,
+      })),
       internalNotes: input.note_interne || "",
     };
   }
@@ -182,6 +165,8 @@ function normalizeJob(rawInput, overrides = {}) {
 
   return {
     practiceId: input.practice_id || null,
+    meta: input.meta || {},
+    cosaOverride: input.meta?.cosa_override || null,
     customer: {
       name: customer.name || "",
       phone: customer.phone || "",
@@ -191,7 +176,7 @@ function normalizeJob(rawInput, overrides = {}) {
     appointment: {
       date: toIsoDate(overrides.date || appointment.date),
       time: overrides.time || appointment.time,
-      duration: Number(overrides.duration || appointment.slot_duration || 30),
+      duration: Number(overrides.duration || appointment.slot_duration || 20),
       type: appointment.practice_type || "",
     },
     contexts: input.contexts || sections.map((section) => section.reparto).filter(Boolean),
@@ -272,39 +257,11 @@ async function updatePracticeSynced(args, job) {
   });
 }
 
-async function clickIfVisible(locator, timeout = 1500) {
-  try {
-    await locator.waitFor({ state: "visible", timeout });
-    await locator.click();
-    return true;
-  } catch {
-    return false;
+async function openAgenda(page, isoDate) {
+  await openAgendaInApp(page);
+  if (isoDate) {
+    await gotoAgendaDate(page, isoDate);
   }
-}
-
-async function login(page, username, password) {
-  await page.goto(YAP_BASE_URL, { waitUntil: "domcontentloaded" });
-  await clickIfVisible(page.getByRole("button", { name: /^OK$/i }), 3000)
-    || await clickIfVisible(page.getByText("OK", { exact: true }).last(), 1000);
-  await page.keyboard.press("Escape").catch(() => {});
-
-  await page.locator('input[name="u"]').fill(username);
-  await page.locator('input[name="pw"]').fill(password);
-  const submitButton = page.getByTestId("loginSubmitButton").or(page.getByRole("button", { name: /acc[ée]di/i }));
-  await submitButton.first().click();
-
-  await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
-  await page.getByText("Agenda", { exact: true }).waitFor({ state: "visible", timeout: 45000 });
-}
-
-async function openAgenda(page) {
-  await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
-  await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
-  await page.getByText("Agenda", { exact: true }).first().waitFor({ state: "visible", timeout: 45000 });
-  await page.locator(".fc-time-grid").first().waitFor({
-    state: "visible",
-    timeout: 45000,
-  });
 }
 
 async function visibleTimeLabels(page) {
@@ -415,6 +372,42 @@ async function fillVisibleInput(page, index, value) {
   }, { index, value });
 }
 
+async function addYapTagChips(page, tags) {
+  if (!tags.length) return;
+
+  await page.evaluate((desiredTags) => {
+    const popups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")];
+    const popup = popups.find((p) => (p.textContent || "").includes("Dettagli"));
+    if (!popup) return;
+
+    const existing = (popup.textContent || "").toLowerCase();
+    for (const tag of desiredTags) {
+      if (existing.includes(tag.toLowerCase())) continue;
+
+      const clickable = [...popup.querySelectorAll("div, span, button, a")].find((el) => {
+        const text = (el.textContent || "").trim().toLowerCase();
+        return text === tag.toLowerCase() && el.getBoundingClientRect().width > 0;
+      });
+      if (clickable) {
+        clickable.click();
+        continue;
+      }
+
+      const tagInputs = [...popup.querySelectorAll("input")].filter((inp) => {
+        const section = inp.closest("div");
+        return section && (section.textContent || "").includes("Tag");
+      });
+      const tagInput = tagInputs[tagInputs.length - 1];
+      if (tagInput) {
+        tagInput.focus();
+        tagInput.value = tag;
+        tagInput.dispatchEvent(new Event("input", { bubbles: true }));
+        tagInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      }
+    }
+  }, tags);
+}
+
 async function fillAppointmentPopup(page, job) {
   const rect = await appointmentPopupRect(page);
   if (!rect) {
@@ -433,28 +426,50 @@ async function fillAppointmentPopup(page, job) {
     throw new Error(`Popup YAP non riconosciuto. Input visibili: ${JSON.stringify(inputs)}`);
   }
 
-  const titleInput = inputs
-    .filter((item) => item.index < dateIndex && !item.value && item.width > 120)
-    .sort((a, b) => b.y - a.y)[0] || inputs.find((item) => !item.value && item.width > 120);
+  const cosaInput = inputs
+    .filter((item) => item.index < dateIndex && item.width > 80)
+    .sort((a, b) => a.y - b.y)[0] || inputs.find((item) => item.index < dateIndex);
 
-  if (!titleInput) {
+  if (!cosaInput) {
     throw new Error("Non trovo il campo 'Cosa' nel popup YAP");
   }
 
-  const title = buildAgendaTitle(job);
+  const cosaValue = pickCosaFromJob(job);
   const endTime = addMinutes(job.appointment.time, job.appointment.duration);
+  const notes = buildNotesForPopup(jobToMapping(job));
 
-  await fillVisibleInput(page, titleInput.index, title);
+  await fillVisibleInput(page, cosaInput.index, cosaValue);
   await fillVisibleInput(page, dateIndex, toItalianDate(job.appointment.date));
   await fillVisibleInput(page, timeIndexes[0], toYapTime(job.appointment.time));
   await fillVisibleInput(page, timeIndexes[1], toYapTime(endTime));
 
-  const tag = pickTag(job.contexts);
-  const afterTimeIndex = timeIndexes[1];
-  const tagCandidate = (await inputSnapshot(page)).find((item) => item.index > afterTimeIndex && item.value && !/^\d/.test(item.value));
-  if (tagCandidate && tagCandidate.value.toLowerCase() !== tag) {
-    await fillVisibleInput(page, tagCandidate.index, tag).catch(() => {});
+  const emptyAfterTimes = inputs.filter(
+    (item) => item.index > timeIndexes[1] && !item.value && item.width > 40,
+  );
+  if (notes && emptyAfterTimes[0]) {
+    await fillVisibleInput(page, emptyAfterTimes[0].index, notes).catch(() => {});
   }
+
+  const yapTags = pickYapTagsFromJob(job);
+  await addYapTagChips(page, yapTags);
+}
+
+async function scanAgendaEvents(page) {
+  return page.evaluate(() => {
+    const rows = [];
+    const seen = new Set();
+    for (const el of document.querySelectorAll(".fc-time-grid-event, .fc-event")) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 2) continue;
+      const title = (el.querySelector(".fc-title") || el).textContent.replace(/\s+/g, " ").trim();
+      const time = (el.querySelector(".fc-time")?.textContent || "").trim();
+      const key = `${time}|${title}`;
+      if (!title || seen.has(key)) continue;
+      seen.add(key);
+      rows.push({ time, title });
+    }
+    return rows;
+  });
 }
 
 async function runYapAutomation(job, args) {
@@ -463,26 +478,70 @@ async function runYapAutomation(job, args) {
   await fs.mkdir(args.artifactDir, { recursive: true });
 
   const browser = await chromium.launch({ headless: !args.headed });
-  const context = await browser.newContext({
-    viewport: { width: 1440, height: 950 },
-    locale: "it-IT",
-  });
+  const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
 
   try {
-    await login(page, username, password);
-    await openAgenda(page);
+    await loginYap(page, username, password);
+    await openAgenda(page, job.appointment.date);
+
+    const yapTags = pickYapTagsFromJob(job);
+    const existingEvents = await scanAgendaEvents(page);
+    const dedup = findExistingAppointment(existingEvents, {
+      plate: job.customer.plate,
+      date: job.appointment.date,
+      time: job.appointment.time,
+      toleranceMinutes: 0,
+    });
 
     if (args.dryRun) {
       const suffix = `${job.practiceId || "payload"}-${Date.now()}`;
-      const agendaPath = path.join(args.artifactDir, `agenda-check-${suffix}.png`);
-      await page.screenshot({ path: agendaPath, fullPage: true });
+      let agendaPath = null;
+      if (args.debug) {
+        agendaPath = path.join(args.artifactDir, `agenda-check-${suffix}.png`);
+        await page.screenshot({ path: agendaPath, fullPage: true });
+      }
+
+      const planned = {
+        cosa: pickCosaFromJob(job),
+        quando: toItalianDate(job.appointment.date),
+        dalle: toYapTime(job.appointment.time),
+        alle: toYapTime(addMinutes(job.appointment.time, job.appointment.duration)),
+        tags: yapTags,
+      };
+
+      const syncLog = buildSyncLogEntry(job, {
+        dryRun: true,
+        action: dedup.hit ? "skip_duplicate" : "create_appointment",
+        syncStatus: dedup.hit ? "synced" : "pending",
+        yapPreview: planned,
+        dedup,
+      });
 
       return {
         saved: false,
         mode: "dry-run",
         screenshot: agendaPath,
-        message: "Accesso YAP e agenda verificati. Nessuna modifica eseguita su YAP.",
+        planned,
+        dedupKey: buildDedupKey({
+          plate: job.customer.plate,
+          date: job.appointment.date,
+          time: job.appointment.time,
+        }),
+        dedup,
+        syncLog,
+        message: dedup.hit
+          ? "Appuntamento già presente in agenda (dedup). Nessuna modifica."
+          : "Accesso YAP e agenda verificati. Nessuna modifica eseguita su YAP.",
+      };
+    }
+
+    if (dedup.hit) {
+      return {
+        saved: false,
+        mode: "commit-blocked-duplicate",
+        dedup,
+        message: "Commit bloccato: appuntamento duplicato rilevato in agenda.",
       };
     }
 
@@ -490,18 +549,59 @@ async function runYapAutomation(job, args) {
     await fillAppointmentPopup(page, job);
 
     const suffix = `${job.practiceId || "payload"}-${Date.now()}`;
-    const beforeSavePath = path.join(args.artifactDir, `before-save-${suffix}.png`);
-    await page.screenshot({ path: beforeSavePath, fullPage: true });
+    let beforeSavePath = null;
+    if (args.debug) {
+      beforeSavePath = path.join(args.artifactDir, `before-save-${suffix}.png`);
+      await page.screenshot({ path: beforeSavePath, fullPage: true });
+    }
 
-    await page.getByText("Salva appuntamento", { exact: true }).click();
-    await page.waitForTimeout(1500);
-    const afterSavePath = path.join(args.artifactDir, `after-save-${suffix}.png`);
-    await page.screenshot({ path: afterSavePath, fullPage: true });
+    const putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
+      const saved = await page.evaluate(() => {
+        const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+          .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
+        if (!popup) return false;
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+        };
+        const btns = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button']")]
+          .filter(isVisible)
+          .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
+        const saveBtn = btns.find((el) => {
+          const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
+          return text.includes("salva") || text.includes("save") || text.includes("floppy") || text.includes("done") || text.includes("check");
+        }) || btns[0];
+        if (saveBtn) { saveBtn.click(); return true; }
+        return false;
+      });
+      if (!saved) {
+        throw new Error("Bottone salva non trovato nel popup YAP");
+      }
+    }, 12000);
+
+    const saved = Boolean(putResponse);
+    if (!saved) {
+      const stillOpen = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1000 }).catch(() => false);
+      if (stillOpen) {
+        throw new Error("Salvataggio YAP non confermato: PrenotazionePutAction non rilevata");
+      }
+    }
+    await page.waitForTimeout(600);
+    let afterSavePath = null;
+    if (args.debug) {
+      afterSavePath = path.join(args.artifactDir, `after-save-${suffix}.png`);
+      await page.screenshot({ path: afterSavePath, fullPage: true });
+    }
     await updatePracticeSynced(args, job).catch(() => {});
 
     return {
       saved: true,
       mode: "commit",
+      putAction: {
+        detected: Boolean(putResponse),
+        status: putResponse?.status(),
+      },
       screenshot: afterSavePath,
       message: "Appuntamento salvato su YAP.",
     };

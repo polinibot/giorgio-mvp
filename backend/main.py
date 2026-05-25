@@ -382,6 +382,23 @@ class SyncToggleRequest(BaseModel):
     synced: bool
 
 
+class YapSyncRequest(BaseModel):
+    dry_run: bool = False
+    debug: bool = False
+    fresh_login: bool = False
+    date: Optional[str] = None
+    time: Optional[str] = None
+    duration: Optional[int] = None
+
+
+class YapDeleteAppointmentRequest(BaseModel):
+    date: Optional[str] = None
+    search: Optional[str] = None
+    dry_run: bool = False
+    debug: bool = False
+    fresh_login: bool = False
+
+
 class SectionPayload(BaseModel):
     context: Context
     description_rows: List[str]
@@ -414,11 +431,12 @@ def _contexts_csv(contexts: List[Context]) -> str:
 
 
 def _validate_slot_time(appointment_time: str):
-    if len(appointment_time or "") != 5 or appointment_time[2] != ":" or appointment_time[3:] not in ["00", "30"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="L'ora deve avere minuti 00 o 30 (slot da 30 minuti)",
-        )
+    from appointment_time import validate_appointment_time
+
+    try:
+        validate_appointment_time(appointment_time)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 def _clean_section_rows(rows: List[str]) -> List[str]:
@@ -474,6 +492,9 @@ def _apply_practice_data(practice: Practice, data: PracticeCreate, user_id: int)
     practice.customer_name = data.customer_name
     practice.customer_type = data.customer_type
     practice.billing_to_complete = data.billing_to_complete
+    for field in ("company_name", "vat_number", "fiscal_code", "billing_address", "billing_city", "billing_zip"):
+        if hasattr(practice, field):
+            setattr(practice, field, getattr(data, field, None))
     practice.appointment_date = data.appointment_date
     practice.appointment_time = data.appointment_time
     practice.practice_type = data.practice_type
@@ -483,21 +504,42 @@ def _apply_practice_data(practice: Practice, data: PracticeCreate, user_id: int)
     practice.updated_by_telegram_id = user_id
 
 
+def _sanitize_section_for_context(section: SectionPayload) -> SectionPayload:
+    """Campi ammessi per reparto (allineato a mini-app)."""
+    ctx = _context_value(section.context)
+    data = section.model_dump()
+    if ctx == "officina":
+        data["mac_hours"] = None
+        data["materials_amount"] = None
+        data["waste_apply"] = False
+        data["waste_percentage"] = None
+    elif ctx == "revisione":
+        data["man_hours"] = None
+        data["mac_hours"] = None
+        data["materials_amount"] = None
+        data["waste_apply"] = False
+        data["waste_percentage"] = None
+    elif ctx == "carrozzeria":
+        data["man_hours"] = None
+    return SectionPayload(**data)
+
+
 def _replace_sections_and_parts(db: Session, practice_id: int, sections: List[SectionPayload], parts: List[PartPayload]):
     db.query(PracticeSection).filter(PracticeSection.practice_id == practice_id).delete()
     db.query(PracticePart).filter(PracticePart.practice_id == practice_id).delete()
 
     for section in sections:
+        clean = _sanitize_section_for_context(section)
         db.add(PracticeSection(
             practice_id=practice_id,
-            context=section.context,
-            description_rows=_json.dumps(_clean_section_rows(section.description_rows)),
-            man_hours=section.man_hours,
-            mac_hours=section.mac_hours,
-            materials_amount=section.materials_amount,
-            waste_apply=section.waste_apply,
-            waste_percentage=section.waste_percentage,
-            notes=section.notes,
+            context=clean.context,
+            description_rows=_json.dumps(_clean_section_rows(clean.description_rows)),
+            man_hours=clean.man_hours,
+            mac_hours=clean.mac_hours,
+            materials_amount=clean.materials_amount,
+            waste_apply=clean.waste_apply,
+            waste_percentage=clean.waste_percentage,
+            notes=clean.notes,
         ))
 
     for part in parts:
@@ -666,6 +708,54 @@ def _serialize_photo(photo) -> dict:
     data["url"] = data.get("storage_path", "")
     data["thumbnail"] = _get_thumbnail_url(data.get("storage_path", ""))
     return data
+
+
+def _project_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _practice_date_iso(practice: Practice) -> str:
+    value = practice.appointment_date
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+    return str(value or "")[:10]
+
+
+async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180) -> Dict[str, Any]:
+    root = _project_root()
+    script_path = os.path.join(root, "automation", "yap", script_name)
+    process = await asyncio.create_subprocess_exec(
+        "node",
+        script_path,
+        *args,
+        cwd=root,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=os.environ.copy(),
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Timeout automazione YAP")
+
+    out = stdout.decode("utf-8", errors="replace").strip()
+    err = stderr.decode("utf-8", errors="replace").strip()
+    if process.returncode != 0:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "Automazione YAP fallita", "stdout": out[-3000:], "stderr": err[-3000:]},
+        )
+
+    start = out.find("{")
+    end = out.rfind("}")
+    if start >= 0 and end >= start:
+        try:
+            return _json.loads(out[start:end + 1])
+        except Exception:
+            pass
+    return {"ok": True, "raw": out}
 
 
 @app.patch("/api/practices/{practice_id}/sync")
@@ -957,11 +1047,7 @@ async def create_practice(
             detail="Almeno un contesto è obbligatorio",
         )
 
-    if practice_data.appointment_time[3:] not in ["00", "30"]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="L'ora deve avere minuti 00 o 30 (slot da 30 minuti)",
-        )
+    _validate_slot_time(practice_data.appointment_time)
 
     try:
         contexts_csv = ",".join([
@@ -976,6 +1062,12 @@ async def create_practice(
             customer_name=practice_data.customer_name,
             customer_type=practice_data.customer_type,
             billing_to_complete=practice_data.billing_to_complete,
+            company_name=practice_data.company_name,
+            vat_number=practice_data.vat_number,
+            fiscal_code=practice_data.fiscal_code,
+            billing_address=practice_data.billing_address,
+            billing_city=practice_data.billing_city,
+            billing_zip=practice_data.billing_zip,
             appointment_date=practice_data.appointment_date,
             appointment_time=practice_data.appointment_time,
             practice_type=practice_data.practice_type,
@@ -1033,11 +1125,7 @@ async def update_practice(
         practice.updated_by_telegram_id = user_data["id"]
 
         if "appointment_time" in update_data:
-            if practice.appointment_time[3:] not in ["00", "30"]:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="L'ora deve avere minuti 00 o 30 (slot da 30 minuti)",
-                )
+            _validate_slot_time(practice.appointment_time)
 
         db.commit()
         db.refresh(practice)
@@ -1195,6 +1283,114 @@ async def get_management_mapping(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore mapping gestionale")
 
 
+@app.post("/practices/{practice_id}/yap/sync")
+@limiter.limit("10/minute")
+async def sync_practice_to_yap(
+    request: Request,
+    practice_id: int,
+    body: YapSyncRequest,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+        Practice.status != PracticeStatus.DELETED,
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    tmp_path = None
+    try:
+        from automation_service import AutomationService
+
+        payload = AutomationService.prepare_automation_payload(practice_id, db)
+        check = AutomationService.pre_sync_check(payload)
+        if check.get("ready") is False:
+            return APIResponse(success=False, data={"status": "not_ready", "preSync": check})
+
+        mapped = AutomationService.map_payload_to_management(payload)
+        if body.date:
+            mapped.setdefault("agenda", {})["data"] = body.date
+        if body.time:
+            mapped.setdefault("agenda", {})["ora"] = body.time
+        if body.duration:
+            mapped.setdefault("agenda", {})["durata_minuti"] = body.duration
+
+        artifacts = os.path.join(_project_root(), "automation", "artifacts", "yap", "payloads")
+        os.makedirs(artifacts, exist_ok=True)
+        tmp_path = os.path.join(artifacts, f"practice-{practice_id}-{uuid.uuid4().hex}.json")
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            _json.dump({"mapping": mapped}, fh, ensure_ascii=False)
+
+        args = ["--payload-file", tmp_path]
+        if not body.dry_run:
+            args.append("--commit")
+        if body.debug:
+            args.append("--debug")
+        if body.fresh_login:
+            args.append("--fresh-login")
+
+        result = await _run_yap_script("yap-worker.mjs", args)
+        saved = bool((result.get("result") or {}).get("saved"))
+        duplicate = (result.get("result") or {}).get("mode") == "commit-blocked-duplicate"
+        if not body.dry_run and (saved or duplicate):
+            practice.synced = True
+            practice.updated_by_telegram_id = user_data["id"]
+            db.commit()
+        return APIResponse(success=True, data={"status": "synced" if saved else "dry_run_or_duplicate", "preSync": check, "yap": result})
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error("Error syncing practice %d to YAP: %s", practice_id, e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore sync YAP")
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
+@app.delete("/practices/{practice_id}/yap/appointment")
+@limiter.limit("10/minute")
+async def delete_practice_yap_appointment(
+    request: Request,
+    practice_id: int,
+    body: YapDeleteAppointmentRequest,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+        Practice.status != PracticeStatus.DELETED,
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+
+    date_iso = body.date or _practice_date_iso(practice)
+    search = body.search or practice.plate_confirmed or practice.customer_name
+    if not date_iso or not search:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data o testo ricerca YAP mancante")
+
+    args = ["--date", date_iso, "--search", str(search)]
+    if body.dry_run:
+        args.append("--dry-run")
+    if body.debug:
+        args.append("--debug")
+    if body.fresh_login:
+        args.append("--fresh-login")
+
+    result = await _run_yap_script("yap-delete-appointment.mjs", args)
+    if not body.dry_run and result.get("deleted"):
+        practice.synced = False
+        practice.updated_by_telegram_id = user_data["id"]
+        db.commit()
+    return APIResponse(success=True, data={"status": result.get("status") or ("deleted" if result.get("deleted") else "not_deleted"), "yap": result})
+
+
 @app.get("/practices/{practice_id}/yap-mapping-preview")
 @limiter.limit("30/minute")
 async def get_yap_mapping_preview(
@@ -1224,6 +1420,35 @@ async def get_yap_mapping_preview(
     except Exception as e:
         logger.error("Error building YAP preview for practice %d: %s", practice_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore anteprima YAP")
+
+
+@app.post("/yap-mapping-preview/from-form")
+@limiter.limit("60/minute")
+async def get_yap_mapping_preview_from_form(
+    request: Request,
+    body: PracticeFullSave,
+    user_data: dict = Depends(require_whitelisted_user),
+):
+    """Anteprima YAP da dati form (senza salvare). Contesti mini-app = fonte di verità."""
+    try:
+        from automation_service import AutomationService
+        from yap_mapping import build_yap_preview
+
+        _validate_full_payload(body)
+        practice_dict = body.practice.model_dump()
+        sections_list = [s.model_dump() for s in body.sections]
+        parts_list = [p.model_dump() for p in body.parts]
+
+        mapped = AutomationService.map_form_to_management(practice_dict, sections_list, parts_list)
+        payload = AutomationService.payload_from_form(practice_dict, sections_list, parts_list)
+        pre_sync = AutomationService.pre_sync_check(payload)
+        preview = build_yap_preview(mapped, pre_sync)
+        return APIResponse(success=True, data=preview)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error building YAP preview from form: %s", e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore anteprima YAP da form")
 
 
 # --- Sections ---

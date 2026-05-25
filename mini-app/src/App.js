@@ -91,6 +91,25 @@ function formatDateForBackend(value) {
   return d.toISOString().slice(0, 10);
 }
 
+/** Opzioni orario ogni 5 min (allineato a YAP / messaggi Telegram, es. 09:24). */
+function buildAppointmentTimeOptions() {
+  const options = [];
+  for (let h = 0; h < 24; h += 1) {
+    for (let m = 0; m < 60; m += 5) {
+      options.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+    }
+  }
+  return options;
+}
+
+const APPOINTMENT_TIME_OPTIONS = buildAppointmentTimeOptions();
+
+function addMinutesToTime(time, minutes) {
+  const [h, m] = String(time || '00:00').split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 // --- Sub-components ---
 
 /** Toast notification */
@@ -191,7 +210,11 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 // Form fields that are actually sent to the backend
-const FORM_FIELDS = ['plate_confirmed', 'phone', 'customer_name', 'customer_type', 'billing_to_complete', 'appointment_date', 'appointment_time', 'practice_type', 'internal_notes'];
+const FORM_FIELDS = [
+  'plate_confirmed', 'phone', 'customer_name', 'customer_type', 'billing_to_complete',
+  'company_name', 'vat_number', 'fiscal_code', 'billing_address', 'billing_city', 'billing_zip',
+  'appointment_date', 'appointment_time', 'practice_type', 'internal_notes',
+];
 
 // Precompiled demo data used for fast QA testing in browser/Telegram preview
 const DEMO_DRAFT = {
@@ -675,6 +698,9 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [yapPreview, setYapPreview] = useState(null);
   const [yapPreviewLoading, setYapPreviewLoading] = useState(false);
+  const [formYapPreview, setFormYapPreview] = useState(null);
+  const [formYapPreviewLoading, setFormYapPreviewLoading] = useState(false);
+  const formYapPreviewTimerRef = useRef(null);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
 
   // Form state
@@ -1236,6 +1262,77 @@ function App() {
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast]);
 
+  // --- YAP Automation ---
+  const [yapSyncLoading, setYapSyncLoading] = useState(false);
+  const [yapDeleteLoading, setYapDeleteLoading] = useState(false);
+  const [yapLastResult, setYapLastResult] = useState(null);
+
+  const syncToYap = useCallback(async (id, options = {}) => {
+    if (browserPreviewMode) {
+      addToast('Anteprima: sync YAP simulato', 'success');
+      setYapLastResult({ status: 'synced', simulated: true });
+      return;
+    }
+    setYapSyncLoading(true);
+    setYapLastResult(null);
+    try {
+      rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
+      const res = await fetchWithRetry(() =>
+        axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
+      );
+      const data = res.data?.data || {};
+      setYapLastResult(data);
+      rememberResponse('yap.sync');
+      if (data.status === 'synced') {
+        addToast('Appuntamento sincronizzato con YAP', 'success');
+        loadDetail(id);
+      } else if (data.status === 'dry_run_or_duplicate') {
+        addToast('Dry-run o duplicato: nessuna modifica YAP', 'info');
+      } else if (data.status === 'not_ready') {
+        addToast('Pratica non pronta per sync YAP', 'warning');
+      } else {
+        addToast(`Sync YAP: ${data.status}`, 'info');
+      }
+    } catch (err) {
+      rememberError('yap.sync', err);
+      addToast(classifyError(err), 'error');
+    } finally {
+      setYapSyncLoading(false);
+    }
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
+
+  const deleteYapAppointment = useCallback(async (id, options = {}) => {
+    if (browserPreviewMode) {
+      addToast('Anteprima: delete YAP simulato', 'success');
+      setYapLastResult({ status: 'deleted', simulated: true });
+      return;
+    }
+    setYapDeleteLoading(true);
+    setYapLastResult(null);
+    try {
+      rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders() });
+      const res = await fetchWithRetry(() =>
+        axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: options, params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
+      );
+      const data = res.data?.data || {};
+      setYapLastResult(data);
+      rememberResponse('yap.delete');
+      if (data.status === 'deleted') {
+        addToast('Appuntamento eliminato da YAP', 'success');
+        loadDetail(id);
+      } else if (data.status === 'blocked_by_odl') {
+        addToast('Impossibile eliminare: associato a ordine di lavoro', 'warning');
+      } else {
+        addToast(`Delete YAP: ${data.status}`, 'info');
+      }
+    } catch (err) {
+      rememberError('yap.delete', err);
+      addToast(classifyError(err), 'error');
+    } finally {
+      setYapDeleteLoading(false);
+    }
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
+
   // --- Form: Load practice for editing ---
   const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '', currentTelegramUserId = '', currentPracticeAccessToken = '') => {
     startSlowTimer();
@@ -1339,6 +1436,12 @@ function App() {
       setValue('practice_type', p.practice_type || 'preventivo');
       setValue('internal_notes', p.internal_notes || p.notes || '');
       setValue('billing_to_complete', p.billing_to_complete || false);
+      setValue('company_name', p.company_name || '');
+      setValue('vat_number', p.vat_number || '');
+      setValue('fiscal_code', p.fiscal_code || '');
+      setValue('billing_address', p.billing_address || '');
+      setValue('billing_city', p.billing_city || '');
+      setValue('billing_zip', p.billing_zip || '');
       if (p.appointment_date) setValue('appointment_date', new Date(p.appointment_date));
       setSelectedContexts(normalizeContexts(p.contexts));
       setError('');
@@ -1524,6 +1627,275 @@ function App() {
   const updatePart = (context, index, field, value) => {
     setParts(prev => ({ ...prev, [context]: (prev[context] || []).map((p, i) => i === index ? { ...p, [field]: value } : p) }));
   };
+
+  const buildYapPreviewFormPayload = useCallback(() => {
+    const data = getValues();
+    const plate = (data.plate_confirmed || '').trim();
+    const phone = (data.phone || '').trim();
+    const name = (data.customer_name || '').trim();
+    if (!plate || !phone || !name || !data.appointment_date || !data.appointment_time || selectedContexts.length === 0) {
+      return null;
+    }
+    const hasRows = selectedContexts.every((ctx) =>
+      (sections[ctx]?.description_rows || []).some((row) => (row || '').trim())
+    );
+    if (!hasRows) return null;
+
+    const sectionPayloads = selectedContexts.map((context) => {
+      const section = sections[context] || {};
+      return {
+        context,
+        description_rows: (section.description_rows || []).filter((row) => (row || '').trim()),
+        man_hours: section.man_hours === '' ? null : section.man_hours,
+        mac_hours: section.mac_hours === '' ? null : section.mac_hours,
+        materials_amount: section.materials_amount === '' ? null : section.materials_amount,
+        waste_apply: section.waste_apply || false,
+        waste_percentage: section.waste_apply ? (section.waste_percentage || 2) : null,
+        notes: section.notes || null,
+      };
+    });
+
+    const partPayloads = [];
+    for (const context of selectedContexts) {
+      for (const p of (parts[context] || []).filter((item) => (item.name || '').trim())) {
+        partPayloads.push({
+          context,
+          name: p.name.trim(),
+          quantity: (p.quantity || '').trim() || null,
+        });
+      }
+    }
+
+    return {
+      practice: {
+        plate_confirmed: plate,
+        phone,
+        customer_name: name,
+        customer_type: data.customer_type || 'privato',
+        billing_to_complete: data.billing_to_complete || false,
+        company_name: data.company_name?.trim() || null,
+        vat_number: data.vat_number?.trim() || null,
+        fiscal_code: data.fiscal_code?.trim() || null,
+        billing_address: data.billing_address?.trim() || null,
+        billing_city: data.billing_city?.trim() || null,
+        billing_zip: data.billing_zip?.trim() || null,
+        appointment_date: formatDateForBackend(data.appointment_date),
+        appointment_time: data.appointment_time,
+        practice_type: data.practice_type || 'ordine_di_lavoro',
+        contexts: selectedContexts,
+        internal_notes: data.internal_notes || null,
+      },
+      sections: sectionPayloads,
+      parts: partPayloads,
+    };
+  }, [getValues, selectedContexts, sections, parts]);
+
+  const renderFieldMappingTable = (rows, title) => {
+    if (!rows?.length) return null;
+    return (
+      <div className="yap-field-map-group">
+        <h4 className="yap-field-map-heading">{title}</h4>
+        <table className="yap-field-map-table">
+          <thead>
+            <tr>
+              <th>Giorgio</th>
+              <th>Dove in YAP</th>
+              <th>Valore</th>
+              <th>Chi scrive</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={`${r.giorgio}-${i}`} className={`yap-fm-${r.writer || r.automation}`}>
+                <td>{r.giorgio}</td>
+                <td title={r.yap}>{r.yapPath || r.yap}</td>
+                <td>{r.value != null && r.value !== '' ? String(r.value) : '—'}</td>
+                <td><span className="yap-fm-badge">{r.writerLabel || r.automation}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
+  const renderYapPreviewPanel = (preview, loading, { showOdl = true, title = '📅 Anteprima YAP (mapping completo)' } = {}) => {
+    const fm = preview?.proposedYap?.fieldMapping;
+    return (
+    <div className="section yap-preview-section">
+      <h2>{title}</h2>
+      <p className="yap-preview-intro">
+        Mappa completa: per ogni campo Giorgio indica <strong>dove</strong> va in YAP (agenda, pratica, ordini di lavoro).
+        «Giorgio worker» = già automatizzato in agenda; «pianificato» = destinazione definita, prossimo step worker ODL.
+      </p>
+      {fm?.mappingNote && <p className="yap-preview-hint">{fm.mappingNote}</p>}
+      {preview?.confidence?.cosaNote && (
+        <p className="yap-preview-hint">{preview.confidence.cosaNote}</p>
+      )}
+      {loading && <div className="yap-preview-loading">Calcolo anteprima…</div>}
+      {!loading && preview?.proposedYap?.popup && (
+        <>
+          <div className="yap-preview-grid">
+            <div className="yap-preview-field">
+              <span className="yap-preview-label">Cosa</span>
+              <span className="yap-preview-value">{preview.proposedYap.popup.cosa || '—'}</span>
+            </div>
+            <div className="yap-preview-field">
+              <span className="yap-preview-label">Quando</span>
+              <span className="yap-preview-value">{preview.proposedYap.popup.quando || '—'}</span>
+            </div>
+            <div className="yap-preview-field">
+              <span className="yap-preview-label">Dalle</span>
+              <span className="yap-preview-value">{preview.proposedYap.popup.dalle || '—'}</span>
+            </div>
+            <div className="yap-preview-field">
+              <span className="yap-preview-label">Alle</span>
+              <span className="yap-preview-value">{preview.proposedYap.popup.alle || '—'}</span>
+            </div>
+          </div>
+          {(preview.proposedYap.popup.tag || []).length > 0 && (
+            <div className="yap-preview-tags">
+              {(preview.proposedYap.popup.tag || []).map((tag) => (
+                <span key={tag} className="yap-tag-chip">{tag}</span>
+              ))}
+            </div>
+          )}
+          {preview.giorgioSummary?.cosa_breve && (
+            <div className="yap-preview-brief">
+              Titolo breve lavoro: <strong>{preview.giorgioSummary.cosa_breve}</strong>
+              <span className="yap-preview-brief-hint"> (priorità: officina → carrozzeria → revisione)</span>
+            </div>
+          )}
+          {preview?.proposedYap?.popup?.alle && (
+            <div className="yap-preview-slot-end">
+              Fine slot YAP (20 min): <strong>{preview.proposedYap.popup.alle.replace('.', ':')}</strong>
+            </div>
+          )}
+          {preview.giorgioSummary?.note_interne && (
+            <div className="yap-preview-notes">
+              <span className="yap-preview-label">Note interne</span>
+              <pre className="yap-preview-notes-body">{preview.giorgioSummary.note_interne}</pre>
+            </div>
+          )}
+          {preview.preSync && (
+            <div className={`yap-preview-readiness ${preview.preSync.ready ? 'ready' : 'not-ready'}`}>
+              {preview.preSync.ready
+                ? `Pronta per sync • score ${preview.preSync.score}/100`
+                : `Non ancora pronta • score ${preview.preSync.score}/100`}
+            </div>
+          )}
+          {showOdl && preview.proposedYap?.odl && (
+            <div className="yap-odl-preview">
+              <h3 className="yap-odl-title">Gestione pratica / ODL</h3>
+              <p className="yap-odl-reason">{preview.proposedYap.odl.reason}</p>
+              {(preview.proposedYap.odl.lavorazioniGiorgio || []).map((lav, idx) => (
+                <div key={`${lav.reparto}-${idx}`} className="yap-odl-reparto">
+                  <span className="context-badge yap-odl-badge">{lav.reparto}</span>
+                  <ul className="yap-odl-lines">
+                    {(lav.descrizioni || []).map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                  {lav.noteReparto && (
+                    <div className="yap-odl-note-reparto">Note: {lav.noteReparto}</div>
+                  )}
+                  {lav.ore_man != null && <div className="yap-odl-metric">MAN: {lav.ore_man} h</div>}
+                  {lav.ore_mac != null && <div className="yap-odl-metric">MAC: {lav.ore_mac} h</div>}
+                  {lav.materiali_euro != null && <div className="yap-odl-metric">Materiali: €{lav.materiali_euro}</div>}
+                  {lav.smaltimento?.applica && (
+                    <div className="yap-odl-metric">Smaltimento: {lav.smaltimento.percentuale ?? 2}%</div>
+                  )}
+                  {(lav.ricambi || []).length > 0 && (
+                    <div className="yap-odl-ricambi">
+                      Ricambi: {(lav.ricambi || []).map((r) => r.name).filter(Boolean).join(', ')}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {fm && (
+            <div className="yap-field-map-section">
+              <h3 className="yap-odl-title">Mappa campi Giorgio → YAP</h3>
+              {fm.summary && (
+                <p className="yap-field-map-summary">
+                  Agenda worker: { (fm.summary.agendaWorker || fm.summary.v1GiorgioWrites || []).join(', ') } ·
+                  ODL pianificato: { (fm.summary.odlWorkerPlanned || fm.summary.v2GiorgioOptional || []).join(', ') }
+                </p>
+              )}
+              {renderFieldMappingTable(fm.anagrafica, 'Anagrafica → pratica / barra agenda')}
+              {renderFieldMappingTable(fm.agenda, 'Agenda — popup appuntamento')}
+              {renderFieldMappingTable(fm.agendaBar, 'Agenda — barra evento')}
+              {renderFieldMappingTable(fm.gestionePratica, 'Gestione pratica')}
+              {(fm.ordiniDiLavoro || fm.lavorazioni || []).map((lav) =>
+                renderFieldMappingTable(lav.fields, `Ordini di lavoro — ${lav.reparto}`)
+              )}
+              {renderFieldMappingTable(fm.altro, 'Altro')}
+            </div>
+          )}
+        </>
+      )}
+      {!loading && !preview?.proposedYap?.popup && (
+        <div className="yap-preview-empty">Completa targa, data, ora, contesti e almeno una riga descrittiva per vedere l&apos;anteprima.</div>
+      )}
+    </div>
+    );
+  };
+
+  const watchedPlate = watch('plate_confirmed');
+  const watchedPhone = watch('phone');
+  const watchedCustomer = watch('customer_name');
+  const watchedDate = watch('appointment_date');
+  const watchedTime = watch('appointment_time');
+  const watchedPracticeType = watch('practice_type');
+  const watchedCustomerType = watch('customer_type');
+
+  useEffect(() => {
+    if (browserPreviewMode || currentView !== 'form') return undefined;
+
+    if (formYapPreviewTimerRef.current) clearTimeout(formYapPreviewTimerRef.current);
+    formYapPreviewTimerRef.current = setTimeout(async () => {
+      const body = buildYapPreviewFormPayload();
+      if (!body) {
+        setFormYapPreview(null);
+        setFormYapPreviewLoading(false);
+        return;
+      }
+      setFormYapPreviewLoading(true);
+      try {
+        const res = await axios.post(
+          `${API_BASE_URL}/yap-mapping-preview/from-form`,
+          body,
+          { params: getAuthParams(), headers: getHeaders(), timeout: 15000 }
+        );
+        setFormYapPreview(res.data?.data || null);
+      } catch {
+        setFormYapPreview(null);
+      } finally {
+        setFormYapPreviewLoading(false);
+      }
+    }, 600);
+
+    return () => {
+      if (formYapPreviewTimerRef.current) clearTimeout(formYapPreviewTimerRef.current);
+    };
+  }, [
+    browserPreviewMode,
+    currentView,
+    buildYapPreviewFormPayload,
+    watchedPlate,
+    watchedPhone,
+    watchedCustomer,
+    watchedDate,
+    watchedTime,
+    watchedPracticeType,
+    watchedCustomerType,
+    selectedContexts,
+    sections,
+    parts,
+    getAuthParams,
+    getHeaders,
+  ]);
 
   // --- Delete practice ---
   const deletePractice = (practiceToDelete) => {
@@ -2053,50 +2425,35 @@ function App() {
             </div>
           </div>
 
-          {/* YAP agenda preview (pratica reale → gestionale) */}
+          {!browserPreviewMode && renderYapPreviewPanel(yapPreview, yapPreviewLoading)}
+
+          {/* YAP Automation Controls */}
           {!browserPreviewMode && (
-            <div className="section yap-preview-section">
-              <h2>📅 Anteprima agenda YAP</h2>
-              <p className="yap-preview-intro">Cosa verrebbe scritto nel popup appuntamento (solo anteprima, nessuna modifica su YAP).</p>
-              {yapPreviewLoading && <div className="yap-preview-loading">Caricamento anteprima…</div>}
-              {!yapPreviewLoading && yapPreview?.proposedYap?.popup && (
-                <>
-                  <div className="yap-preview-grid">
-                    <div className="yap-preview-field">
-                      <span className="yap-preview-label">Cosa</span>
-                      <span className="yap-preview-value">{yapPreview.proposedYap.popup.cosa || '—'}</span>
-                    </div>
-                    <div className="yap-preview-field">
-                      <span className="yap-preview-label">Quando</span>
-                      <span className="yap-preview-value">{yapPreview.proposedYap.popup.quando || '—'}</span>
-                    </div>
-                    <div className="yap-preview-field">
-                      <span className="yap-preview-label">Dalle</span>
-                      <span className="yap-preview-value">{yapPreview.proposedYap.popup.dalle || '—'}</span>
-                    </div>
-                    <div className="yap-preview-field">
-                      <span className="yap-preview-label">Alle</span>
-                      <span className="yap-preview-value">{yapPreview.proposedYap.popup.alle || '—'}</span>
-                    </div>
-                  </div>
-                  {(yapPreview.proposedYap.popup.tag || []).length > 0 && (
-                    <div className="yap-preview-tags">
-                      {(yapPreview.proposedYap.popup.tag || []).map((tag) => (
-                        <span key={tag} className="yap-tag-chip">{tag}</span>
-                      ))}
-                    </div>
-                  )}
-                  {yapPreview.preSync && (
-                    <div className={`yap-preview-readiness ${yapPreview.preSync.ready ? 'ready' : 'not-ready'}`}>
-                      {yapPreview.preSync.ready
-                        ? `Pronta per sync • score ${yapPreview.preSync.score}/100`
-                        : `Non ancora pronta • score ${yapPreview.preSync.score}/100`}
-                    </div>
-                  )}
-                </>
-              )}
-              {!yapPreviewLoading && !yapPreview?.proposedYap?.popup && (
-                <div className="yap-preview-empty">Anteprima non disponibile (completa data, ora e sezioni lavoro).</div>
+            <div className="section">
+              <h2>🔧 Automazione YAP</h2>
+              <div className="yap-controls-grid">
+                <button
+                  type="button"
+                  className="yap-control-button"
+                  onClick={() => syncToYap(practice.id, { dry_run: false })}
+                  disabled={yapSyncLoading}
+                >
+                  {yapSyncLoading ? 'Sincronizzazione...' : 'Sincronizza con YAP'}
+                </button>
+                <button
+                  type="button"
+                  className="yap-control-button yap-delete-button"
+                  onClick={() => deleteYapAppointment(practice.id, { dry_run: false })}
+                  disabled={yapDeleteLoading}
+                >
+                  {yapDeleteLoading ? 'Eliminazione...' : 'Elimina appuntamento YAP'}
+                </button>
+              </div>
+              {yapLastResult && (
+                <div className={`yap-result-banner ${yapLastResult.status === 'synced' || yapLastResult.status === 'deleted' ? 'yap-success' : yapLastResult.status === 'blocked_by_odl' ? 'yap-warning' : 'yap-info'}`}>
+                  <strong>Stato YAP:</strong> {yapLastResult.status}
+                  {yapLastResult.yap?.yapMessage && <span> — {yapLastResult.yap.yapMessage}</span>}
+                </div>
               )}
             </div>
           )}
@@ -2509,21 +2866,22 @@ function App() {
               </div>
 
               <div className="form-group">
-                <label htmlFor="appointment_time">Ora (slot 30 min)*</label>
+                <label htmlFor="appointment_time">Ora inizio appuntamento*</label>
                 <select
                   id="appointment_time"
                   {...register('appointment_time', { required: 'Ora obbligatoria' })}
                   className={`select ${fieldErrors.appointment_time ? 'input-error' : ''}`}
                 >
                   <option value="">-- Seleziona --</option>
-                  {Array.from({ length: 24 }, (_, i) =>
-                    ['00', '30'].map(min =>
-                      <option key={`${i.toString().padStart(2, '0')}:${min}`} value={`${i.toString().padStart(2, '0')}:${min}`}>
-                        {i.toString().padStart(2, '0')}:{min}
-                      </option>
-                    )
-                  ).flat()}
+                  {APPOINTMENT_TIME_OPTIONS.map((slot) => (
+                    <option key={slot} value={slot}>{slot}</option>
+                  ))}
                 </select>
+                {watchedTime && (
+                  <div className="field-hint">
+                    Durata slot YAP: 20 min → fine prevista {addMinutesToTime(watchedTime, 20)}
+                  </div>
+                )}
                 {renderFieldError('appointment_time')}
               </div>
 
@@ -2533,6 +2891,17 @@ function App() {
                   <option value="preventivo">Preventivo</option>
                   <option value="ordine_di_lavoro">Ordine di Lavoro</option>
                 </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="internal_notes">Note interne (pratica)</label>
+                <textarea
+                  id="internal_notes"
+                  {...register('internal_notes')}
+                  className="textarea"
+                  rows="2"
+                  placeholder="Note generali visibili nel mapping verso YAP (non nel popup agenda)"
+                />
               </div>
             </div>
 
@@ -2675,6 +3044,10 @@ function App() {
                 </div>
               </div>
             ))}
+
+            {!browserPreviewMode && renderYapPreviewPanel(formYapPreview, formYapPreviewLoading, {
+              title: '📅 Anteprima YAP (live)',
+            })}
 
             <button
               type="submit"
