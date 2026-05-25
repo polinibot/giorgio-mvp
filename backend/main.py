@@ -1054,7 +1054,7 @@ async def create_practice(
             c.value if hasattr(c, "value") else str(c) for c in practice_data.contexts
         ])
 
-        practice = Practice(
+        practice_kwargs = dict(
             created_by_telegram_id=user_data["id"],
             status=PracticeStatus.CONFIRMED,
             plate_confirmed=practice_data.plate_confirmed,
@@ -1062,18 +1062,25 @@ async def create_practice(
             customer_name=practice_data.customer_name,
             customer_type=practice_data.customer_type,
             billing_to_complete=practice_data.billing_to_complete,
-            company_name=getattr(practice_data, "company_name", None),
-            vat_number=getattr(practice_data, "vat_number", None),
-            fiscal_code=getattr(practice_data, "fiscal_code", None),
-            billing_address=getattr(practice_data, "billing_address", None),
-            billing_city=getattr(practice_data, "billing_city", None),
-            billing_zip=getattr(practice_data, "billing_zip", None),
             appointment_date=practice_data.appointment_date,
             appointment_time=practice_data.appointment_time,
             practice_type=practice_data.practice_type,
             contexts=contexts_csv,
             internal_notes=practice_data.internal_notes,
         )
+        optional_billing_fields = (
+            "company_name",
+            "vat_number",
+            "fiscal_code",
+            "billing_address",
+            "billing_city",
+            "billing_zip",
+        )
+        for field in optional_billing_fields:
+            if hasattr(Practice, field):
+                practice_kwargs[field] = getattr(practice_data, field, None)
+
+        practice = Practice(**practice_kwargs)
 
         db.add(practice)
         db.commit()
