@@ -711,7 +711,9 @@ def _serialize_photo(photo) -> dict:
 
 
 def _project_root() -> str:
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    # In container/runtime the backend code lives under /app.
+    # Using dirname(__file__) keeps all derived paths writable and stable.
+    return os.path.abspath(os.path.dirname(__file__))
 
 
 def _practice_date_iso(practice: Practice) -> str:
