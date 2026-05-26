@@ -110,6 +110,204 @@ function addMinutesToTime(time, minutes) {
   return `${String(Math.floor(total / 60) % 24).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
+const RANDOM_CONTEXTS = ['officina', 'carrozzeria', 'revisione'];
+const RANDOM_FIRST_NAMES = ['Andrea', 'Luca', 'Marco', 'Giulia', 'Sara', 'Elena', 'Paolo', 'Marta', 'Davide', 'Francesca'];
+const RANDOM_LAST_NAMES = ['Rossi', 'Bianchi', 'Ferrari', 'Esposito', 'Romano', 'Gallo', 'Bruno', 'Marino', 'Greco', 'Conti'];
+const RANDOM_COMPANIES = ['Autofficina Delta Srl', 'Car Service Nova', 'Futura Garage', 'Nord Pneumatici', 'Linea Motori Srl'];
+const RANDOM_INTERNAL_NOTES = [
+  'Test casuale completo',
+  'Pratica generata per stress test',
+  'Controllare coerenza dati',
+  'Scenario random multi-flusso',
+  'Bozza generata automaticamente',
+];
+const RANDOM_OFFICINA_ROWS = [
+  'Tagliando completo',
+  'Cambio filtri',
+  'Controllo freni',
+  'Diagnosi elettronica',
+  'Verifica fluidi',
+  'Sostituzione batteria',
+];
+const RANDOM_CARROZZERIA_ROWS = [
+  'Ripristino paraurti',
+  'Lucidatura zona riparata',
+  'Verniciatura parziale',
+  'Rimozione graffi',
+  'Allineamento pannello',
+  'Controllo finitura',
+];
+const RANDOM_REVISIONE_ROWS = [
+  'Revisione periodica',
+  'Controllo emissioni',
+  'Verifica fari',
+  'Prova freni',
+  'Controllo pneumatici',
+];
+const RANDOM_OFFICINA_PARTS = [
+  'Filtro olio',
+  'Olio motore 5W30',
+  'Pastiglie freno',
+  'Filtro aria',
+  'Candela accensione',
+  'Batteria 60Ah',
+];
+const RANDOM_CARROZZERIA_PARTS = [
+  'Primer',
+  'Stucco',
+  'Vernice base',
+  'Trasparente',
+  'Nastro mascheratura',
+];
+
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function randomChoice(items) {
+  return items[randomInt(0, items.length - 1)];
+}
+
+function randomSubset(items, minCount = 1, maxCount = items.length) {
+  const pool = [...items];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = randomInt(0, i);
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const target = randomInt(minCount, Math.min(maxCount, pool.length));
+  return pool.slice(0, target);
+}
+
+function randomPlate() {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const digits = '0123456789';
+  const pick = (source, count) => Array.from({ length: count }, () => source[randomInt(0, source.length - 1)]).join('');
+  return `${pick(letters, 2)}${pick(digits, 3)}${pick(letters, 2)}`;
+}
+
+function randomPhone() {
+  return `+39${randomInt(320, 399)}${randomInt(1000000, 9999999)}`;
+}
+
+function randomDateInNovember2026() {
+  const day = randomInt(1, 28);
+  return new Date(2026, 10, day, 12, 0, 0);
+}
+
+function randomPartQuantity() {
+  return `${randomInt(1, 4)} ${randomChoice(['pz', 'set', 'cf', 'L'])}`;
+}
+
+function randomSectionPayload(context) {
+  const contextConfig = {
+    officina: {
+      rows: RANDOM_OFFICINA_ROWS,
+      manHours: [0.5, 6],
+      macHours: null,
+      materialsMin: 20,
+      materialsMax: 320,
+      wasteApply: false,
+      parts: RANDOM_OFFICINA_PARTS,
+    },
+    carrozzeria: {
+      rows: RANDOM_CARROZZERIA_ROWS,
+      manHours: [0.5, 4],
+      macHours: [0.5, 5],
+      materialsMin: 40,
+      materialsMax: 450,
+      wasteApply: true,
+      parts: RANDOM_CARROZZERIA_PARTS,
+    },
+    revisione: {
+      rows: RANDOM_REVISIONE_ROWS,
+      manHours: [0.5, 2],
+      macHours: null,
+      materialsMin: null,
+      materialsMax: null,
+      wasteApply: false,
+      parts: [],
+    },
+  }[context];
+
+  const descriptionRows = randomSubset(contextConfig.rows, 1, Math.min(3, contextConfig.rows.length));
+  const manHours = contextConfig.manHours ? Number((Math.random() * (contextConfig.manHours[1] - contextConfig.manHours[0]) + contextConfig.manHours[0]).toFixed(1)) : null;
+  const macHours = contextConfig.macHours
+    ? Number((Math.random() * (contextConfig.macHours[1] - contextConfig.macHours[0]) + contextConfig.macHours[0]).toFixed(1))
+    : null;
+  const materialsAmount = contextConfig.materialsMin === null
+    ? null
+    : Number((Math.random() * (contextConfig.materialsMax - contextConfig.materialsMin) + contextConfig.materialsMin).toFixed(2));
+  const wasteApply = context === 'carrozzeria' ? Math.random() < 0.7 : false;
+  const wastePercentage = wasteApply ? Number((Math.random() * 8 + 2).toFixed(1)) : null;
+
+  return {
+    section: {
+      context,
+      description_rows: descriptionRows,
+      man_hours: context === 'carrozzeria' ? null : manHours,
+      mac_hours: macHours,
+      materials_amount: materialsAmount,
+      waste_apply: wasteApply,
+      waste_percentage: wastePercentage,
+      notes: `Scenario ${context} casuale`,
+    },
+    parts: contextConfig.parts.length
+      ? randomSubset(contextConfig.parts, 1, Math.min(3, contextConfig.parts.length)).map((name) => ({
+        context,
+        name,
+        quantity: randomPartQuantity(),
+      }))
+      : [],
+  };
+}
+
+function buildRandomPracticeDraft() {
+  const selectedContexts = randomSubset(RANDOM_CONTEXTS, 1, RANDOM_CONTEXTS.length);
+  const customerType = Math.random() < 0.55 ? 'privato' : 'azienda';
+  const billingToComplete = customerType === 'azienda' ? Math.random() < 0.5 : false;
+  const isCompany = customerType === 'azienda';
+  const customerName = isCompany
+    ? randomChoice(RANDOM_COMPANIES)
+    : `${randomChoice(RANDOM_FIRST_NAMES)} ${randomChoice(RANDOM_LAST_NAMES)}`;
+  const appointmentDate = randomDateInNovember2026();
+  const appointmentTime = randomChoice(APPOINTMENT_TIME_OPTIONS);
+  const practiceType = Math.random() < 0.5 ? 'preventivo' : 'ordine_di_lavoro';
+  const plateConfirmed = randomPlate();
+  const phone = randomPhone();
+  const internalNotes = `${randomChoice(RANDOM_INTERNAL_NOTES)} - ${selectedContexts.join(' + ')}`;
+
+  const sectionEntries = selectedContexts.map((context) => randomSectionPayload(context));
+  const sections = {};
+  const parts = {};
+  sectionEntries.forEach(({ section, parts: sectionParts }) => {
+    sections[section.context] = section;
+    if (sectionParts.length) parts[section.context] = sectionParts;
+  });
+
+  return {
+    formData: {
+      plate_confirmed: plateConfirmed,
+      phone,
+      customer_name: customerName,
+      customer_type: customerType,
+      billing_to_complete: billingToComplete,
+      company_name: billingToComplete ? customerName : '',
+      vat_number: billingToComplete ? `IT${randomInt(10000000000, 99999999999)}` : '',
+      fiscal_code: billingToComplete ? `${randomChoice(RANDOM_LAST_NAMES).slice(0, 3).toUpperCase()}${randomChoice(RANDOM_FIRST_NAMES).slice(0, 3).toUpperCase()}80A01H501U` : '',
+      billing_address: billingToComplete ? `Via ${randomChoice(['Roma', 'Milano', 'Torino', 'Napoli'])} ${randomInt(1, 99)}` : '',
+      billing_city: billingToComplete ? randomChoice(['Milano', 'Roma', 'Torino', 'Bologna']) : '',
+      billing_zip: billingToComplete ? String(randomInt(10000, 99999)) : '',
+      appointment_date: appointmentDate,
+      appointment_time: appointmentTime,
+      practice_type: practiceType,
+      internal_notes: internalNotes,
+    },
+    selectedContexts,
+    sections,
+    parts,
+  };
+}
+
 // --- Sub-components ---
 
 /** Toast notification */
@@ -731,6 +929,76 @@ function App() {
   const authMode = browserPreviewMode ? 'preview browser' : (initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato'));
   const showDeveloperUi = isDebugUiEnabled();
 
+  // --- Draft persistence ---
+  const saveDraft = useCallback(() => {
+    if (currentView !== 'form') return false;
+    try {
+      const data = getValues();
+      const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now() };
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }, [getValues, selectedContexts, sections, parts, currentView]);
+
+  const watchedValues = watch();
+
+  const clearDraft = useCallback(() => {
+    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+  }, []);
+
+  const restoreDraft = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (!raw) return false;
+      const draft = JSON.parse(raw);
+      if (Date.now() - draft.timestamp > 24 * 60 * 60 * 1000) {
+        localStorage.removeItem(DRAFT_STORAGE_KEY);
+        return false;
+      }
+      if (draft.formData) {
+        Object.keys(draft.formData).forEach(key => {
+          if (key === 'appointment_date' && draft.formData[key]) {
+            setValue(key, new Date(draft.formData[key]));
+          } else {
+            setValue(key, draft.formData[key]);
+          }
+        });
+      }
+      if (draft.selectedContexts) setSelectedContexts(draft.selectedContexts);
+      if (draft.selectedContexts) setValue('contexts', draft.selectedContexts);
+      if (draft.sections) {
+        setSections(normalizeSections(
+          Object.entries(draft.sections).map(([context, section]) => ({ context, ...section }))
+        ));
+      }
+      if (draft.parts) setParts(draft.parts);
+      return true;
+    } catch (_) { return false; }
+  }, [setValue]);
+
+  useEffect(() => {
+    if (currentView !== 'form' || loading || successDone) return undefined;
+
+    const persistDraft = () => { saveDraft(); };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') saveDraft();
+    };
+
+    const timer = setTimeout(() => saveDraft(), 250);
+    window.addEventListener('beforeunload', persistDraft);
+    window.addEventListener('pagehide', persistDraft);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('beforeunload', persistDraft);
+      window.removeEventListener('pagehide', persistDraft);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [watchedValues, currentView, loading, successDone, selectedContexts, sections, parts, saveDraft]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const hiddenDebug = {
@@ -822,6 +1090,9 @@ function App() {
   }, [currentView]);
 
   const navigateBack = useCallback(() => {
+    if (currentView === 'form') {
+      saveDraft();
+    }
     const prev = navigationStack[navigationStack.length - 1] || 'dashboard';
     setNavigationStack(s => s.slice(0, -1));
     setCurrentView(prev);
@@ -836,7 +1107,17 @@ function App() {
     setFormPhotoUploadProgress('');
     setPractice(null);
     setError('');
-  }, [navigationStack]);
+  }, [navigationStack, currentView, saveDraft]);
+
+  const openDashboard = useCallback(() => {
+    saveDraft();
+    setCurrentView('dashboard');
+    setNavigationStack([]);
+    setSelectedPracticeId(null);
+    setEditingPractice(null);
+    setDetailData(null);
+    setLoading(false);
+  }, [saveDraft]);
 
   // --- Telegram BackButton ---
   useEffect(() => {
@@ -870,7 +1151,7 @@ function App() {
     }
 
     return () => mb.offClick(handler);
-  }, [browserPreviewMode, currentView]);
+  }, [browserPreviewMode, currentView, openDashboard]);
 
   // --- Slow request indicator ---
   const startSlowTimer = useCallback(() => {
@@ -880,20 +1161,6 @@ function App() {
     if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
     slowTimerRef.current = null;
     setSlowRequest(false);
-  }, []);
-
-  // --- localStorage draft ---
-  const saveDraft = useCallback(() => {
-    if (currentView !== 'form') return;
-    try {
-      const data = getValues();
-      const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now() };
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
-    } catch (_) {}
-  }, [getValues, selectedContexts, sections, parts, currentView]);
-
-  const clearDraft = useCallback(() => {
-    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
   }, []);
 
   const applyDemoTemplate = useCallback(() => {
@@ -922,44 +1189,6 @@ function App() {
     setLoading(false);
     setCurrentView('form');
   }, [setValue]);
-
-  const restoreDraft = useCallback(() => {
-    try {
-      const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
-      if (!raw) return false;
-      const draft = JSON.parse(raw);
-      if (Date.now() - draft.timestamp > 24 * 60 * 60 * 1000) {
-        localStorage.removeItem(DRAFT_STORAGE_KEY);
-        return false;
-      }
-      if (draft.formData) {
-        Object.keys(draft.formData).forEach(key => {
-          if (key === 'appointment_date' && draft.formData[key]) {
-            setValue(key, new Date(draft.formData[key]));
-          } else {
-            setValue(key, draft.formData[key]);
-          }
-        });
-      }
-      if (draft.selectedContexts) setSelectedContexts(draft.selectedContexts);
-      if (draft.sections) {
-        setSections(normalizeSections(
-          Object.entries(draft.sections).map(([context, section]) => ({ context, ...section }))
-        ));
-      }
-      if (draft.parts) setParts(draft.parts);
-      return true;
-    } catch (_) { return false; }
-  }, [setValue]);
-
-  // Save draft on data change (debounced)
-  const watchedValues = watch();
-  useEffect(() => {
-    if (currentView === 'form' && !loading && !successDone) {
-      const timer = setTimeout(() => saveDraft(), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [watchedValues, selectedContexts, sections, parts, loading, successDone, saveDraft, currentView]);
 
   // --- API helpers ---
   const getHeaders = useCallback(() => {
@@ -2142,12 +2371,15 @@ function App() {
   const resetFormForNew = () => {
     setPractice(null);
     setEditingPractice(null);
+    setStartedFromBot(false);
+    setShowDraftBanner(false);
     setSelectedContexts([]);
     setSections({});
     setParts({});
     setError('');
     setFieldErrors({});
     setSuccessDone(false);
+    setValue('contexts', []);
     setValue('plate_confirmed', '');
     setValue('phone', '');
     setValue('customer_name', '');
@@ -2157,6 +2389,12 @@ function App() {
     setValue('practice_type', 'preventivo');
     setValue('internal_notes', '');
     setValue('billing_to_complete', false);
+    setValue('company_name', '');
+    setValue('vat_number', '');
+    setValue('fiscal_code', '');
+    setValue('billing_address', '');
+    setValue('billing_city', '');
+    setValue('billing_zip', '');
     setFormPhotos([]);
     setExistingPhotos([]);
     setFormPhotoUploadProgress('');
@@ -2187,13 +2425,53 @@ function App() {
 
   // ==================== RENDER ====================
 
-  const openDashboard = () => {
-    setCurrentView('dashboard');
-    setNavigationStack([]);
-    setSelectedPracticeId(null);
+  const openNewPracticeForm = () => {
+    resetFormForNew();
+    const restored = restoreDraft();
+    if (restored) {
+      setShowDraftBanner(true);
+    }
+    setCurrentView('form');
+    setNavigationStack(['dashboard']);
+  };
+
+  const applyRandomPracticeDraft = () => {
+    clearDraft();
+    const randomDraft = buildRandomPracticeDraft();
+
+    setPractice(null);
     setEditingPractice(null);
-    setDetailData(null);
+    setSelectedPracticeId(null);
+    setStartedFromBot(false);
     setLoading(false);
+    setSuccessDone(false);
+    setError('');
+    setShowDraftBanner(false);
+    setFieldErrors({});
+    setFormPhotos([]);
+    setExistingPhotos([]);
+    setFormPhotoUploadProgress('');
+    setSelectedContexts(randomDraft.selectedContexts);
+    setValue('contexts', randomDraft.selectedContexts);
+    setSections(randomDraft.sections);
+    setParts(randomDraft.parts);
+    setValue('plate_confirmed', randomDraft.formData.plate_confirmed);
+    setValue('phone', randomDraft.formData.phone);
+    setValue('customer_name', randomDraft.formData.customer_name);
+    setValue('customer_type', randomDraft.formData.customer_type);
+    setValue('billing_to_complete', randomDraft.formData.billing_to_complete);
+    setValue('company_name', randomDraft.formData.company_name);
+    setValue('vat_number', randomDraft.formData.vat_number);
+    setValue('fiscal_code', randomDraft.formData.fiscal_code);
+    setValue('billing_address', randomDraft.formData.billing_address);
+    setValue('billing_city', randomDraft.formData.billing_city);
+    setValue('billing_zip', randomDraft.formData.billing_zip);
+    setValue('appointment_date', randomDraft.formData.appointment_date);
+    setValue('appointment_time', randomDraft.formData.appointment_time);
+    setValue('practice_type', randomDraft.formData.practice_type);
+    setValue('internal_notes', randomDraft.formData.internal_notes);
+    setCurrentView('form');
+    setNavigationStack(['dashboard']);
   };
 
   // --- Dashboard View ---
@@ -2347,7 +2625,7 @@ function App() {
       <button
         className="fab"
         type="button"
-        onClick={() => { resetFormForNew(); navigateTo('form'); }}
+        onClick={openNewPracticeForm}
         aria-label="Nuova pratica"
       >
         +
@@ -2606,13 +2884,20 @@ function App() {
       <div className="view-form view-enter">
         <div className="container">
           {(currentView === 'form' && !startedFromBot) && (
-            <button className="back-button" onClick={() => { navigateBack(); resetFormForNew(); }} type="button">← Indietro</button>
+            <button className="back-button" onClick={navigateBack} type="button">← Indietro</button>
           )}
           {(currentView === 'form' && startedFromBot) && (
             <button className="back-button" onClick={() => { openDashboard(); setStartedFromBot(false); }} type="button">← Dashboard</button>
           )}
 
-          <h1>🔧 Dati Pratica</h1>
+          <div className="section-inline-actions" style={{ marginBottom: 12 }}>
+            <h1>🔧 Dati Pratica</h1>
+            {showDeveloperUi && (
+              <button type="button" className="btn-secondary" onClick={applyRandomPracticeDraft}>
+                Casuale
+              </button>
+            )}
+          </div>
           {showDeveloperUi && (
             <>
               <div className="field-hint" style={{ marginBottom: 12 }}>
