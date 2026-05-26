@@ -60,6 +60,9 @@ automation/artifacts/
 yap-*.png
 yap-storage.json
 automation-artifact-yap-*.png
+tmp_*.js
+tmp_*.json
+tmp_*.html
 automation/yap/archive/
 automation/yap/analysis/rpc-trace-*.json
 automation/yap/analysis/pratica-odl-probe-*.json

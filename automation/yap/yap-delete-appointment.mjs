@@ -74,7 +74,7 @@ async function clickDeleteConfirmIfPresent(page) {
   // Cerca un dialog di conferma visibile con testo conferma/elimina/sì
   const confirmLocator = page.locator(
     ".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel"
-  ).filter({ hasText: /conferm|sicuro|vuoi eliminare/i });
+  ).filter({ hasText: /conferm|sicuro|vuoi eliminare|eliminazione dell'appuntamento/i });
 
   const count = await confirmLocator.count();
   if (!count) return false;
@@ -94,6 +94,27 @@ async function clickDeleteConfirmIfPresent(page) {
 
   await okBtn.first().click();
   return true;
+}
+
+async function clickDeleteAndAcceptNativeDialog(page, locator) {
+  const dialogMessages = [];
+  const onDialog = async (dialog) => {
+    const message = dialog.message();
+    dialogMessages.push(message);
+    if (/confermi l'eliminazione dell'appuntamento\?/i.test(message)) {
+      await dialog.accept();
+      return;
+    }
+    await dialog.dismiss().catch(() => {});
+  };
+
+  page.on("dialog", onDialog);
+  try {
+    await locator.click();
+    return dialogMessages;
+  } finally {
+    page.off("dialog", onDialog);
+  }
 }
 
 async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
@@ -180,8 +201,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
     await page.screenshot({ path: screenshotPath, fullPage: false });
     throw new Error(`Anchor Elimina non trovato nel popup. Screenshot: ${screenshotPath}`);
   }
-  await elimLocator.first().click();
-  const clicked = true;
+  const dialogMessages = await clickDeleteAndAcceptNativeDialog(page, elimLocator.first());
 
   // Screenshot a 300ms, 1000ms, 2000ms dopo click Elimina per catturare dialog conferma
   for (const delay of [300, 700, 1000]) {

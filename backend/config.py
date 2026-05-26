@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"
 
     @field_validator("whitelist_telegram_ids", mode="before")
     @classmethod

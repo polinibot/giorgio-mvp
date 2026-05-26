@@ -8,6 +8,8 @@ Uso:
 Invia un messaggio di test al canale errori configurato.
 """
 
+__test__ = False
+
 import os
 import sys
 import asyncio
