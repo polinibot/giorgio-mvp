@@ -1,0 +1,57 @@
+{
+  "inspectedAt": "2026-05-22T11:41:45.329Z",
+  "results": [
+    {
+      "target": {
+        "id": 9,
+        "name": "Cofano_revisione",
+        "date": "2026-03-15",
+        "context": "revisione",
+        "terms": [
+          "3285625559",
+          "328562",
+          "cofano",
+          "freccia",
+          "belotti"
+        ]
+      },
+      "found": false,
+      "termsTried": [
+        "3285625559",
+        "328562",
+        "cofano",
+        "freccia",
+        "belotti"
+      ],
+      "screenshots": {
+        "before": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-supplement\\Cofano_revisione-before.png"
+      }
+    },
+    {
+      "target": {
+        "id": 2,
+        "name": "Kit_frizione",
+        "date": "2026-03-20",
+        "context": "officina",
+        "terms": [
+          "3351324672",
+          "dp126gz",
+          "bisio",
+          "frizione",
+          "pikhlyk"
+        ]
+      },
+      "found": false,
+      "termsTried": [
+        "3351324672",
+        "dp126gz",
+        "bisio",
+        "frizione",
+        "pikhlyk"
+      ],
+      "screenshots": {
+        "before": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-supplement\\Kit_frizione-before.png"
+      }
+    }
+  ]
+}

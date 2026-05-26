@@ -1,0 +1,74 @@
+{
+  "generatedAt": "2026-05-22T20:25:00.000Z",
+  "method": "yap-pratica-odl-probe.mjs read-only su appuntamento revisione esistente",
+  "specimen": {
+    "date": "2025-04-04",
+    "plate": "EL733YJ",
+    "client": "MORELLI LILIANA",
+    "context": "revisione pura",
+    "agendaTitle": "EL733YJ - CITROEN C3 PICASSO - MORELLI LILIANA - REVISIONE",
+    "column": "LCWVQRD-b-r"
+  },
+  "verified": true,
+  "summary": "Appuntamento con tag revisione ha già pratica collegata e sezione Ordini di lavoro in YAP. Giorgio deve solo creare l'appuntamento agenda con tag corretti; pratica/ODL si aprono da YAP nativamente.",
+  "popupFindings": {
+    "cosa": "REVISIONE",
+    "cosaNote": "Eccezione: revisione pura usa Cosa=REVISIONE, non targa (diverso da officina/carrozzeria dove Cosa=targa)",
+    "quando": "04/04/2025",
+    "dalle": "10.20",
+    "alle": "10.40",
+    "tagChips": ["revisione"],
+    "linksInPopup": ["Pianifica documento...", "Gestione pratica"]
+  },
+  "praticaFindings": {
+    "praticaTitle": "PRATICA VEICOLO 'EL733YJ' DEL 4 APR 2025, 10:20:00",
+    "reachableFromAgenda": true,
+    "menuSections": [
+      "Controllo",
+      "Revisione",
+      "Preventivi",
+      "Ordini di lavoro",
+      "Documenti fiscali",
+      "Materiali di consumo",
+      "Smaltimento rifiuti"
+    ],
+    "rpcOnOpen": [
+      "PraticaGetOverviewAction",
+      "DocumentoFiscaleTableAction",
+      "PraticaDocumentoFiscaleGetOverviewAction"
+    ]
+  },
+  "odlFindings": {
+    "odlSectionVisible": true,
+    "manodoperaInCatalog": true,
+    "materialiInCatalog": true,
+    "giorgioMustCreateOdl": false,
+    "reason": "YAP crea/collega pratica da prenotazione; ODL e righe MANODOPERA/Materiali sono moduli successivi già presenti nella pratica"
+  },
+  "automatismiCrossCheck": {
+    "AutomatismoOdlDaPrenotazione": "presente nel tenant",
+    "AutomatismoRevisioneInPrenotazione": "presente nel tenant",
+    "AutomatismoArticoloDocumentoFromTagPrenotazione": "presente nel tenant",
+    "uiConfirmsAutomatismi": true
+  },
+  "giorgioScopeRevised": {
+    "agenda": "implementare (Cosa, Quando, Dalle/Alle, tag chip)",
+    "gestionePratica": "non automatizzare — link nativo da YAP dopo save",
+    "odl": "non automatizzare — operatore usa YAP o fase 2 opzionale",
+    "oreMaterialiRicambi": "payload Giorgio pronto; inserimento in pratica/ODL manuale o fase 2"
+  },
+  "mappingExceptions": [
+    {
+      "case": "revisione pura",
+      "cosaRule": "Cosa=REVISIONE (osservato), non targa",
+      "tags": ["revisione"],
+      "confidence": "high (evidenza popup)"
+    }
+  ],
+  "artifacts": [
+    "automation/artifacts/yap-pratica-probe/2025-04-04-popup.png",
+    "automation/artifacts/yap-pratica-probe/2025-04-04-after-pratica-click.png",
+    "automation/yap/analysis/pratica-odl-probe-2025-04-04-revisione.json"
+  ],
+  "confidence": "high"
+}

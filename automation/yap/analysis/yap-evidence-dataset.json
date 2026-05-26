@@ -1,0 +1,360 @@
+{
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-05-22T20:01:07.525Z",
+  "evidenceSchema": {
+    "required": [
+      "date",
+      "source",
+      "uiStatus"
+    ],
+    "uiStatusValues": [
+      "popup_extracted",
+      "agenda_bar_only",
+      "not_found",
+      "api_only",
+      "api_inferred"
+    ]
+  },
+  "recordCount": 10,
+  "records": [
+    {
+      "id": "scan-2025-04-04-10:00 - 10:20-DW092DR - CITROEN C4",
+      "giorgioExampleId": null,
+      "giorgioContext": null,
+      "date": "2025-04-04",
+      "source": "readonly-scan-2025-04-04.json",
+      "uiStatus": "agenda_bar_only",
+      "agendaBar": {
+        "time": "10:00 - 10:20",
+        "title": "DW092DR - CITROEN C4 PICASSO «I» - SERUGHETTI LUCIANO - 3384738808 - DW092DR",
+        "repartoClass": "LCWVQRD-b-r"
+      },
+      "popup": {
+        "cosa": null,
+        "quando": null,
+        "dalle": null,
+        "alle": null,
+        "tagChips": [],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    },
+    {
+      "id": "scan-2025-04-04-10:20 - 10:40-EL733YJ - CITROEN C3",
+      "giorgioExampleId": 9,
+      "giorgioContext": "revisione",
+      "date": "2025-04-04",
+      "source": "readonly-scan-2025-04-04.json",
+      "uiStatus": "agenda_bar_only",
+      "agendaBar": {
+        "time": "10:20 - 10:40",
+        "title": "EL733YJ - CITROEN C3 PICASSO - MORELLI LILIANA - 3456953099 - REVISIONE",
+        "repartoClass": "LCWVQRD-b-r"
+      },
+      "popup": {
+        "cosa": null,
+        "quando": null,
+        "dalle": null,
+        "alle": null,
+        "tagChips": [],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    },
+    {
+      "id": "scan-2025-04-04-14:00 - 14:20-DP126GZ - MERCEDES-B",
+      "giorgioExampleId": 2,
+      "giorgioContext": "officina",
+      "date": "2025-04-04",
+      "source": "readonly-scan-2025-04-04.json",
+      "uiStatus": "agenda_bar_only",
+      "agendaBar": {
+        "time": "14:00 - 14:20",
+        "title": "DP126GZ - MERCEDES-BENZ A-CLASS (169) (04-12) - PIKHLYK PETRO - 3280524550 - DP126GZ - KIT FRIZIONE",
+        "repartoClass": "LCWVQRD-b-e"
+      },
+      "popup": {
+        "cosa": null,
+        "quando": null,
+        "dalle": null,
+        "alle": null,
+        "tagChips": [],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    },
+    {
+      "id": "precise-9-2026-03-15-missing",
+      "giorgioExampleId": 9,
+      "giorgioContext": null,
+      "date": "2026-03-15",
+      "source": "precise-inspection-results.json",
+      "uiStatus": "not_found",
+      "agendaBar": {
+        "time": "",
+        "title": "",
+        "repartoClass": ""
+      },
+      "popup": {
+        "cosa": null,
+        "quando": null,
+        "dalle": null,
+        "alle": null,
+        "tagChips": [],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": [
+        "not found in precise inspector"
+      ]
+    },
+    {
+      "id": "precise-8-2026-03-16",
+      "giorgioExampleId": 8,
+      "giorgioContext": null,
+      "date": "2026-03-16",
+      "source": "precise-inspection-results.json",
+      "uiStatus": "popup_extracted",
+      "agendaBar": {
+        "time": "",
+        "title": "8:20 - 8:40FX339TM - SPA ITALTRANS - FX339TM",
+        "repartoClass": ""
+      },
+      "popup": {
+        "cosa": "FX339TM",
+        "quando": "16/03/2026",
+        "dalle": "08.20",
+        "alle": "08.40",
+        "tagChips": [
+          "pneumatici"
+        ],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    },
+    {
+      "id": "scan-2026-03-16-8:20 - 8:40-FX339TM - SPA ITALTR",
+      "giorgioExampleId": null,
+      "giorgioContext": null,
+      "date": "2026-03-16",
+      "source": "readonly-scan-2026-03-16.json",
+      "uiStatus": "agenda_bar_only",
+      "agendaBar": {
+        "time": "8:20 - 8:40",
+        "title": "FX339TM - SPA ITALTRANS - FX339TM",
+        "repartoClass": "LCWVQRD-b-f"
+      },
+      "popup": {
+        "cosa": null,
+        "quando": null,
+        "dalle": null,
+        "alle": null,
+        "tagChips": [],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    },
+    {
+      "id": "scan-2026-03-20-10:00 - 10:20-DE998HF - IVECO DAIL",
+      "giorgioExampleId": null,
+      "giorgioContext": null,
+      "date": "2026-03-20",
+      "source": "readonly-scan-2026-03-20.json",
+      "uiStatus": "agenda_bar_only",
+      "agendaBar": {
+        "time": "10:00 - 10:20",
+        "title": "DE998HF - IVECO DAILY C «II» - I.C.E.M. - DE998HF",
+        "repartoClass": "LCWVQRD-b-r"
+      },
+      "popup": {
+        "cosa": null,
+        "quando": null,
+        "dalle": null,
+        "alle": null,
+        "tagChips": [],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    },
+    {
+      "id": "precise-5-2026-03-23",
+      "giorgioExampleId": 5,
+      "giorgioContext": null,
+      "date": "2026-03-23",
+      "source": "precise-inspection-results.json",
+      "uiStatus": "popup_extracted",
+      "agendaBar": {
+        "time": "",
+        "title": "12:00 - 12:20DK140TP - VOLKSWAGEN PASSAT «V» VARIANT - KYAL NEZHA - 3669584120 - RADWAN",
+        "repartoClass": ""
+      },
+      "popup": {
+        "cosa": "RADWAN",
+        "quando": "23/02/2026",
+        "dalle": "12.00",
+        "alle": "12.20",
+        "tagChips": [
+          "revisione"
+        ],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    },
+    {
+      "id": "precise-1-2026-03-25",
+      "giorgioExampleId": 1,
+      "giorgioContext": null,
+      "date": "2026-03-25",
+      "source": "precise-inspection-results.json",
+      "uiStatus": "popup_extracted",
+      "agendaBar": {
+        "time": "",
+        "title": "8:00 - 8:20GA019BC - MERCEDES-BENZ GLC - FRIGOR TRASPORTI OROBICO - 035953876 - GA019BC",
+        "repartoClass": ""
+      },
+      "popup": {
+        "cosa": "GA019BC",
+        "quando": "25/02/2026",
+        "dalle": "08.00",
+        "alle": "08.20",
+        "tagChips": [
+          "revisione"
+        ],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    },
+    {
+      "id": "precise-7-2026-03-30",
+      "giorgioExampleId": 7,
+      "giorgioContext": null,
+      "date": "2026-03-30",
+      "source": "precise-inspection-results.json",
+      "uiStatus": "popup_extracted",
+      "agendaBar": {
+        "time": "",
+        "title": "9:00 - 9:20GD109AR - PEUGEOT 5008 «II» - SINGH GURWINDER - 3899885954 - GD109AR",
+        "repartoClass": ""
+      },
+      "popup": {
+        "cosa": "GD109AR",
+        "quando": "30/03/2026",
+        "dalle": "09.00",
+        "alle": "09.20",
+        "tagChips": [
+          "pneumatici",
+          "comunicato",
+          "preventivo"
+        ],
+        "note1": null,
+        "note2": null
+      },
+      "apiMatch": null,
+      "notes": []
+    }
+  ],
+  "apiIndex": {
+    "1": {
+      "title": "Frigor Trasporti carrozzeria",
+      "context": "carrozzeria",
+      "bestScore": 38,
+      "bestDate": "20260325",
+      "matchCount": 5
+    },
+    "2": {
+      "title": "Kit frizione officina",
+      "context": "officina",
+      "bestScore": 0,
+      "bestDate": null,
+      "matchCount": 0
+    },
+    "3": {
+      "title": "Rumore motore officina",
+      "context": "officina",
+      "bestScore": 0,
+      "bestDate": null,
+      "matchCount": 0
+    },
+    "4": {
+      "title": "Cofano usato carrozzeria",
+      "context": "carrozzeria",
+      "bestScore": 0,
+      "bestDate": null,
+      "matchCount": 0
+    },
+    "5": {
+      "title": "Passat misto",
+      "context": "misto",
+      "bestScore": 20,
+      "bestDate": "20260323",
+      "matchCount": 5
+    },
+    "6": {
+      "title": "Perizia Manuel Zubani",
+      "context": "carrozzeria",
+      "bestScore": 0,
+      "bestDate": null,
+      "matchCount": 0
+    },
+    "7": {
+      "title": "Porta posteriore sinistra",
+      "context": "carrozzeria",
+      "bestScore": 45,
+      "bestDate": "20260330",
+      "matchCount": 5
+    },
+    "8": {
+      "title": "Italtrans filippina",
+      "context": "carrozzeria",
+      "bestScore": 30,
+      "bestDate": "20260316",
+      "matchCount": 5
+    },
+    "9": {
+      "title": "Cofano freccia revisione",
+      "context": "revisione",
+      "bestScore": 30,
+      "bestDate": "20260315",
+      "matchCount": 1
+    }
+  },
+  "scansSummary": [
+    {
+      "date": "2025-04-04",
+      "eventCount": 18,
+      "file": "readonly-scan-2025-04-04.json"
+    },
+    {
+      "date": "2026-03-15",
+      "eventCount": 0,
+      "file": "readonly-scan-2026-03-15.json"
+    },
+    {
+      "date": "2026-03-16",
+      "eventCount": 1,
+      "file": "readonly-scan-2026-03-16.json"
+    },
+    {
+      "date": "2026-03-20",
+      "eventCount": 11,
+      "file": "readonly-scan-2026-03-20.json"
+    }
+  ]
+}

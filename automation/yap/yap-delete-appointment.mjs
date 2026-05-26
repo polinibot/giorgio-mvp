@@ -71,39 +71,29 @@ async function visibleYapMessage(page) {
 }
 
 async function clickDeleteConfirmIfPresent(page) {
-  return page.evaluate(() => {
-    const isVisible = (el) => {
-      const rect = el.getBoundingClientRect();
-      const style = window.getComputedStyle(el);
-      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
-    };
+  // Cerca un dialog di conferma visibile con testo conferma/elimina/sì
+  const confirmLocator = page.locator(
+    ".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel"
+  ).filter({ hasText: /conferm|sicuro|vuoi eliminare/i });
 
-    const dialogs = [...document.querySelectorAll(".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel")]
-      .filter(isVisible)
-      .filter((el) => {
-        const text = (el.textContent || "").toLowerCase();
-        return (
-          text.includes("conferm") ||
-          text.includes("sicuro") ||
-          text.includes("elimin") ||
-          text.includes("cancell")
-        );
-      });
+  const count = await confirmLocator.count();
+  if (!count) return false;
 
-    if (!dialogs.length) return false;
-    const dialog = dialogs[dialogs.length - 1];
-    const buttons = [...dialog.querySelectorAll("button, .gwt-Button, a.gwt-Anchor, [role='button']")]
-      .filter(isVisible);
-    if (!buttons.length) return false;
+  // Cerca bottone OK/Sì/Conferma nel dialog
+  const okBtn = confirmLocator.last().locator(
+    "button, .gwt-Button, a.gwt-Anchor, [role='button']"
+  ).filter({ hasText: /ok|s[ìi]|confer|elimin|cancell|yes/i });
 
-    const ok = buttons.find((el) => {
-      const text = (el.textContent || "").toLowerCase();
-      return /ok|s[ìi]|confer|elimin|cancell|yes/.test(text);
-    }) || buttons[0];
+  const okCount = await okBtn.count();
+  if (!okCount) {
+    // Prova primo button disponibile
+    const anyBtn = confirmLocator.last().locator("button, .gwt-Button, a.gwt-Anchor").first();
+    if (await anyBtn.count()) { await anyBtn.click(); return true; }
+    return false;
+  }
 
-    ok.click();
-    return true;
-  });
+  await okBtn.first().click();
+  return true;
 }
 
 async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
@@ -168,25 +158,21 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
   page.on("request", onRequest);
   page.on("response", onResponse);
 
+  // Chiudi eventuali tooltip/popup esistenti prima di cliccare sull'evento
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+  // Click su area neutra (intestazione ore, lontana da eventi e sidebar)
+  await page.mouse.click(300, 128);
+  await page.waitForTimeout(400);
+
   await page.mouse.click(match.x, match.y);
   await page.getByText("Dettagli appuntamento").first().waitFor({ state: "visible", timeout: 15000 });
+  await page.waitForTimeout(300);
 
-  const clicked = await page.evaluate(() => {
-    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
-      .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
-    if (!popup) return false;
-
-    const anchors = [...popup.querySelectorAll("a.gwt-Anchor")]
-      .filter((el) => el.getBoundingClientRect().width > 0)
-      .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
-
-    const elim = anchors.find((a) => (a.textContent || "").includes("Elimina")) || anchors[1];
-    if (!elim) return false;
-    elim.click();
-    return true;
-  });
-
-  if (!clicked) {
+  // Usa page.locator per cliccare su "Elimina appuntamento" — GWT richiede click reale Playwright
+  const elimLocator = page.locator(".gwt-DecoratedPopupPanel a.gwt-Anchor").filter({ hasText: /Elimina/i });
+  const elimCount = await elimLocator.count();
+  if (elimCount === 0) {
     page.off("request", onRequest);
     page.off("response", onResponse);
     const screenshotPath = path.join(ROOT_DIR, "automation", "artifacts", "yap", `delete-popup-${Date.now()}.png`);
@@ -194,26 +180,44 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
     await page.screenshot({ path: screenshotPath, fullPage: false });
     throw new Error(`Anchor Elimina non trovato nel popup. Screenshot: ${screenshotPath}`);
   }
+  await elimLocator.first().click();
+  const clicked = true;
+
+  // Screenshot a 300ms, 1000ms, 2000ms dopo click Elimina per catturare dialog conferma
+  for (const delay of [300, 700, 1000]) {
+    await page.waitForTimeout(delay);
+    const midPath = path.join(ROOT_DIR, "automation", "artifacts", "yap", `after-elimina-${delay}ms-${Date.now()}.png`);
+    await fs.mkdir(path.dirname(midPath), { recursive: true });
+    await page.screenshot({ path: midPath, fullPage: false });
+    console.warn(`[debug] t+${delay}ms: ${midPath}`);
+    // Se appare un popup intanto, esci dal loop
+    const msg = await visibleYapMessage(page);
+    if (msg) { console.warn(`[debug] t+${delay}ms popup: ${msg.slice(0, 120)}`); break; }
+  }
 
   let visibleMessage = "";
-  for (let i = 0; i < 4 && !deleteRpcRequest; i += 1) {
-    await page.waitForTimeout(650);
+
+  // Aspetta la RPC delete tramite waitForRequest (event-driven, non polling)
+  // oppure un dialog di conferma che va cliccato prima
+  const waitForRpc = page.waitForRequest(
+    (req) => req.url().includes(DELETE_ACTION_ENDPOINT),
+    { timeout: 10000 }
+  ).then(() => "rpc").catch(() => "rpc_timeout");
+
+  // Controlla anche se arriva prima un dialog di conferma
+  let raceResult = "timeout";
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(600);
+    if (deleteRpcRequest) { raceResult = "rpc"; break; }
     visibleMessage = await visibleYapMessage(page);
-    if (classifyDeleteFailure(visibleMessage)) break;
-    if (deleteRpcRequest) break;
+    if (classifyDeleteFailure(visibleMessage)) { raceResult = "error"; break; }
     const confirmed = await clickDeleteConfirmIfPresent(page);
-    if (!confirmed && i === 0) {
-      await page.evaluate(() => {
-        const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
-          .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
-        if (!popup) return;
-        const anchors = [...popup.querySelectorAll("a.gwt-Anchor")]
-          .filter((el) => el.getBoundingClientRect().width > 0)
-          .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
-        const elim = anchors.find((a) => (a.textContent || "").includes("Elimina")) || anchors[1];
-        if (elim) elim.click();
-      });
-    }
+    if (confirmed) { raceResult = "confirmed"; break; }
+  }
+
+  // Se c'era un dialog di conferma, aspetta ora la RPC
+  if (raceResult === "confirmed" || raceResult === "timeout") {
+    await Promise.race([waitForRpc, page.waitForTimeout(8000)]);
   }
 
   await page.waitForTimeout(500);
@@ -300,13 +304,65 @@ async function main() {
     }
 
     console.log(JSON.stringify({ ok: true, date: args.date, search: args.search, screenshot: screenshotPath, ...result }, null, 2));
+  } catch (error) {
+    const errorSuffix = `${args.search}-${Date.now()}`;
+    const errorScreenshotPath = path.join(ROOT_DIR, "automation", "artifacts", "yap", `error-delete-${errorSuffix}.png`);
+    try {
+      await page.screenshot({ path: errorScreenshotPath, fullPage: true });
+      error.screenshotPath = errorScreenshotPath;
+      console.warn(`Screenshot dell'errore salvato in: ${errorScreenshotPath}`);
+    } catch (screenshotError) {
+      console.warn(`Fallito screenshot dell'errore: ${screenshotError.message}`);
+    }
+    throw error;
   } finally {
     await context.close();
     await browser.close();
   }
 }
 
-main().catch((err) => {
-  console.error(JSON.stringify({ ok: false, error: err.message }, null, 2));
+async function notifyError(error, args) {
+  const apiBaseUrl = process.env.API_BASE_URL;
+  if (!apiBaseUrl) return;
+
+  const payload = {
+    error_message: error.message,
+    stack_trace: error.stack,
+    screenshot_path: error.screenshotPath || null,
+    practice_id: null,
+    customer: args?.search ? { name: args.search, plate: args.search } : null,
+    appointment: args?.date ? { date: args.date, time: null } : null,
+    worker: "yap-delete-appointment.mjs",
+  };
+
+  try {
+    const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/yap/notify-error`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (response.ok) {
+      console.warn("Notifica errore inviata al backend");
+    }
+  } catch (notifyErr) {
+    console.warn(`Fallito invio notifica errore: ${notifyErr.message}`);
+  }
+}
+
+main().catch(async (err) => {
+  // Prova a notificare l'errore al backend
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    await notifyError(err, args);
+  } catch {
+    // Ignora errori nella notifica
+  }
+
+  console.error(JSON.stringify({
+    ok: false,
+    error: err.message,
+    stack: err.stack,
+    screenshot: err.screenshotPath || null,
+  }, null, 2));
   process.exit(1);
 });

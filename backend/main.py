@@ -42,7 +42,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for dev/test environm
 
 from config import settings, DEBUG, ALLOWED_ORIGINS, LOCAL_DEV_ORIGIN_REGEX
 from database_sqlite import (
-    get_db, create_tables, Practice, PracticePhoto, PracticeSection, PracticePart,
+    get_db, create_tables, Practice, PracticePhoto, PracticeSection, PracticePart, SystemSetting,
 )
 from models import (
     PracticeStatus, PracticeType, CustomerType, Context,
@@ -400,6 +400,16 @@ class YapDeleteAppointmentRequest(BaseModel):
     fresh_login: bool = False
 
 
+class YapErrorNotificationRequest(BaseModel):
+    error_message: str
+    stack_trace: Optional[str] = None
+    screenshot_path: Optional[str] = None
+    practice_id: Optional[int] = None
+    customer: Optional[dict] = None
+    appointment: Optional[dict] = None
+    worker: Optional[str] = None
+
+
 class SectionPayload(BaseModel):
     context: Context
     description_rows: List[str]
@@ -714,7 +724,11 @@ def _serialize_photo(photo) -> dict:
 def _project_root() -> str:
     # In container/runtime the backend code lives under /app.
     # Using dirname(__file__) keeps all derived paths writable and stable.
-    return os.path.abspath(os.path.dirname(__file__))
+    root = os.path.abspath(os.path.dirname(__file__))
+    # Fallback per sviluppo locale se 'automation' non è nella stessa cartella ma è nel parent
+    if not os.path.exists(os.path.join(root, "automation")) and os.path.exists(os.path.join(os.path.dirname(root), "automation")):
+        return os.path.dirname(root)
+    return root
 
 
 def _practice_date_iso(practice: Practice) -> str:
@@ -724,9 +738,23 @@ def _practice_date_iso(practice: Practice) -> str:
     return str(value or "")[:10]
 
 
-async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180) -> Dict[str, Any]:
+async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180, db: Optional[Session] = None) -> Dict[str, Any]:
     root = _project_root()
     script_path = os.path.join(root, "automation", "yap", script_name)
+
+    # Gestione Session State da Database
+    session_file_path = os.path.join(root, "automation", "artifacts", "yap", "session-state.json")
+    if db:
+        try:
+            setting = db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
+            if setting and setting.value:
+                os.makedirs(os.path.dirname(session_file_path), exist_ok=True)
+                with open(session_file_path, "w", encoding="utf-8") as f:
+                    f.write(setting.value)
+                logger.info("Session state YAP ripristinato dal database")
+        except Exception as e:
+            logger.warning("Impossibile ripristinare la sessione YAP dal database: %s", e)
+
     node_bin = os.getenv("NODE_BINARY") or (_shutil.which("node") or _shutil.which("nodejs") or "node")
     process = await asyncio.create_subprocess_exec(
         node_bin,
@@ -746,6 +774,25 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
 
     out = stdout.decode("utf-8", errors="replace").strip()
     err = stderr.decode("utf-8", errors="replace").strip()
+
+    # Salva Session State nel Database dopo l'esecuzione, anche in caso di fallimento
+    if db and os.path.exists(session_file_path):
+        try:
+            with open(session_file_path, "r", encoding="utf-8") as f:
+                session_data = f.read()
+            if session_data.strip():
+                setting = db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
+                if not setting:
+                    setting = SystemSetting(key="yap_session_state", value=session_data)
+                    db.add(setting)
+                else:
+                    setting.value = session_data
+                db.commit()
+                logger.info("Session state YAP salvato nel database")
+        except Exception as e:
+            db.rollback()
+            logger.warning("Impossibile salvare la sessione YAP nel database: %s", e)
+
     if process.returncode != 0:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1342,7 +1389,7 @@ async def sync_practice_to_yap(
         if body.fresh_login:
             args.append("--fresh-login")
 
-        result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=420)
+        result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=420, db=db)
         saved = bool((result.get("result") or {}).get("saved"))
         duplicate = (result.get("result") or {}).get("mode") == "commit-blocked-duplicate"
         if not body.dry_run and (saved or duplicate):
@@ -1394,7 +1441,7 @@ async def delete_practice_yap_appointment(
     if body.fresh_login:
         args.append("--fresh-login")
 
-    result = await _run_yap_script("yap-delete-appointment.mjs", args)
+    result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
     if not body.dry_run and result.get("deleted"):
         practice.synced = False
         practice.updated_by_telegram_id = user_data["id"]
@@ -1460,6 +1507,99 @@ async def get_yap_mapping_preview_from_form(
     except Exception as e:
         logger.error("Error building YAP preview from form: %s", e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore anteprima YAP da form")
+
+
+@app.get("/yap/error-channel-status")
+@limiter.limit("30/minute")
+async def get_error_channel_status(request: Request):
+    """Verifica lo stato della configurazione del canale errori."""
+    from error_notifier import get_error_notifier
+
+    notifier = get_error_notifier()
+
+    is_configured = bool(
+        notifier.bot_token and notifier.channel_id
+    )
+
+    return APIResponse(
+        success=True,
+        data={
+            "configured": is_configured,
+            "has_bot_token": bool(notifier.bot_token),
+            "has_channel_id": bool(notifier.channel_id),
+            "channel_id_preview": notifier.channel_id[:15] + "..." if notifier.channel_id and len(notifier.channel_id) > 15 else notifier.channel_id,
+        }
+    )
+
+
+@app.post("/yap/test-error-channel")
+@limiter.limit("5/minute")
+async def test_error_channel(request: Request):
+    """Invia un messaggio di test al canale errori."""
+    from error_notifier import get_error_notifier
+
+    notifier = get_error_notifier()
+
+    if not notifier.bot_token or not notifier.channel_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Canale errori non configurato. Imposta TELEGRAM_ERROR_CHANNEL_ID nel .env",
+        )
+
+    result = await notifier.notify_error(
+        error_message="🧪 Questo è un messaggio di test dal backend Giorgio",
+        context={
+            "practice_id": None,
+            "worker": "test-endpoint",
+        }
+    )
+
+    if result:
+        return APIResponse(success=True, data={"sent": True, "message": "Messaggio di test inviato al canale"})
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Impossibile inviare messaggio di test. Verifica che il bot sia amministratore del canale.",
+        )
+
+
+@app.post("/yap/notify-error")
+@limiter.limit("30/minute")
+async def notify_yap_error_endpoint(
+    request: Request,
+    body: YapErrorNotificationRequest,
+):
+    """Riceve notifiche errori dai worker YAP e le invia su canale Telegram."""
+    try:
+        from error_notifier import get_error_notifier
+
+        context = {
+            "practice_id": body.practice_id,
+            "customer": body.customer,
+            "appointment": body.appointment,
+            "worker": body.worker,
+        }
+
+        notifier = get_error_notifier()
+        success = await notifier.notify_error(
+            error_message=body.error_message,
+            stack_trace=body.stack_trace,
+            screenshot_path=body.screenshot_path,
+            context=context,
+        )
+
+        if success:
+            logger.info("Notifica errore YAP inviata su Telegram (practice_id=%s)", body.practice_id)
+            return APIResponse(success=True, data={"notified": True})
+        else:
+            logger.warning("Notifica errore YAP non inviata - canale non configurato")
+            return APIResponse(success=True, data={"notified": False, "reason": "channel_not_configured"})
+    except Exception as e:
+        logger.error("Errore nell'invio notifica YAP: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Errore invio notifica",
+        )
 
 
 # --- Sections ---

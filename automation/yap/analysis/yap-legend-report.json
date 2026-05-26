@@ -1,0 +1,30 @@
+{
+  "extractedAt": "2026-05-22T11:41:25.569Z",
+  "legendPopup": null,
+  "observedClasses": [],
+  "inferredMapping": {
+    "LCWVQRD-b-f": {
+      "label": "Colonna gialla (osservata su Italtrans/carrozzeria-pneumatici)",
+      "confidence": "medium",
+      "sampleBg": "rgb(224, 194, 64)"
+    },
+    "LCWVQRD-b-r": {
+      "label": "Colonna azzurra (osservata su Passat/Frigor/revisione)",
+      "confidence": "medium",
+      "sampleBg": "azzurro"
+    },
+    "LCWVQRD-b-e": {
+      "label": "Colonna alternativa (Porta posteriore / pneumatici+preventivo)",
+      "confidence": "medium"
+    },
+    "LCWVQRD-b-n": {
+      "label": "Colonna marrone (altri eventi stesso giorno)",
+      "confidence": "low"
+    },
+    "LCWVQRD-b-a": {
+      "label": "Colonna grigia",
+      "confidence": "low"
+    }
+  },
+  "note": "La legenda testuale YAP puo non essere accessibile via automazione; usare observedClasses + deep-inspection per conferma."
+}

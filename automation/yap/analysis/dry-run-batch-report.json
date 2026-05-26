@@ -1,0 +1,95 @@
+{
+  "generatedAt": "2026-05-25T10:34:37.268Z",
+  "mode": "dry_run_batch",
+  "allOk": true,
+  "results": [
+    {
+      "file": "sample-payload.json",
+      "ok": true,
+      "planned": {
+        "cosa": "AB123CD - CONTROLLO VEICOLO",
+        "quando": "25/05/2026",
+        "dalle": "14.30",
+        "alle": "14.50",
+        "tags": [
+          "officina"
+        ]
+      },
+      "dedup": {
+        "hit": false,
+        "reason": "not_found",
+        "key": "AB123CD|2026-05-25|14:30"
+      },
+      "error": null
+    },
+    {
+      "file": "sample-payload-revisione-pura.json",
+      "ok": true,
+      "planned": {
+        "cosa": "REVISIONE",
+        "quando": "04/04/2025",
+        "dalle": "10.20",
+        "alle": "10.40",
+        "tags": [
+          "revisione"
+        ]
+      },
+      "dedup": {
+        "hit": true,
+        "reason": "plate_time_match",
+        "event": {
+          "time": "10:20 - 10:40",
+          "title": "EL733YJ - CITROEN C3 PICASSO - MORELLI LILIANA - 3456953099 - REVISIONE"
+        },
+        "key": "EL733YJ|2025-04-04|10:20",
+        "diffMinutes": 0
+      },
+      "error": null
+    },
+    {
+      "file": "sample-payload-carrozzeria-revisione.json",
+      "ok": true,
+      "planned": {
+        "cosa": "GA019BC - VERNICIATURA CERCHI",
+        "quando": "25/03/2026",
+        "dalle": "08.00",
+        "alle": "08.20",
+        "tags": [
+          "pneumatici",
+          "preventivo"
+        ]
+      },
+      "dedup": {
+        "hit": true,
+        "reason": "plate_time_match",
+        "event": {
+          "time": "8:00 - 8:20",
+          "title": "GA019BC - MERCEDES-BENZ GLC - FRIGOR TRASPORTI OROBICO - 035953876 - GA019BC"
+        },
+        "key": "GA019BC|2026-03-25|08:00",
+        "diffMinutes": 0
+      },
+      "error": null
+    },
+    {
+      "file": "sample-payload-fd897lp-revisione.json",
+      "ok": true,
+      "planned": {
+        "cosa": "FD897LP - RIPARARE FORATURA",
+        "quando": "25/05/2026",
+        "dalle": "09.24",
+        "alle": "09.44",
+        "tags": [
+          "officina",
+          "revisione"
+        ]
+      },
+      "dedup": {
+        "hit": false,
+        "reason": "not_found",
+        "key": "FD897LP|2026-05-25|09:24"
+      },
+      "error": null
+    }
+  ]
+}

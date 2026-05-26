@@ -136,6 +136,13 @@ class PracticePart(Base):
     quantity = Column(String(50), nullable=True)  # Testuale: "1 pz", "2 pz", "3,5 kg"
 
 
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    key = Column(String(100), primary_key=True, index=True)
+    value = Column(Text, nullable=False)
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -174,95 +181,109 @@ def create_tables():
         logger.info("Migrated: added notes column to practice_sections")
     # Migrate: make plate_confirmed, phone, customer_name nullable
     try:
-        with engine.connect() as conn:
-            pragma_rows = conn.execute(text("PRAGMA table_info(practices)")).fetchall()
-            notnull_by_column = {row[1]: row[3] for row in pragma_rows}  # row[1]=name, row[3]=notnull
-            needs_nullable_migration = any(
-                notnull_by_column.get(column_name, 0) == 1
-                for column_name in ("plate_confirmed", "phone", "customer_name")
-            )
+        if DATABASE_URL.startswith("sqlite"):
+            with engine.connect() as conn:
+                pragma_rows = conn.execute(text("PRAGMA table_info(practices)")).fetchall()
+                notnull_by_column = {row[1]: row[3] for row in pragma_rows}  # row[1]=name, row[3]=notnull
+                needs_nullable_migration = any(
+                    notnull_by_column.get(column_name, 0) == 1
+                    for column_name in ("plate_confirmed", "phone", "customer_name")
+                )
 
-            if needs_nullable_migration:
-                conn.execute(text("DROP TABLE IF EXISTS practices_new"))
-                conn.execute(text("""
-                    CREATE TABLE practices_new (
-                        id INTEGER PRIMARY KEY,
-                        created_at DATETIME,
-                        updated_at DATETIME,
-                        created_by_telegram_id INTEGER NOT NULL,
-                        updated_by_telegram_id INTEGER,
-                        status VARCHAR,
-                        plate_detected VARCHAR(20),
-                        plate_confirmed VARCHAR(20),
-                        phone VARCHAR(20),
-                        customer_name VARCHAR(200),
-                        customer_type VARCHAR,
-                        billing_to_complete BOOLEAN DEFAULT 0,
-                        appointment_date DATETIME NOT NULL,
-                        appointment_time VARCHAR(5) NOT NULL,
-                        practice_type VARCHAR,
-                        contexts VARCHAR(100) NOT NULL,
-                        internal_notes TEXT,
-                        management_external_id VARCHAR(100),
-                        management_sync_status VARCHAR(50),
-                        management_last_sync_at DATETIME,
-                        synced BOOLEAN DEFAULT 0 NOT NULL
-                    )
-                """))
-                conn.execute(text("""
-                    INSERT INTO practices_new (
-                        id,
-                        created_at,
-                        updated_at,
-                        created_by_telegram_id,
-                        updated_by_telegram_id,
-                        status,
-                        plate_detected,
-                        plate_confirmed,
-                        phone,
-                        customer_name,
-                        customer_type,
-                        billing_to_complete,
-                        appointment_date,
-                        appointment_time,
-                        practice_type,
-                        contexts,
-                        internal_notes,
-                        management_external_id,
-                        management_sync_status,
-                        management_last_sync_at,
-                        synced
-                    )
-                    SELECT
-                        id,
-                        created_at,
-                        updated_at,
-                        created_by_telegram_id,
-                        updated_by_telegram_id,
-                        status,
-                        plate_detected,
-                        plate_confirmed,
-                        phone,
-                        customer_name,
-                        customer_type,
-                        billing_to_complete,
-                        appointment_date,
-                        appointment_time,
-                        practice_type,
-                        contexts,
-                        internal_notes,
-                        management_external_id,
-                        management_sync_status,
-                        management_last_sync_at,
-                        synced
-                    FROM practices
-                """))
-                conn.execute(text("DROP TABLE practices"))
-                conn.execute(text("ALTER TABLE practices_new RENAME TO practices"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_id ON practices (id)"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_created_by_telegram_id ON practices (created_by_telegram_id)"))
-                conn.commit()
-                logger.info("Migrated: made plate_confirmed, phone, customer_name nullable")
+                if needs_nullable_migration:
+                    conn.execute(text("DROP TABLE IF EXISTS practices_new"))
+                    conn.execute(text("""
+                        CREATE TABLE practices_new (
+                            id INTEGER PRIMARY KEY,
+                            created_at DATETIME,
+                            updated_at DATETIME,
+                            created_by_telegram_id INTEGER NOT NULL,
+                            updated_by_telegram_id INTEGER,
+                            status VARCHAR,
+                            plate_detected VARCHAR(20),
+                            plate_confirmed VARCHAR(20),
+                            phone VARCHAR(20),
+                            customer_name VARCHAR(200),
+                            customer_type VARCHAR,
+                            billing_to_complete BOOLEAN DEFAULT 0,
+                            appointment_date DATETIME NOT NULL,
+                            appointment_time VARCHAR(5) NOT NULL,
+                            practice_type VARCHAR,
+                            contexts VARCHAR(100) NOT NULL,
+                            internal_notes TEXT,
+                            management_external_id VARCHAR(100),
+                            management_sync_status VARCHAR(50),
+                            management_last_sync_at DATETIME,
+                            synced BOOLEAN DEFAULT 0 NOT NULL
+                        )
+                    """))
+                    conn.execute(text("""
+                        INSERT INTO practices_new (
+                            id,
+                            created_at,
+                            updated_at,
+                            created_by_telegram_id,
+                            updated_by_telegram_id,
+                            status,
+                            plate_detected,
+                            plate_confirmed,
+                            phone,
+                            customer_name,
+                            customer_type,
+                            billing_to_complete,
+                            appointment_date,
+                            appointment_time,
+                            practice_type,
+                            contexts,
+                            internal_notes,
+                            management_external_id,
+                            management_sync_status,
+                            management_last_sync_at,
+                            synced
+                        )
+                        SELECT
+                            id,
+                            created_at,
+                            updated_at,
+                            created_by_telegram_id,
+                            updated_by_telegram_id,
+                            status,
+                            plate_detected,
+                            plate_confirmed,
+                            phone,
+                            customer_name,
+                            customer_type,
+                            billing_to_complete,
+                            appointment_date,
+                            appointment_time,
+                            practice_type,
+                            contexts,
+                            internal_notes,
+                            management_external_id,
+                            management_sync_status,
+                            management_last_sync_at,
+                            synced
+                        FROM practices
+                    """))
+                    conn.execute(text("DROP TABLE practices"))
+                    conn.execute(text("ALTER TABLE practices_new RENAME TO practices"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_id ON practices (id)"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_created_by_telegram_id ON practices (created_by_telegram_id)"))
+                    conn.commit()
+                    logger.info("Migrated SQLite: made plate_confirmed, phone, customer_name nullable")
+        elif "postgresql" in DATABASE_URL:
+            with engine.connect() as conn:
+                res = conn.execute(text("""
+                    SELECT column_name, is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'practices' AND column_name IN ('plate_confirmed', 'phone', 'customer_name')
+                """)).fetchall()
+                notnull_cols = [row[0] for row in res if row[1] == 'NO']
+                if notnull_cols:
+                    for column_name in notnull_cols:
+                        conn.execute(text(f"ALTER TABLE practices ALTER COLUMN {column_name} DROP NOT NULL"))
+                    conn.commit()
+                    logger.info("Migrated Postgres: made columns %s nullable", notnull_cols)
     except Exception as e:
         logger.warning("Migration to nullable columns failed (may already exist): %s", e)
 

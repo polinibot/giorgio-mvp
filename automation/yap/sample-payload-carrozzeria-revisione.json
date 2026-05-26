@@ -1,0 +1,30 @@
+{
+  "mapping": {
+    "anagrafica": {
+      "cliente_nome": "Frigor Trasporti",
+      "cliente_telefono": "+39035953876",
+      "cliente_tipo": "azienda",
+      "targa": "GA019BC"
+    },
+    "agenda": {
+      "data": "2026-03-25",
+      "ora": "08:00",
+      "durata_minuti": 20,
+      "tipo_pratica": "preventivo"
+    },
+    "contexts": ["carrozzeria"],
+    "lavorazioni": [
+      {
+        "reparto": "carrozzeria",
+        "descrizioni": ["Verniciatura cerchi", "revisione"],
+        "ore_man": null,
+        "ore_mac": null,
+        "materiali_euro": null,
+        "smaltimento_applica": false,
+        "ricambi": []
+      }
+    ],
+    "note_interne": "",
+    "meta": { "practice_id": "frigor-sample" }
+  }
+}

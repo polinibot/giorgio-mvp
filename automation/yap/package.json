@@ -1,0 +1,17 @@
+{
+  "name": "giorgio-yap-automation",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node run-tests.mjs",
+    "test:gate": "node run-tests.mjs",
+    "cleanup": "node run-tests.mjs --cleanup-only",
+    "test:worker": "node test-worker-suite.mjs",
+    "test:delete": "node test-delete-worker.mjs",
+    "test:readonly": "node run-dry-batch.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.50.0"
+  }
+}

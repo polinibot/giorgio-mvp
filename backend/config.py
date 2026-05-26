@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     telegram_bot_token: str = ""
+    telegram_error_channel_id: str = ""  # Channel ID for error notifications (with -100 prefix)
     database_url: str = "sqlite:///./giorgio.db"  # Default SQLite
     whitelist_telegram_ids: Any = []
     ocr_confidence_threshold: float = 0.6
@@ -92,6 +93,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Error channel configuration
+ERROR_CHANNEL_ID = settings.telegram_error_channel_id
 
 # --- Startup validation ---
 DEBUG = settings.debug

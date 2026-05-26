@@ -1,0 +1,89 @@
+{
+  "generatedAt": "2026-05-25T10:39:34.687Z",
+  "mode": "agenda_v2_audit",
+  "mappingEngine": "contexts_from_miniapp",
+  "cases": [
+    {
+      "id": "officina",
+      "file": "sample-payload.json",
+      "contexts": [
+        "officina"
+      ],
+      "cosa": "AB123CD - CONTROLLO VEICOLO",
+      "tags": [
+        "officina"
+      ],
+      "expectedTags": [
+        "officina"
+      ],
+      "expectedCosa": "AB123CD - CONTROLLO VEICOLO",
+      "pass": true,
+      "tagsOk": true,
+      "cosaOk": true,
+      "note": null
+    },
+    {
+      "id": "revisione_pura",
+      "file": "sample-payload-revisione-pura.json",
+      "contexts": [
+        "revisione"
+      ],
+      "cosa": "REVISIONE",
+      "tags": [
+        "revisione"
+      ],
+      "expectedTags": [
+        "revisione"
+      ],
+      "expectedCosa": "REVISIONE",
+      "pass": true,
+      "tagsOk": true,
+      "cosaOk": true,
+      "note": "EL733YJ: solo contesto revisione"
+    },
+    {
+      "id": "carrozzeria_solo",
+      "file": "sample-payload-carrozzeria-revisione.json",
+      "contexts": [
+        "carrozzeria"
+      ],
+      "cosa": "GA019BC - VERNICIATURA CERCHI",
+      "tags": [
+        "pneumatici",
+        "preventivo"
+      ],
+      "expectedTags": [
+        "pneumatici",
+        "preventivo"
+      ],
+      "expectedCosa": "GA019BC - VERNICIATURA CERCHI",
+      "pass": true,
+      "tagsOk": true,
+      "cosaOk": true,
+      "note": "Solo contesto carrozzeria: tag da checkbox, non dal testo righe"
+    },
+    {
+      "id": "fd897lp_officina_revisione",
+      "file": "sample-payload-fd897lp-revisione.json",
+      "contexts": [
+        "officina",
+        "revisione"
+      ],
+      "cosa": "FD897LP - RIPARARE FORATURA",
+      "tags": [
+        "officina",
+        "revisione"
+      ],
+      "expectedTags": [
+        "officina",
+        "revisione"
+      ],
+      "expectedCosa": "FD897LP - RIPARARE FORATURA",
+      "pass": true,
+      "tagsOk": true,
+      "cosaOk": true,
+      "note": "Contesti mini-app officina+revisione (evidenza YAP 2026-05-25)"
+    }
+  ],
+  "allCasesPass": true
+}

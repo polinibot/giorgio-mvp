@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-05-22T14:00:00.000Z",
+  "giorgioExampleId": 2,
+  "giorgioContext": "officina",
+  "source": "api_snippet_and_agenda_bar",
+  "uiStatus": "api_inferred",
+  "confidence": "medium",
+  "yapHistoricalDate": "2025-04-04",
+  "giorgioPlannedDate": "2026-03-20",
+  "agendaBar": {
+    "time": "14:00 - 14:20",
+    "title": "DP126GZ - MERCEDES-BENZ A-CLASS (169) (04-12) - PIKHLYK PETRO - 3280524550 - DP126GZ - KIT FRIZIONE",
+    "repartoClass": "LCWVQRD-b-e"
+  },
+  "popupInferred": {
+    "cosa": "DP126GZ",
+    "quando": "04/04/2025",
+    "dalle": "10.20",
+    "alle": "10.40",
+    "tagChips": ["officina"],
+    "tagRationale": "Keyword KIT FRIZIONE in titolo barra; RPC conferma categoria O=officina. Non usare meccanica leggera/pesante: non sono reparti cliente.",
+    "note1": null,
+    "note2": null
+  },
+  "apiSnippet": "DP126GZ - KIT FRIZIONE ... 20250404102000 ... PIKHLYK PETRO",
+  "phoneGiorgio": "3351324672",
+  "phoneYapBar": "3280524550",
+  "openItemStatus": "closed_for_agenda_mapping"
+}

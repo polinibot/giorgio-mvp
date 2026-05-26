@@ -1,0 +1,36 @@
+{
+  "mapping": {
+    "anagrafica": {
+      "cliente_nome": "GIORGIO PROVA",
+      "cliente_telefono": "+393331112233",
+      "cliente_tipo": "privato",
+      "targa": "TEST99ZZ"
+    },
+    "agenda": {
+      "data": "2026-11-12",
+      "ora": "10:00",
+      "durata_minuti": 20,
+      "tipo_pratica": "intervento"
+    },
+    "contexts": ["officina"],
+    "lavorazioni": [
+      {
+        "reparto": "officina",
+        "descrizioni": [
+          "Prova automazione Giorgio"
+        ],
+        "ore_man": null,
+        "ore_mac": null,
+        "materiali_euro": null,
+        "smaltimento_applica": false,
+        "smaltimento_percentuale": null,
+        "ricambi": []
+      }
+    ],
+    "note_interne": "",
+    "meta": {
+      "practice_id": "test-reale",
+      "external_id": null
+    }
+  }
+}

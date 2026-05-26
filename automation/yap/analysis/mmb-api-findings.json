@@ -1,0 +1,40 @@
+{
+  "generatedAt": "2026-05-22T22:30:00.000Z",
+  "method": "web search + product pages MMB Software",
+  "summary": "YAP/MMB dichiara 'open integration' e libreria API per sistemi esterni, ma non esiste documentazione REST pubblica con endpoint, auth e schema. Per Giorgio resta valido l'approccio RPC/browser automation finché MMB non fornisce API partner.",
+  "findings": [
+    {
+      "id": "API1_public_docs",
+      "title": "Documentazione API pubblica",
+      "result": "non_trovata",
+      "evidence": "Sito mmbsoftware.com menziona 'libreria API' e integrazioni, senza OpenAPI/Swagger pubblico.",
+      "url": "https://www.mmbsoftware.com/gestionale-yap/"
+    },
+    {
+      "id": "API2_integration_philosophy",
+      "title": "Filosofia integrazione",
+      "result": "hub_centralizzato",
+      "evidence": "YAP si propone come hub cloud con integrazioni via API verso banche dati (Autodata, Kromeda) e sistemi terzi.",
+      "url": "https://www.partsweb.it/mmb-software-officine-e-gommisti-nel-cloud/"
+    },
+    {
+      "id": "API3_protocol_observed",
+      "title": "Protocollo osservato nel tenant",
+      "result": "gwt_rpc",
+      "evidence": "POST /yap/action/* con GWT-RPC — reverse engineering già funzionante in read-only.",
+      "implication": "Continuare con RPC interception + Playwright finché non c'è API ufficiale."
+    }
+  ],
+  "decision": {
+    "useOfficialApi": false,
+    "reason": "API non documentata pubblicamente; richiedere accesso partner a MMB/Cloudmotive.",
+    "recommendedPath": "RPC read-only + Playwright dry-run; eventuale ticket commerciale MMB per API agenda/prenotazioni.",
+    "effortSavedIfApiExists": "alto (eliminerebbe reverse GWT), ma bloccato senza contratto partner"
+  },
+  "nextSteps": [
+    "Opzionale: chiedere al cliente se ha contratto MMB con accesso API/integrazioni",
+    "Nel frattempo: completare mapping via PrenotazioneTableAction (già source of truth)",
+    "Non investire in decoder GWT completo se API partner diventa disponibile"
+  ],
+  "confidence": "high (assenza docs pubbliche); medium (esistenza API partner non verificata col vendor)"
+}

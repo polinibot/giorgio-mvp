@@ -1,0 +1,322 @@
+{
+  "schemaVersion": "1.0-frozen",
+  "frozenAt": "2026-05-22T13:58:47.561Z",
+  "mode": "readonly_study",
+  "evidenceSource": "analysis/yap-evidence-dataset.json",
+  "recordCount": 10,
+  "rules": [
+    {
+      "ruleId": "R001_cosa_targa_default",
+      "giorgioPath": "anagrafica.targa",
+      "yapTarget": "popup.cosa",
+      "transform": "uppercase(trim)",
+      "state": "accepted",
+      "confidence": "high",
+      "evidence": [
+        "precise-8-2026-03-16",
+        "precise-5-2026-03-23",
+        "precise-1-2026-03-25",
+        "precise-7-2026-03-30"
+      ],
+      "counterexample": [
+        {
+          "id": "precise-5-2026-03-23",
+          "cosa": "RADWAN",
+          "note": "Passat misto"
+        }
+      ],
+      "decision": "Default: Cosa = targa. Eccezione: revisione pura → REVISIONE (EL733YJ). Eccezione misti: riferimento breve se fornito.",
+      "implementation": "if revisione pura -> REVISIONE; else if shortRef -> shortRef; else plate"
+    },
+    {
+      "ruleId": "R001b_cosa_revisione_pura",
+      "giorgioPath": "contexts=[revisione] only OR lavorazioni solo revisione",
+      "yapTarget": "popup.cosa",
+      "transform": "literal REVISIONE",
+      "state": "accepted",
+      "confidence": "high",
+      "evidence": [
+        "pratica-odl-probe-2025-04-04-revisione.json",
+        "pratica-odl-discovery-findings.json"
+      ],
+      "decision": "Revisione come unico reparto: Cosa=REVISIONE (non targa). Verificato popup EL733YJ."
+    },
+    {
+      "ruleId": "R002_quando",
+      "giorgioPath": "agenda.data",
+      "yapTarget": "popup.quando",
+      "transform": "DD/MM/YYYY",
+      "state": "accepted",
+      "confidence": "high",
+      "evidence": [
+        "precise-8-2026-03-16",
+        "precise-5-2026-03-23",
+        "precise-1-2026-03-25",
+        "precise-7-2026-03-30"
+      ]
+    },
+    {
+      "ruleId": "R003_dalle_alle",
+      "giorgioPath": "agenda.ora + agenda.durata_minuti",
+      "yapTarget": "popup.dalle / popup.alle",
+      "transform": "HH.MM, durata default 20",
+      "state": "accepted",
+      "confidence": "high",
+      "evidence": [
+        "precise-8-2026-03-16",
+        "precise-5-2026-03-23",
+        "precise-1-2026-03-25",
+        "precise-7-2026-03-30"
+      ],
+      "note": "Verificare allineamento data popup vs data agenda (alcuni popup mostrano mese diverso)"
+    },
+    {
+      "ruleId": "R004_tag_revisione",
+      "giorgioPath": "lavorazioni[].reparto=revisione OR contexts includes revisione",
+      "yapTarget": "popup.tag chip",
+      "yapTags": [
+        "revisione"
+      ],
+      "state": "accepted",
+      "confidence": "high",
+      "evidence": [
+        "precise-5-2026-03-23",
+        "precise-1-2026-03-25"
+      ]
+    },
+    {
+      "ruleId": "R005_tag_carrozzeria",
+      "giorgioPath": "lavorazioni[].reparto=carrozzeria",
+      "yapTarget": "popup.tag chip",
+      "yapTags": [
+        "pneumatici"
+      ],
+      "extraTagsIfPreventivo": [
+        "preventivo"
+      ],
+      "manualTagsAfterCustomerAction": [
+        "comunicato"
+      ],
+      "state": "accepted",
+      "confidence": "medium-high",
+      "evidence": [
+        "precise-8-2026-03-16",
+        "precise-7-2026-03-30"
+      ],
+      "counterexample": [
+        {
+          "id": "precise-1-2026-03-25",
+          "tags": [
+            "revisione"
+          ],
+          "note": "Frigor carrozzeria -> revisione"
+        }
+      ],
+      "decision": "Usare pneumatici; aggiungere preventivo se tipo_pratica=preventivo. Non aggiungere comunicato automaticamente: il cliente lo mette solo dopo invio preventivo.",
+      "operationalRule": "Default pneumatici. Se lavorazioni includono revisione esplicita, usare solo chip revisione (eccezione Frigor)."
+    },
+    {
+      "ruleId": "R006_tag_officina",
+      "giorgioPath": "lavorazioni[].reparto=officina",
+      "yapTarget": "popup.tag chip",
+      "yapTags": [
+        "officina"
+      ],
+      "state": "accepted",
+      "confidence": "medium-high",
+      "evidence": [
+        "scan-2025-04-04-14:00 - 14:20-DP126GZ - MERCEDES-B",
+        "officina-kit-frizione-inferred.json"
+      ],
+      "agendaBarProof": {
+        "date": "2025-04-04",
+        "title": "DP126GZ ... KIT FRIZIONE",
+        "repartoClass": "LCWVQRD-b-e",
+        "note": "Popup officina non estratto; titolo barra conferma pattern"
+      },
+      "apiProof": {
+        "title": "Kit frizione officina",
+        "context": "officina",
+        "bestScore": 0,
+        "bestDate": null,
+        "matchCount": 0
+      },
+      "decision": "Cosa=targa. Tag chip officina. Categoria O confermata via RPC su DP126GZ.",
+      "popupInferred": {
+        "cosa": "DP126GZ",
+        "tagChips": [
+          "officina"
+        ],
+        "quando": "04/04/2025",
+        "dalle": "10.20",
+        "alle": "10.40"
+      },
+      "nextCheck": "yap-agenda-inspector --date 2025-04-04 --search DP126GZ"
+    },
+    {
+      "ruleId": "R007_misto",
+      "giorgioPath": "contexts length > 1",
+      "yapTarget": "popup.tag chip",
+      "yapTags": [
+        "revisione"
+      ],
+      "state": "accepted",
+      "confidence": "medium",
+      "evidence": [
+        "precise-5-2026-03-23"
+      ],
+      "decision": "Passat: un appuntamento, un solo tag revisione in YAP. Strategia: un appuntamento + tag revisione + eventuali altri tag se UI lo consente."
+    },
+    {
+      "ruleId": "R008_note_fields",
+      "giorgioPath": "note_interne / lavorazioni.descrizioni",
+      "yapTarget": "popup.note1 / note2",
+      "state": "blocked",
+      "confidence": "none",
+      "decision": "Campi note popup sempre vuoti nelle ispezioni. Non mappare finche non si vede un esempio valorizzato."
+    },
+    {
+      "ruleId": "R009_work_sections",
+      "giorgioPath": "ore_man, materiali, ricambi",
+      "yapTarget": null,
+      "state": "blocked",
+      "confidence": "none",
+      "decision": "Non presenti nel popup agenda. Modulo diverso o post-creazione."
+    },
+    {
+      "ruleId": "R010_cofano_revisione",
+      "giorgioPath": "esempio id 9",
+      "yapTarget": "n/a",
+      "state": "blocked",
+      "confidence": "none",
+      "evidence": [
+        "precise-9-2026-03-15-missing",
+        "readonly-scan-2026-03-15.json"
+      ],
+      "apiProof": {
+        "title": "Cofano freccia revisione",
+        "context": "revisione",
+        "bestScore": 30,
+        "bestDate": "20260315",
+        "matchCount": 1
+      },
+      "decision": "Non in agenda UI 15/03/2026. Non pianificare inserimento su quella data finche non compare in YAP."
+    },
+    {
+      "ruleId": "R011_agenda_bar",
+      "giorgioPath": "anagrafica + veicolo",
+      "yapTarget": "agendaBar.title",
+      "state": "accepted",
+      "confidence": "high",
+      "decision": "Composto da YAP automaticamente; non scrivere manualmente in fase 1.",
+      "pattern": "{time}{plate} - {model} - {client} - {phone} - {suffix}"
+    },
+    {
+      "ruleId": "R012_column_css",
+      "giorgioPath": "lavorazioni.reparto",
+      "yapTarget": "agendaColumn LCWVQRD-b-*",
+      "state": "proposed",
+      "confidence": "medium",
+      "decision": "Colonna CSS != tag. b-f giallo, b-r azzurro, b-e giallo alternativo. Non usare per decidere tag."
+    }
+  ],
+  "exampleStatus": [
+    {
+      "id": 1,
+      "title": "Frigor",
+      "giorgioContext": "carrozzeria",
+      "yapTags": [
+        "revisione"
+      ],
+      "status": "mapped_with_exception",
+      "action": "Confermare se carrozzeria deve forzare pneumatici"
+    },
+    {
+      "id": 2,
+      "title": "Kit frizione",
+      "giorgioContext": "officina",
+      "yapDate": "2025-04-04",
+      "giorgioDate": "2026-03-20",
+      "status": "inferred_from_historical",
+      "action": "Usare 2025-04-04 per studio; non cercare su 20/03/2026",
+      "yapPopup": {
+        "cosa": "DP126GZ",
+        "tags": [
+          "officina"
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "title": "Passat",
+      "giorgioContext": "misto",
+      "yapTags": [
+        "revisione"
+      ],
+      "cosa": "RADWAN",
+      "status": "mapped_with_exception"
+    },
+    {
+      "id": 7,
+      "title": "Porta posteriore",
+      "giorgioContext": "carrozzeria",
+      "yapTags": [
+        "pneumatici",
+        "preventivo"
+      ],
+      "status": "best_aligned"
+    },
+    {
+      "id": 8,
+      "title": "Italtrans",
+      "giorgioContext": "carrozzeria",
+      "yapTags": [
+        "pneumatici"
+      ],
+      "status": "best_aligned"
+    },
+    {
+      "id": 9,
+      "title": "Cofano revisione",
+      "giorgioContext": "revisione",
+      "status": "blocked_not_in_ui",
+      "api": {
+        "title": "Cofano freccia revisione",
+        "context": "revisione",
+        "bestScore": 30,
+        "bestDate": "20260315",
+        "matchCount": 1
+      }
+    }
+  ],
+  "proposedYapDefaults": {
+    "cosa": "anagrafica.targa uppercase",
+    "quando": "agenda.data DD/MM/YYYY",
+    "dalle": "agenda.ora HH.MM",
+    "alle": "dalle + 20min",
+    "tags": {
+      "revisione": [
+        "revisione"
+      ],
+      "carrozzeria": [
+        "pneumatici",
+        "preventivo?"
+      ],
+      "officina": [
+        "officina"
+      ],
+      "misto": [
+        "revisione"
+      ]
+    }
+  },
+  "openItems": [],
+  "resolvedOpenItems": [
+    "Pratiche miste = un appuntamento + tag revisione (evidenza week-dataset + probe EL733YJ)",
+    "Revisione pura Cosa=REVISIONE (probe popup)",
+    "ODL/pratica delegati a YAP V1 (automatismi + UI verificata)",
+    "Preventivo carrozzeria: comunicato resta manuale solo dopo invio al cliente"
+  ],
+  "supersededBy": "yap-giorgio-bridge-mapping.json (draft)",
+  "patchNote": "Chiusi: scan 16/03 derivato, cofano blocked, Frigor regola operativa"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "giorgio-production-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e:production": "node run-production-e2e.mjs",
+    "e2e:dry": "node run-production-e2e.mjs --yap-dry-run",
+    "cleanup": "node run-production-e2e.mjs --cleanup-only",
+    "help": "node run-production-e2e.mjs --help"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

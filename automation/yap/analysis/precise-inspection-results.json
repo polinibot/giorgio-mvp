@@ -1,0 +1,406 @@
+{
+  "inspectedAt": "2026-05-22T11:21:01.364Z",
+  "results": [
+    {
+      "target": {
+        "id": 8,
+        "name": "Italtrans",
+        "date": "2026-03-16",
+        "term": "Italtrans"
+      },
+      "found": true,
+      "text": "8:20 - 8:40FX339TM - SPA ITALTRANS - FX339TM",
+      "screenshots": {
+        "before": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-precise\\agenda-Italtrans-before.png",
+        "after": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-precise\\agenda-Italtrans-after.png"
+      },
+      "popup": {
+        "title": "Dettagli Appuntamento",
+        "htmlSnippet": "<div class=\"gwt-DecoratedPopupPanel LCWVQRD-ib-i LCWVQRD-ib-j\" style=\"left: 361px; top: 99px; visibility: visible; position: absolute; overflow: visible;\"><div class=\"\"><table cellspacing=\"0\" cellpadding=\"0\" class=\"\"><tbody><tr class=\"popupTop\"><td class=\"popupTopLeft\"><div class=\"popupTopLeftInner\"></div></td><td class=\"popupTopCenter\"><div class=\"popupTopCenterInner\"></div></td><td class=\"popupTopRight\"><div class=\"popupTopRightInner\"></div></td></tr><tr class=\"popupMiddle\"><td class=\"popupMiddleLeft\"><div class=\"popupMiddleLeftInner\"></div></td><td class=\"popupMiddleCenter\"><div class=\"popupMiddleCenterInner popupContent\"><div style=\"width: 33.1em;\"><div class=\"LCWVQRD-ib-f\"> <table cellpadding=\"0\" cellspacing=\"0\"> <tbody><tr> <td valign=\"middle\" width=\"100%\"> <div class=\"LCWVQRD-ib-b\"> <div class=\"LCWVQRD-ib-p LCWVQRD-ib-h\"><div class=\"gwt-HTML LCWVQRD-ib-q LCWVQRD-k-O LCWVQRD-k-Q\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">check</span></div></div> Dettagli appuntamento </div> </td> <td align=\"center\" style=\"white-space: nowrap;\" valign=\"middle\"> <button type=\"button\" class=\"gwt-Button waves-effect waves-default\" aria-hidden=\"true\" style=\"display: none;\"><img class=\"gwt-Image LCWVQRD-a-l\" aria-hidden=\"true\" style=\"display: none;\"><span class=\"\"></span></button>  <div class=\"gwt-HTML LCWVQRD-jb-o LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">{</span></div> </td> </tr> </tbody></table> </div> <div class=\"LCWVQRD-ib-c\"> <div aria-hidden=\"true\" style=\"display: none;\"><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Veicolo </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"LCWVQRD-jb-B\"><div class=\"LCWVQRD-n-u\"><span class=\"LCWVQRD-n-ib LCWVQRD-n-Bc LCWVQRD-n-qb\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">?</span></span></span><span class=\"LCWVQRD-n-Fc LCWVQRD-n-S\">Nessun veicolo selezionato</span></div></div> <div class=\"LCWVQRD-jb-A\" style=\"display: none;\"> <div class=\"LCWVQRD-hb-a\" style=\"width: 100%;\"><div class=\"LCWVQRD-n-u\" sty",
+        "rawText": [
+          "check",
+          "Dettagli appuntamento",
+          "{",
+          "Cosa",
+          "Quando",
+          "y",
+          "dalle",
+          "S",
+          "alle",
+          "S",
+          "Tag",
+          "close",
+          "pneumatici",
+          "ĕ",
+          "“",
+          ",",
+          "«"
+        ],
+        "inputs": [
+          {
+            "name": "mpgtvyao156",
+            "id": "gwt-uid-989",
+            "value": "FX339TM",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyav707",
+            "id": "gwt-uid-1065",
+            "value": "16/03/2026",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyaw67",
+            "id": "gwt-uid-1069",
+            "value": "08.20",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyax366",
+            "id": "gwt-uid-1073",
+            "value": "08.40",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyay676",
+            "id": "gwt-uid-1077",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyay696",
+            "id": "gwt-uid-1081",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyal85",
+            "id": "gwt-uid-984",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": "closepneumatici"
+          }
+        ],
+        "textareas": [],
+        "selects": []
+      }
+    },
+    {
+      "target": {
+        "id": 9,
+        "name": "Cofano_revisione",
+        "date": "2026-03-15",
+        "term": "revisione"
+      },
+      "found": false
+    },
+    {
+      "target": {
+        "id": 5,
+        "name": "Passat",
+        "date": "2026-03-23",
+        "term": "Passat"
+      },
+      "found": true,
+      "text": "12:00 - 12:20DK140TP - VOLKSWAGEN PASSAT «V» VARIANT - KYAL NEZHA - 3669584120 - RADWAN",
+      "screenshots": {
+        "before": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-precise\\agenda-Passat-before.png",
+        "after": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-precise\\agenda-Passat-after.png"
+      },
+      "popup": {
+        "title": "Dettagli Appuntamento",
+        "htmlSnippet": "<div class=\"gwt-DecoratedPopupPanel LCWVQRD-ib-i LCWVQRD-ib-j\" style=\"left: 636px; top: 324px; visibility: visible; position: absolute; overflow: visible;\"><div class=\"\"><table cellspacing=\"0\" cellpadding=\"0\" class=\"\"><tbody><tr class=\"popupTop\"><td class=\"popupTopLeft\"><div class=\"popupTopLeftInner\"></div></td><td class=\"popupTopCenter\"><div class=\"popupTopCenterInner\"></div></td><td class=\"popupTopRight\"><div class=\"popupTopRightInner\"></div></td></tr><tr class=\"popupMiddle\"><td class=\"popupMiddleLeft\"><div class=\"popupMiddleLeftInner\"></div></td><td class=\"popupMiddleCenter\"><div class=\"popupMiddleCenterInner popupContent\"><div style=\"width: 33.1em;\"><div class=\"LCWVQRD-ib-f\"> <table cellpadding=\"0\" cellspacing=\"0\"> <tbody><tr> <td valign=\"middle\" width=\"100%\"> <div class=\"LCWVQRD-ib-b\"> <div class=\"LCWVQRD-ib-p LCWVQRD-ib-h\"><div class=\"gwt-HTML LCWVQRD-ib-q LCWVQRD-k-O LCWVQRD-k-Q\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">check</span></div></div> Dettagli appuntamento </div> </td> <td align=\"center\" style=\"white-space: nowrap;\" valign=\"middle\"> <button type=\"button\" class=\"gwt-Button waves-effect waves-default\" aria-hidden=\"true\" style=\"display: none;\"><img class=\"gwt-Image LCWVQRD-a-l\" aria-hidden=\"true\" style=\"display: none;\"><span class=\"\"></span></button>  <div class=\"gwt-HTML LCWVQRD-jb-o LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">{</span></div> </td> </tr> </tbody></table> </div> <div class=\"LCWVQRD-ib-c\"> <div aria-hidden=\"true\" style=\"display: none;\"><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Veicolo </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"LCWVQRD-jb-B\"><div class=\"LCWVQRD-n-u\"><span class=\"LCWVQRD-n-ib LCWVQRD-n-Bc LCWVQRD-n-qb\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">?</span></span></span><span class=\"LCWVQRD-n-Fc LCWVQRD-n-S\">Nessun veicolo selezionato</span></div></div> <div class=\"LCWVQRD-jb-A\" style=\"display: none;\"> <div class=\"LCWVQRD-hb-a\" style=\"width: 100%;\"><div class=\"LCWVQRD-n-u\" st",
+        "rawText": [
+          "check",
+          "Dettagli appuntamento",
+          "{",
+          "Cosa",
+          "Quando",
+          "y",
+          "dalle",
+          "S",
+          "alle",
+          "S",
+          "Tag",
+          "close",
+          "revisione",
+          "ĕ",
+          "“",
+          ",",
+          "«"
+        ],
+        "inputs": [
+          {
+            "name": "mpgtvyao156",
+            "id": "gwt-uid-989",
+            "value": "RADWAN",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyav707",
+            "id": "gwt-uid-1065",
+            "value": "23/02/2026",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyaw67",
+            "id": "gwt-uid-1069",
+            "value": "12.00",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyax366",
+            "id": "gwt-uid-1073",
+            "value": "12.20",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyay676",
+            "id": "gwt-uid-1077",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyay696",
+            "id": "gwt-uid-1081",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyal85",
+            "id": "gwt-uid-984",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": "closerevisione"
+          }
+        ],
+        "textareas": [],
+        "selects": []
+      }
+    },
+    {
+      "target": {
+        "id": 1,
+        "name": "Frigor_Trasporti",
+        "date": "2026-03-25",
+        "term": "Frigor"
+      },
+      "found": true,
+      "text": "8:00 - 8:20GA019BC - MERCEDES-BENZ GLC - FRIGOR TRASPORTI OROBICO - 035953876 - GA019BC",
+      "screenshots": {
+        "before": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-precise\\agenda-Frigor_Trasporti-before.png",
+        "after": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-precise\\agenda-Frigor_Trasporti-after.png"
+      },
+      "popup": {
+        "title": "Dettagli Appuntamento",
+        "htmlSnippet": "<div class=\"gwt-DecoratedPopupPanel LCWVQRD-ib-i LCWVQRD-ib-k\" style=\"visibility: visible; overflow: visible; position: absolute; left: 996px; top: 79px;\"><div class=\"\"><table cellspacing=\"0\" cellpadding=\"0\" class=\"\"><tbody><tr class=\"popupTop\"><td class=\"popupTopLeft\"><div class=\"popupTopLeftInner\"></div></td><td class=\"popupTopCenter\"><div class=\"popupTopCenterInner\"></div></td><td class=\"popupTopRight\"><div class=\"popupTopRightInner\"></div></td></tr><tr class=\"popupMiddle\"><td class=\"popupMiddleLeft\"><div class=\"popupMiddleLeftInner\"></div></td><td class=\"popupMiddleCenter\"><div class=\"popupMiddleCenterInner popupContent\"><div style=\"width: 33.1em;\"><div class=\"LCWVQRD-ib-f\"> <table cellpadding=\"0\" cellspacing=\"0\"> <tbody><tr> <td valign=\"middle\" width=\"100%\"> <div class=\"LCWVQRD-ib-b\"> <div class=\"LCWVQRD-ib-p LCWVQRD-ib-h\"><div class=\"gwt-HTML LCWVQRD-ib-q LCWVQRD-k-O LCWVQRD-k-Q\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">check</span></div></div> Dettagli appuntamento </div> </td> <td align=\"center\" style=\"white-space: nowrap;\" valign=\"middle\"> <button type=\"button\" class=\"gwt-Button waves-effect waves-default\" aria-hidden=\"true\" style=\"display: none;\"><img class=\"gwt-Image LCWVQRD-a-l\" aria-hidden=\"true\" style=\"display: none;\"><span class=\"\"></span></button>  <div class=\"gwt-HTML LCWVQRD-jb-o LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">{</span></div> </td> </tr> </tbody></table> </div> <div class=\"LCWVQRD-ib-c\"> <div aria-hidden=\"true\" style=\"display: none;\"><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Veicolo </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"LCWVQRD-jb-B\"><div class=\"LCWVQRD-n-u\"><span class=\"LCWVQRD-n-ib LCWVQRD-n-Bc LCWVQRD-n-qb\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">?</span></span></span><span class=\"LCWVQRD-n-Fc LCWVQRD-n-S\">Nessun veicolo selezionato</span></div></div> <div class=\"LCWVQRD-jb-A\" style=\"display: none;\"> <div class=\"LCWVQRD-hb-a\" style=\"width: 100%;\"><div class=\"LCWVQRD-n-u\" sty",
+        "rawText": [
+          "check",
+          "Dettagli appuntamento",
+          "{",
+          "Cosa",
+          "Quando",
+          "y",
+          "dalle",
+          "S",
+          "alle",
+          "S",
+          "Tag",
+          "close",
+          "revisione",
+          "ĕ",
+          "“",
+          ",",
+          "«"
+        ],
+        "inputs": [
+          {
+            "name": "mpgtvyao156",
+            "id": "gwt-uid-989",
+            "value": "GA019BC",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyav707",
+            "id": "gwt-uid-1065",
+            "value": "25/02/2026",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyaw67",
+            "id": "gwt-uid-1069",
+            "value": "08.00",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyax366",
+            "id": "gwt-uid-1073",
+            "value": "08.20",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyay676",
+            "id": "gwt-uid-1077",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyay696",
+            "id": "gwt-uid-1081",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyal85",
+            "id": "gwt-uid-984",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": "closerevisione"
+          }
+        ],
+        "textareas": [],
+        "selects": []
+      }
+    },
+    {
+      "target": {
+        "id": 7,
+        "name": "Porta_posteriore",
+        "date": "2026-03-30",
+        "term": "3899885954"
+      },
+      "found": true,
+      "text": "9:00 - 9:20GD109AR - PEUGEOT 5008 «II» - SINGH GURWINDER - 3899885954 - GD109AR",
+      "screenshots": {
+        "before": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-precise\\agenda-Porta_posteriore-before.png",
+        "after": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-precise\\agenda-Porta_posteriore-after.png"
+      },
+      "popup": {
+        "title": "Dettagli Appuntamento",
+        "htmlSnippet": "<div class=\"gwt-DecoratedPopupPanel LCWVQRD-ib-i LCWVQRD-ib-k\" style=\"visibility: visible; overflow: visible; position: absolute; left: 996px; top: 140px;\"><div class=\"\"><table cellspacing=\"0\" cellpadding=\"0\" class=\"\"><tbody><tr class=\"popupTop\"><td class=\"popupTopLeft\"><div class=\"popupTopLeftInner\"></div></td><td class=\"popupTopCenter\"><div class=\"popupTopCenterInner\"></div></td><td class=\"popupTopRight\"><div class=\"popupTopRightInner\"></div></td></tr><tr class=\"popupMiddle\"><td class=\"popupMiddleLeft\"><div class=\"popupMiddleLeftInner\"></div></td><td class=\"popupMiddleCenter\"><div class=\"popupMiddleCenterInner popupContent\"><div style=\"width: 33.1em;\"><div class=\"LCWVQRD-ib-f\"> <table cellpadding=\"0\" cellspacing=\"0\"> <tbody><tr> <td valign=\"middle\" width=\"100%\"> <div class=\"LCWVQRD-ib-b\"> <div class=\"LCWVQRD-ib-p LCWVQRD-ib-h\"><div class=\"gwt-HTML LCWVQRD-ib-q LCWVQRD-k-O LCWVQRD-k-Q\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">check</span></div></div> Dettagli appuntamento </div> </td> <td align=\"center\" style=\"white-space: nowrap;\" valign=\"middle\"> <button type=\"button\" class=\"gwt-Button waves-effect waves-default\" aria-hidden=\"true\" style=\"display: none;\"><img class=\"gwt-Image LCWVQRD-a-l\" aria-hidden=\"true\" style=\"display: none;\"><span class=\"\"></span></button>  <div class=\"gwt-HTML LCWVQRD-jb-o LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">{</span></div> </td> </tr> </tbody></table> </div> <div class=\"LCWVQRD-ib-c\"> <div aria-hidden=\"true\" style=\"display: none;\"><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Veicolo </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"LCWVQRD-jb-B\"><div class=\"LCWVQRD-n-u\"><span class=\"LCWVQRD-n-ib LCWVQRD-n-Bc LCWVQRD-n-qb\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">?</span></span></span><span class=\"LCWVQRD-n-Fc LCWVQRD-n-S\">Nessun veicolo selezionato</span></div></div> <div class=\"LCWVQRD-jb-A\" style=\"display: none;\"> <div class=\"LCWVQRD-hb-a\" style=\"width: 100%;\"><div class=\"LCWVQRD-n-u\" st",
+        "rawText": [
+          "check",
+          "Dettagli appuntamento",
+          "{",
+          "Cosa",
+          "Quando",
+          "y",
+          "dalle",
+          "S",
+          "alle",
+          "S",
+          "Tag",
+          "close",
+          "pneumatici",
+          "close",
+          "comunicato",
+          "close",
+          "preventivo",
+          "ĕ",
+          "“",
+          ",",
+          "«"
+        ],
+        "inputs": [
+          {
+            "name": "mpgtvyao156",
+            "id": "gwt-uid-989",
+            "value": "GD109AR",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyav707",
+            "id": "gwt-uid-1065",
+            "value": "30/03/2026",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyaw67",
+            "id": "gwt-uid-1069",
+            "value": "09.00",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyax366",
+            "id": "gwt-uid-1073",
+            "value": "09.20",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyay676",
+            "id": "gwt-uid-1077",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyay696",
+            "id": "gwt-uid-1081",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": ""
+          },
+          {
+            "name": "mpgtvyal85",
+            "id": "gwt-uid-984",
+            "value": "",
+            "placeholder": "",
+            "type": "text",
+            "labelText": "closepneumaticiclosecomunicato"
+          }
+        ],
+        "textareas": [],
+        "selects": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "scannedAt": "2026-05-22T14:00:00.000Z",
+  "date": "2026-03-16",
+  "mode": "readonly",
+  "source": "derived_from_precise_inspection",
+  "note": "Scan live fallito (timeout agenda). Evento Italtrans ricostruito da precise-inspection-results.json.",
+  "eventCount": 1,
+  "events": [
+    {
+      "time": "8:20 - 8:40",
+      "title": "FX339TM - SPA ITALTRANS - FX339TM",
+      "repartoClass": "LCWVQRD-b-f",
+      "bgColor": "",
+      "borderColor": "",
+      "left": "",
+      "width": ""
+    }
+  ],
+  "screenshot": null
+}

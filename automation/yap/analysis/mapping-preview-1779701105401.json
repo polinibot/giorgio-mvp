@@ -1,0 +1,41 @@
+{
+  "generatedAt": "2026-05-25T09:25:05.400Z",
+  "mode": "preview_only_no_yap_write",
+  "source": "automation/yap/sample-payload-fd897lp-revisione.json",
+  "giorgioSummary": {
+    "cliente": null,
+    "telefono": null,
+    "targa": "FD897LP",
+    "data": "2026-05-25",
+    "ora": "09:24",
+    "durata_minuti": 20,
+    "contesti": [
+      "revisione"
+    ],
+    "tipo_pratica": "intervento",
+    "lavorazioniCount": 1
+  },
+  "proposedYap": {
+    "popup": {
+      "cosa": "REVISIONE",
+      "quando": "25/05/2026",
+      "dalle": "09.24",
+      "alle": "09.44",
+      "tag": [
+        "revisione"
+      ],
+      "note1_proposed": null,
+      "note2_proposed": null
+    },
+    "agendaBar_expectedPattern": "YAP compone automaticamente: ora - targa - modello - cliente - telefono - suffisso"
+  },
+  "confidence": {
+    "cosa": "high",
+    "quando": "high",
+    "dalle_alle": "high",
+    "tag": "medium-high",
+    "note1_note2": "blocked"
+  },
+  "openQuestions": [],
+  "mappingVersion": "1.0-frozen"
+}

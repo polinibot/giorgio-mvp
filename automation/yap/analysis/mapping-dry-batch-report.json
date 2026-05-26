@@ -1,0 +1,166 @@
+{
+  "generatedAt": "2026-05-25T16:49:01.157Z",
+  "mode": "mapping_dry_batch_no_browser",
+  "clientRules": {
+    "tags": "tutti i contesti spuntati in mini-app",
+    "cosa": "best-effort; YAP compone barra agenda",
+    "noTextInference": true
+  },
+  "allPass": true,
+  "cases": [
+    {
+      "id": "officina",
+      "file": "sample-payload.json",
+      "contexts": [
+        "officina"
+      ],
+      "revisionePura": false,
+      "cosa_breve": "CONTROLLO VEICOLO",
+      "planned": {
+        "cosa": "AB123CD - CONTROLLO VEICOLO",
+        "quando": "07/05/2026",
+        "dalle": "14.30",
+        "alle": "15.00",
+        "tags": [
+          "officina"
+        ]
+      },
+      "previewPopup": {
+        "cosa": "AB123CD - CONTROLLO VEICOLO",
+        "quando": "07/05/2026",
+        "dalle": "14.30",
+        "alle": "15.00",
+        "tag": [
+          "officina"
+        ]
+      },
+      "confidence": {
+        "cosa": "indicative",
+        "cosaNote": "YAP compone titolo/barra agenda; Cosa popup è best-effort da dati mini-app",
+        "tag": "high",
+        "write_ready": false
+      },
+      "odlReparti": [
+        "officina"
+      ],
+      "pass": true
+    },
+    {
+      "id": "revisione_pura",
+      "file": "sample-payload-revisione-pura.json",
+      "contexts": [
+        "revisione"
+      ],
+      "revisionePura": true,
+      "cosa_breve": null,
+      "planned": {
+        "cosa": "REVISIONE",
+        "quando": "04/04/2025",
+        "dalle": "10.20",
+        "alle": "10.40",
+        "tags": [
+          "revisione"
+        ]
+      },
+      "previewPopup": {
+        "cosa": "REVISIONE",
+        "quando": "04/04/2025",
+        "dalle": "10.20",
+        "alle": "10.40",
+        "tag": [
+          "revisione"
+        ]
+      },
+      "confidence": {
+        "cosa": "high",
+        "cosaNote": null,
+        "tag": "high",
+        "write_ready": false
+      },
+      "odlReparti": [
+        "revisione"
+      ],
+      "pass": true
+    },
+    {
+      "id": "carrozzeria",
+      "file": "sample-payload-carrozzeria-revisione.json",
+      "contexts": [
+        "carrozzeria"
+      ],
+      "revisionePura": false,
+      "cosa_breve": "VERNICIATURA CERCHI",
+      "planned": {
+        "cosa": "GA019BC - VERNICIATURA CERCHI",
+        "quando": "25/03/2026",
+        "dalle": "08.00",
+        "alle": "08.20",
+        "tags": [
+          "pneumatici",
+          "preventivo"
+        ]
+      },
+      "previewPopup": {
+        "cosa": "GA019BC - VERNICIATURA CERCHI",
+        "quando": "25/03/2026",
+        "dalle": "08.00",
+        "alle": "08.20",
+        "tag": [
+          "pneumatici",
+          "preventivo"
+        ]
+      },
+      "confidence": {
+        "cosa": "indicative",
+        "cosaNote": "YAP compone titolo/barra agenda; Cosa popup è best-effort da dati mini-app",
+        "tag": "high",
+        "write_ready": false
+      },
+      "odlReparti": [
+        "carrozzeria"
+      ],
+      "pass": true
+    },
+    {
+      "id": "fd897lp",
+      "file": "sample-payload-fd897lp-revisione.json",
+      "contexts": [
+        "officina",
+        "revisione"
+      ],
+      "revisionePura": false,
+      "cosa_breve": "RIPARARE FORATURA",
+      "planned": {
+        "cosa": "FD897LP - RIPARARE FORATURA",
+        "quando": "25/05/2026",
+        "dalle": "09.24",
+        "alle": "09.44",
+        "tags": [
+          "officina",
+          "revisione"
+        ]
+      },
+      "previewPopup": {
+        "cosa": "FD897LP - RIPARARE FORATURA",
+        "quando": "25/05/2026",
+        "dalle": "09.24",
+        "alle": "09.44",
+        "tag": [
+          "officina",
+          "revisione"
+        ]
+      },
+      "confidence": {
+        "cosa": "indicative",
+        "cosaNote": "YAP compone titolo/barra agenda; Cosa popup è best-effort da dati mini-app",
+        "tag": "high",
+        "write_ready": false
+      },
+      "odlReparti": [
+        "officina",
+        "revisione"
+      ],
+      "pass": true
+    }
+  ]
+}

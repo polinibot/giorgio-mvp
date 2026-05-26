@@ -1,0 +1,486 @@
+{
+  "found": true,
+  "searchText": "FD897LP",
+  "initialScreenshot": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-inspector\\initial-FD897LP-1779701769039.png",
+  "clickedScreenshot": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-inspector\\clicked-FD897LP-1779701769039.png",
+  "popupScreenshot": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-inspector\\popup-FD897LP-1779701769039.png",
+  "popupOpened": true,
+  "matchDetails": {
+    "text": "FD897LP - MERCEDES CLASSE A «W176» - MARTIGNAGO ORESTE - 3928767320 - FD897LP - RIPARARE FORATURA",
+    "tag": "DIV",
+    "class": "fc-title",
+    "rect": {
+      "x": 900.078125,
+      "y": 401.3125,
+      "width": 462.609375,
+      "height": 18.5,
+      "top": 401.3125,
+      "right": 1362.6875,
+      "bottom": 419.8125,
+      "left": 900.078125
+    }
+  },
+  "extractedData": {
+    "inputs": [
+      {
+        "type": "text",
+        "name": "",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 0,
+          "y": 26,
+          "width": 8,
+          "height": 6,
+          "top": 26,
+          "right": 8,
+          "bottom": 32,
+          "left": 0
+        }
+      },
+      {
+        "type": "text",
+        "name": "",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 994,
+          "y": 75,
+          "width": 8,
+          "height": 6,
+          "top": 75,
+          "right": 1002,
+          "bottom": 81,
+          "left": 994
+        }
+      },
+      {
+        "type": "text",
+        "name": "",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 1058,
+          "y": 75,
+          "width": 8,
+          "height": 6,
+          "top": 75,
+          "right": 1066,
+          "bottom": 81,
+          "left": 1058
+        }
+      },
+      {
+        "type": "text",
+        "name": "",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 1122,
+          "y": 75,
+          "width": 8,
+          "height": 6,
+          "top": 75,
+          "right": 1130,
+          "bottom": 81,
+          "left": 1122
+        }
+      },
+      {
+        "type": "text",
+        "name": "",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 1186,
+          "y": 75,
+          "width": 8,
+          "height": 6,
+          "top": 75,
+          "right": 1194,
+          "bottom": 81,
+          "left": 1186
+        }
+      },
+      {
+        "type": "text",
+        "name": "",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 1250,
+          "y": 75,
+          "width": 8,
+          "height": 6,
+          "top": 75,
+          "right": 1258,
+          "bottom": 81,
+          "left": 1250
+        }
+      },
+      {
+        "type": "text",
+        "name": "",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 1314,
+          "y": 75,
+          "width": 8,
+          "height": 6,
+          "top": 75,
+          "right": 1322,
+          "bottom": 81,
+          "left": 1314
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmck808",
+        "value": "",
+        "placeholder": "Targa denominazione telefono",
+        "rect": {
+          "x": 9,
+          "y": 379.390625,
+          "width": 185.40625,
+          "height": 20.90625,
+          "top": 379.390625,
+          "right": 194.40625,
+          "bottom": 400.296875,
+          "left": 9
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmcl611",
+        "value": "",
+        "placeholder": "Leggi o inserisci un IDD",
+        "rect": {
+          "x": 9,
+          "y": 895,
+          "width": 211,
+          "height": 20.90625,
+          "top": 895,
+          "right": 220,
+          "bottom": 915.90625,
+          "left": 9
+        }
+      },
+      {
+        "type": "text",
+        "name": "",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 1233.5,
+          "y": 117.5,
+          "width": 8,
+          "height": 6,
+          "top": 117.5,
+          "right": 1241.5,
+          "bottom": 123.5,
+          "left": 1233.5
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmcb333",
+        "value": "",
+        "placeholder": "FILTRO APPUNTAMENTI",
+        "rect": {
+          "x": 305.5,
+          "y": 117.5,
+          "width": 921.5,
+          "height": 20.90625,
+          "top": 117.5,
+          "right": 1227,
+          "bottom": 138.40625,
+          "left": 305.5
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmc9896",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 308.5,
+          "y": 144.5,
+          "width": 20,
+          "height": 18.90625,
+          "top": 144.5,
+          "right": 328.5,
+          "bottom": 163.40625,
+          "left": 308.5
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmcg176",
+        "value": "FD897LP - RIPARARE FORATURA",
+        "placeholder": "",
+        "rect": {
+          "x": 973,
+          "y": 284.6875,
+          "width": 368.296875,
+          "height": 20.90625,
+          "top": 284.6875,
+          "right": 1341.296875,
+          "bottom": 305.59375,
+          "left": 973
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmcr765",
+        "value": "25/05/2026",
+        "placeholder": "",
+        "rect": {
+          "x": 973,
+          "y": 311.328125,
+          "width": 116.109375,
+          "height": 20.90625,
+          "top": 311.328125,
+          "right": 1089.109375,
+          "bottom": 332.234375,
+          "left": 973
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmct738",
+        "value": "10.00",
+        "placeholder": "",
+        "rect": {
+          "x": 1128.109375,
+          "y": 311.328125,
+          "width": 87.078125,
+          "height": 20.90625,
+          "top": 311.328125,
+          "right": 1215.1875,
+          "bottom": 332.234375,
+          "left": 1128.109375
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmcu623",
+        "value": "10.20",
+        "placeholder": "",
+        "rect": {
+          "x": 1254.1875,
+          "y": 311.328125,
+          "width": 87.078125,
+          "height": 20.90625,
+          "top": 311.328125,
+          "right": 1341.265625,
+          "bottom": 332.234375,
+          "left": 1254.1875
+        }
+      },
+      {
+        "type": "text",
+        "name": "mpl0fmcc506",
+        "value": "",
+        "placeholder": "",
+        "rect": {
+          "x": 1133.40625,
+          "y": 335.71875,
+          "width": 20,
+          "height": 20,
+          "top": 335.71875,
+          "right": 1153.40625,
+          "bottom": 355.71875,
+          "left": 1133.40625
+        }
+      }
+    ],
+    "textareas": [],
+    "selects": [],
+    "labels": [
+      {
+        "text": "Quando",
+        "for": "gwt-uid-1066"
+      },
+      {
+        "text": "dalle",
+        "for": "gwt-uid-1070"
+      },
+      {
+        "text": "alle",
+        "for": "gwt-uid-1074"
+      }
+    ],
+    "buttons": [
+      {
+        "text": "Oggi",
+        "class": "gwt-Button waves-effect waves-default LCWVQRD-ib-m LCWVQRD-a-q gwt-Button-disabled"
+      },
+      {
+        "text": "precedente",
+        "class": "gwt-Button waves-effect waves-default LCWVQRD-ib-m LCWVQRD-a-q"
+      },
+      {
+        "text": "successivo",
+        "class": "gwt-Button waves-effect waves-default LCWVQRD-a-q"
+      },
+      {
+        "text": "TNuovo appuntamento",
+        "class": "gwt-Button waves-effect waves-default LCWVQRD-a-j LCWVQRD-a-q LCWVQRD-ib-o"
+      },
+      {
+        "text": "(Nuovo promemoria",
+        "class": "gwt-Button waves-effect waves-default LCWVQRD-a-j LCWVQRD-a-q"
+      },
+      {
+        "text": "Ricarica agenda",
+        "class": "gwt-Button waves-effect waves-default LCWVQRD-a-q"
+      },
+      {
+        "text": "",
+        "class": "gwt-ToggleButton waves-effect waves-default LCWVQRD-f-o LCWVQRD-jb-s LCWVQRD-a-q LCWVQRD-ib-n gwt-ToggleButton-up"
+      },
+      {
+        "text": "",
+        "class": "gwt-ToggleButton waves-effect waves-default LCWVQRD-f-o LCWVQRD-jb-s LCWVQRD-a-q LCWVQRD-ib-n gwt-ToggleButton-up"
+      },
+      {
+        "text": "",
+        "class": "gwt-ToggleButton waves-effect waves-default LCWVQRD-f-o LCWVQRD-jb-s LCWVQRD-a-q LCWVQRD-ib-n gwt-ToggleButton-up"
+      },
+      {
+        "text": "",
+        "class": "gwt-ToggleButton waves-effect waves-default LCWVQRD-f-o LCWVQRD-jb-s LCWVQRD-a-q LCWVQRD-ib-n gwt-ToggleButton-up"
+      },
+      {
+        "text": "",
+        "class": "gwt-ToggleButton waves-effect waves-default LCWVQRD-f-o LCWVQRD-jb-s LCWVQRD-a-q LCWVQRD-ib-n gwt-ToggleButton-down"
+      },
+      {
+        "text": "",
+        "class": "gwt-ToggleButton waves-effect waves-default LCWVQRD-f-q LCWVQRD-jb-s LCWVQRD-a-q gwt-ToggleButton-up"
+      },
+      {
+        "text": "Legenda",
+        "class": "gwt-Button waves-effect waves-default LCWVQRD-a-q"
+      },
+      {
+        "text": "«",
+        "class": "button prev-button prev-btn"
+      },
+      {
+        "text": "Maggio 2026",
+        "class": "button view-switch"
+      },
+      {
+        "text": "»",
+        "class": "button next-button next-btn"
+      }
+    ],
+    "popupText": [
+      "check Dettagli appuntamento      {        Veicolo   ?Nessun veicolo selezionato   Ē Č       Cosa      lightbulb      Quando  ylightbulb  dalle  Slightbulb  alle  Slightbulb   Dal  ylightbulb  al  ylightbulb    Tag   closeofficinacloserevisione     Appuntamento salvato  ĕPianifica documento... “Elimina appuntamento ,Gestione pratica cloudPrenotazione remota «Invia comunicazioni di cortesia",
+      "check Dettagli appuntamento      {        Veicolo   ?Nessun veicolo selezionato   Ē Č       Cosa      lightbulb      Quando  ylightbulb  dalle  Slightbulb  alle  Slightbulb   Dal  ylightbulb  al  ylightbulb    Tag   closeofficinacloserevisione     Appuntamento salvato  ĕPianifica documento... “Elimina appuntamento ,Gestione pratica cloudPrenotazione remota «Invia comunicazioni di cortesia",
+      "check Dettagli appuntamento      {        Veicolo   ?Nessun veicolo selezionato   Ē Č       Cosa      lightbulb      Quando  ylightbulb  dalle  Slightbulb  alle  Slightbulb   Dal  ylightbulb  al  ylightbulb    Tag   closeofficinacloserevisione     Appuntamento salvato  ĕPianifica documento... “Elimina appuntamento ,Gestione pratica cloudPrenotazione remota «Invia comunicazioni di cortesia",
+      "check Dettagli appuntamento      {        Veicolo   ?Nessun veicolo selezionato   Ē Č       Cosa      lightbulb      Quando  ylightbulb  dalle  Slightbulb  alle  Slightbulb   Dal  ylightbulb  al  ylightbulb    Tag   closeofficinacloserevisione     Appuntamento salvato  ĕPianifica documento... “Elimina appuntamento ,Gestione pratica cloudPrenotazione remota «Invia comunicazioni di cortesia"
+    ],
+    "rawText": [
+      "AGENDA",
+      "Dashboard\tAgenda\tNuovo\tRevisioni\tBanche dati\tAnalisi\tArchivi\tConfigurazioni\tanasilsupremo@offcarchiuduno\tAiuto",
+      "emergency_home",
+      "notifications_paused",
+      "é ]",
+      "Maggio 2026",
+      "Ricerca veicoli",
+      "Anomalie",
+      "Per la stampa del certificato di revisione occorre verificare la correttezza di nome, cognome e codice fiscale",
+      "Ci sono revisioni per cui non è ancora stata impostata la data di restituzione dei documenti",
+      "Ci sono revisioni inviate in linea",
+      "Accesso veloce",
+      "FILTRO TAG",
+      "lunedì 25 maggio 2026",
+      "Giornaliere",
+      "FW549TA - JEEP RENEGADE - KHVARASTSIANAYA ALENA - 3456540885 - FW549TA !!!!!!!!!!!!!!!!!!!! PERIZIA ORE 9.30 MAESTRI !!!!!!!!!!!!!!!!!!!",
+      "GF183JK - AUDI Q2 «GAB» - FARINELLI CARLA - GF183JK - !!!!!!!!!!!! PERIZIA CARLCINIC ORE 11 !!!!!!!!!!!",
+      "LUCA IL 26 DEVE ANDARE DAL GIUDICE DI PACE A MILANO",
+      "08:00",
+      "08:20",
+      "08:40",
+      "09:00",
+      "09:20",
+      "09:40",
+      "10:00",
+      "10:20",
+      "10:40",
+      "11:00",
+      "11:20",
+      "11:40",
+      "12:00",
+      "12:20",
+      "12:40",
+      "13:00",
+      "13:20",
+      "13:40",
+      "14:00",
+      "14:20",
+      "14:40",
+      "15:00",
+      "15:20",
+      "15:40",
+      "16:00",
+      "16:20",
+      "16:40",
+      "17:00",
+      "17:20",
+      "17:40",
+      "18:00",
+      "18:20",
+      "18:40",
+      "FC735FR - TOYOTA AURIS TOURING SPORTS - BACCI NEREO - 3276686506 - FC735FR",
+      "FP554LA - PEUGEOT 5008 «II» - NDIAYE CHEIKH - FP554LA",
+      "FE960ND - FIAT 500L - BELOTTI FRANCESCO - FE960ND",
+      "EM712PV - SKODA YETI - BOLIS PAOLO GIOVANNI - 3497531530 - BOLIS PAOLO",
+      "FV784PP - JEEP RENEGADE - AUTOMOBILI RICCI SRL - 3450380100 - FV784PP",
+      "CP843DC - RENAULT CLIO «II» - ANTONELLA GIUDICI (GIUDICI ANTONELLA) - CP843DC",
+      "FA869VN - VOLKSWAGEN GOLF «VII» - NATH SOM - 3881132806 - FA869VN",
+      "EY488VX - LANCIA YPSILON «III» - DONZELLI MARILISA - 3458253533 - EY488VX",
+      "FM401JG - RENAULT CLIO «IV» SW - PM AUTO DI MAFFIOLETTI PAOLO - 335228776 - FM401JG",
+      "FA143DA - TOYOTA VERSO - KUQI ZENUN - 3297905011 - FA143DA",
+      "FD897LP - MERCEDES CLASSE A «W176» - MARTIGNAGO ORESTE - 3928767320 - FD897LP - RIPARARE FORATURA",
+      "CW891AF - TOYOTA YARIS (FRANCE ) «I» - ZERBINI NICOLETTA - CW891AF - VUOLE RITIRARLA IL GIORGIO",
+      "DB185XF - FIAT PANDA «II» - PEZZOTTA VALTER - 3400693167 - DB185XF",
+      "FX681TK - FIAT PANDA «III» VAN - ASSO TECNO SERVICE SRL - FX681TK",
+      "GJ727BY - LANCIA YPSILON «III» - STERLI NICOLETTA - GJ727BY",
+      "ET856MS - BMW SERIE 1 «F20» BERLINA - RATTU PARMOD KUMAR - 3312937474 - ET856MS",
+      "FB821PS - FORD TRANSIT «VI» - TEKECO - 3476178588 - FB821PS",
+      "GM581SB - AUDI RS 6 AVANT - VL GENERAL SERVICE SRLS - 3426302506 - GM581SB",
+      "DJ214GW - KIA CARNIVAL «III» - ZAMBELLI DAVIDE - 3757200119 - DJ214GW",
+      "PEUGEOT 206",
+      "VALERIO",
+      "CB363FP - TOYOTA YARIS (JAPAN) «I» - MUJI FESTIM - 3291262954 - CB363FP",
+      "FP591RJ - RENAULT CLIO «IV» - SANGIORGI SAMUELA - 3398514826 - SANGIORGI SAMUELA",
+      "BONASSI ALESSANDRO",
+      "Numero appuntamenti: 27",
+      "Note prenotazione\t- RIPARARE FORATURA",
+      "Targa\tFD897LP",
+      "Veicolo\tMERCEDES CLASSE A «W176»",
+      "Intestatario\tMARTIGNAGO ORESTE",
+      "Cellulare\t3928767320",
+      "Numero protocollo\t1767",
+      "Nome file linea\t26001755",
+      "officina",
+      "revisione",
+      "check",
+      "Dettagli appuntamento",
+      "Cosa",
+      "Quando",
+      "dalle",
+      "alle",
+      "Tag",
+      "close",
+      "officina",
+      "close",
+      "revisione"
+    ]
+  },
+  "timestamp": "2026-05-25T09:36:17.502Z"
+}

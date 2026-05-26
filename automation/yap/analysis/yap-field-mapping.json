@@ -1,0 +1,363 @@
+{
+  "yapVersion": "2026-05",
+  "analyzedAt": "2026-05-22T11:42:18.613Z",
+  "sources": [
+    "precise-inspection-results.json",
+    "deep-inspection-results.json",
+    "supplement-inspection-results.json"
+  ],
+  "popupStructure": {
+    "title": "Dettagli appuntamento",
+    "inputCount": 7,
+    "textareaCount": 0,
+    "selectCount": 0,
+    "fieldOrder": [
+      "cosa",
+      "quando",
+      "dalle",
+      "alle",
+      "note1",
+      "note2",
+      "tag"
+    ],
+    "detectionMethod": "position_and_value_pattern",
+    "stableInSession": true,
+    "gwtNamesObfuscated": true
+  },
+  "fields": {
+    "cosa": {
+      "yapLabel": "Cosa",
+      "giorgioFields": [
+        "anagrafica.targa"
+      ],
+      "transform": "uppercase",
+      "required": true,
+      "examples": [
+        "FX339TM",
+        "RADWAN",
+        "GA019BC",
+        "GD109AR"
+      ],
+      "note": "In YAP reale il campo Cosa contiene spesso solo targa/riferimento breve, non il titolo agenda completo."
+    },
+    "quando": {
+      "yapLabel": "Quando",
+      "giorgioFields": [
+        "agenda.data"
+      ],
+      "transform": "DD/MM/YYYY",
+      "required": true
+    },
+    "dalle": {
+      "yapLabel": "dalle",
+      "giorgioFields": [
+        "agenda.ora"
+      ],
+      "transform": "HH.MM",
+      "required": true
+    },
+    "alle": {
+      "yapLabel": "alle",
+      "giorgioFields": [
+        "agenda.ora",
+        "agenda.durata_minuti"
+      ],
+      "transform": "end_time_HH.MM",
+      "required": true,
+      "defaultDurationMinutes": 20
+    },
+    "note1": {
+      "yapLabel": "(campo vuoto 1)",
+      "giorgioFields": [
+        "note_interne"
+      ],
+      "required": false,
+      "status": "unmapped"
+    },
+    "note2": {
+      "yapLabel": "(campo vuoto 2)",
+      "giorgioFields": [
+        "lavorazioni.descrizioni"
+      ],
+      "required": false,
+      "status": "unmapped"
+    },
+    "tag": {
+      "yapLabel": "Tag",
+      "giorgioFields": [
+        "lavorazioni.reparto",
+        "contexts"
+      ],
+      "type": "chip_multi",
+      "knownTags": [
+        "pneumatici",
+        "revisione",
+        "comunicato",
+        "preventivo"
+      ],
+      "addMethod": "ui_chip_click_or_combobox",
+      "required": false
+    }
+  },
+  "agendaBarTitle": {
+    "format": "{timeRange}{plate} - {model} - {client} - {phone} - {plateOrRef}",
+    "giorgioMapping": {
+      "plate": "anagrafica.targa",
+      "client": "anagrafica.cliente_nome",
+      "phone": "anagrafica.cliente_telefono",
+      "model": "veicolo.modello (se disponibile)"
+    },
+    "workerStrategy": "cosa=targa; titolo barra compilato da YAP o note aggiuntive post-save",
+    "examples": [
+      "8:20 - 8:40FX339TM - SPA ITALTRANS - FX339TM",
+      "12:00 - 12:20DK140TP - VOLKSWAGEN PASSAT «V» VARIANT - KYAL NEZHA - 3669584120 - RADWAN",
+      "8:00 - 8:20GA019BC - MERCEDES-BENZ GLC - FRIGOR TRASPORTI OROBICO - 035953876 - GA019BC",
+      "9:00 - 9:20GD109AR - PEUGEOT 5008 «II» - SINGH GURWINDER - 3899885954 - GD109AR"
+    ]
+  },
+  "workSections": {
+    "detectionStatus": "NOT_YET_MAPPED",
+    "desiredFields": [
+      "ore_man",
+      "ore_mac",
+      "materiali_euro",
+      "smaltimento",
+      "ricambi"
+    ]
+  },
+  "inspectedAppointments": [
+    {
+      "source": "deep",
+      "id": 8,
+      "name": "Italtrans",
+      "date": "2026-03-16",
+      "giorgioContext": "carrozzeria",
+      "found": true,
+      "agendaTitle": "8:20 - 8:40FX339TM - SPA ITALTRANS - FX339TM",
+      "repartoClass": "LCWVQRD-b-f",
+      "fields": {
+        "cosa": "FX339TM",
+        "quando": "16/03/2026",
+        "dalle": "08.20",
+        "alle": "08.40"
+      },
+      "tagChips": [
+        "pneumatici"
+      ],
+      "fieldDetails": [
+        {
+          "role": "cosa",
+          "name": "mpgucell423",
+          "id": "gwt-uid-987",
+          "value": "FX339TM",
+          "type": "text"
+        },
+        {
+          "role": "quando",
+          "name": "mpgucels81",
+          "id": "gwt-uid-1063",
+          "value": "16/03/2026",
+          "type": "text"
+        },
+        {
+          "role": "dalle",
+          "name": "mpgucelv771",
+          "id": "gwt-uid-1067",
+          "value": "08.20",
+          "type": "text"
+        },
+        {
+          "role": "alle",
+          "name": "mpgucelw773",
+          "id": "gwt-uid-1071",
+          "value": "08.40",
+          "type": "text"
+        },
+        {
+          "role": "note",
+          "name": "mpgucelj159",
+          "id": "gwt-uid-982",
+          "value": "",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "source": "deep",
+      "id": 5,
+      "name": "Passat",
+      "date": "2026-03-23",
+      "giorgioContext": "misto",
+      "found": true,
+      "agendaTitle": "12:00 - 12:20DK140TP - VOLKSWAGEN PASSAT «V» VARIANT - KYAL NEZHA - 3669584120 - RADWAN",
+      "repartoClass": "LCWVQRD-b-r",
+      "fields": {
+        "cosa": "RADWAN",
+        "quando": "23/02/2026",
+        "dalle": "12.00",
+        "alle": "12.20"
+      },
+      "tagChips": [
+        "revisione"
+      ],
+      "fieldDetails": [
+        {
+          "role": "cosa",
+          "name": "mpgucell423",
+          "id": "gwt-uid-987",
+          "value": "RADWAN",
+          "type": "text"
+        },
+        {
+          "role": "quando",
+          "name": "mpgucels81",
+          "id": "gwt-uid-1063",
+          "value": "23/02/2026",
+          "type": "text"
+        },
+        {
+          "role": "dalle",
+          "name": "mpgucelv771",
+          "id": "gwt-uid-1067",
+          "value": "12.00",
+          "type": "text"
+        },
+        {
+          "role": "alle",
+          "name": "mpgucelw773",
+          "id": "gwt-uid-1071",
+          "value": "12.20",
+          "type": "text"
+        },
+        {
+          "role": "note",
+          "name": "mpgucelj159",
+          "id": "gwt-uid-982",
+          "value": "",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "source": "deep",
+      "id": 1,
+      "name": "Frigor_Trasporti",
+      "date": "2026-03-25",
+      "giorgioContext": "carrozzeria",
+      "found": true,
+      "agendaTitle": "8:00 - 8:20GA019BC - MERCEDES-BENZ GLC - FRIGOR TRASPORTI OROBICO - 035953876 - GA019BC",
+      "repartoClass": "LCWVQRD-b-r",
+      "fields": {
+        "cosa": "GA019BC",
+        "quando": "25/02/2026",
+        "dalle": "08.00",
+        "alle": "08.20"
+      },
+      "tagChips": [
+        "revisione"
+      ],
+      "fieldDetails": [
+        {
+          "role": "cosa",
+          "name": "mpgucell423",
+          "id": "gwt-uid-987",
+          "value": "GA019BC",
+          "type": "text"
+        },
+        {
+          "role": "quando",
+          "name": "mpgucels81",
+          "id": "gwt-uid-1063",
+          "value": "25/02/2026",
+          "type": "text"
+        },
+        {
+          "role": "dalle",
+          "name": "mpgucelv771",
+          "id": "gwt-uid-1067",
+          "value": "08.00",
+          "type": "text"
+        },
+        {
+          "role": "alle",
+          "name": "mpgucelw773",
+          "id": "gwt-uid-1071",
+          "value": "08.20",
+          "type": "text"
+        },
+        {
+          "role": "note",
+          "name": "mpgucelj159",
+          "id": "gwt-uid-982",
+          "value": "",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "source": "deep",
+      "id": 7,
+      "name": "Porta_posteriore",
+      "date": "2026-03-30",
+      "giorgioContext": "carrozzeria",
+      "found": true,
+      "agendaTitle": "9:00 - 9:20GD109AR - PEUGEOT 5008 «II» - SINGH GURWINDER - 3899885954 - GD109AR",
+      "repartoClass": "LCWVQRD-b-e",
+      "fields": {
+        "cosa": "GD109AR",
+        "quando": "30/03/2026",
+        "dalle": "09.00",
+        "alle": "09.20"
+      },
+      "tagChips": [
+        "pneumatici",
+        "comunicato",
+        "preventivo"
+      ],
+      "fieldDetails": [
+        {
+          "role": "cosa",
+          "name": "mpgucell423",
+          "id": "gwt-uid-987",
+          "value": "GD109AR",
+          "type": "text"
+        },
+        {
+          "role": "quando",
+          "name": "mpgucels81",
+          "id": "gwt-uid-1063",
+          "value": "30/03/2026",
+          "type": "text"
+        },
+        {
+          "role": "dalle",
+          "name": "mpgucelv771",
+          "id": "gwt-uid-1067",
+          "value": "09.00",
+          "type": "text"
+        },
+        {
+          "role": "alle",
+          "name": "mpgucelw773",
+          "id": "gwt-uid-1071",
+          "value": "09.20",
+          "type": "text"
+        },
+        {
+          "role": "note",
+          "name": "mpgucelj159",
+          "id": "gwt-uid-982",
+          "value": "",
+          "type": "text"
+        }
+      ]
+    }
+  ],
+  "workerRules": [
+    "Usare pattern valore (data/ora) per trovare indici input, non name GWT.",
+    "Campo Cosa = targa uppercase.",
+    "Tag = chip UI; non scrivere 'officina'/'carrozzeria' come testo libero.",
+    "Navigare data con click mese/giorno, non page.goto su #!agenda dopo login.",
+    "Casi misti: aggiungere piu tag chip quando supportato."
+  ]
+}

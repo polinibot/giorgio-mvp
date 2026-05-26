@@ -1,0 +1,184 @@
+{
+  "generatedAt": "2026-05-22T20:15:51.092Z",
+  "method": "analyze-automatismi.mjs on existing RPC traces",
+  "sources": [
+    "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json",
+    "rpc-trace-2026-03-25-ga019bc-frigor.json"
+  ],
+  "summary": "YAP ha automatismi nativi ODL + articoli da tag prenotazione. Probabile che impostando i tag agenda corretti YAP crei pratica/ODL/righe senza automazione UI aggiuntiva. Scope Giorgio: focus su agenda + tag, non su ODL manuale.",
+  "automatismi": [
+    {
+      "name": "AutomatismoInterventoAppDrive",
+      "className": "it.indacosoftware.yap.shared.models.AutomatismoInterventoAppDrive/2257696123",
+      "likelyTriggerTags": [
+        "officina",
+        "preventivo",
+        "carrozzeria"
+      ],
+      "sources": [
+        "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json"
+      ],
+      "giorgioRelevance": "Integrazione AppDrive — fuori scope Giorgio"
+    },
+    {
+      "name": "AutomatismoArticoloDocumentoFromTagPrenotazione",
+      "className": "it.indacosoftware.yap.shared.models.AutomatismoArticoloDocumentoFromTagPrenotazione/850855638",
+      "likelyTriggerTags": [
+        "tagliando base",
+        "tagliando completo",
+        "pneumatici",
+        "comunicato",
+        "perizia"
+      ],
+      "sources": [
+        "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json"
+      ],
+      "giorgioRelevance": "Righe documento/articoli da tag prenotazione — riduce scope materiali/ricambi"
+    },
+    {
+      "name": "AutomatismoOdlDaPrenotazione",
+      "className": "it.indacosoftware.yap.shared.models.AutomatismoOdlDaPrenotazione/1583354239",
+      "likelyTriggerTags": [
+        "tagliando base",
+        "tagliando completo",
+        "pneumatici",
+        "comunicato",
+        "perizia",
+        "revisione",
+        "fattura"
+      ],
+      "sources": [
+        "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json"
+      ],
+      "giorgioRelevance": "ODL creato automaticamente da prenotazione — riduce scope ODL"
+    },
+    {
+      "name": "AutomatismoControlloInPrenotazione",
+      "className": "it.indacosoftware.yap.shared.models.AutomatismoControlloInPrenotazione/555558411",
+      "likelyTriggerTags": [
+        "tagliando completo",
+        "pneumatici",
+        "comunicato",
+        "perizia",
+        "revisione",
+        "fattura",
+        "man"
+      ],
+      "sources": [
+        "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json"
+      ],
+      "giorgioRelevance": "Controllo automatico in prenotazione"
+    },
+    {
+      "name": "AutomatismoRevisioneInPrenotazione",
+      "className": "it.indacosoftware.yap.shared.models.AutomatismoRevisioneInPrenotazione/3712403597",
+      "likelyTriggerTags": [
+        "tagliando completo",
+        "pneumatici",
+        "comunicato",
+        "perizia",
+        "revisione",
+        "fattura",
+        "man"
+      ],
+      "sources": [
+        "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json"
+      ],
+      "giorgioRelevance": "Revisione automatica — tag revisione importante"
+    },
+    {
+      "name": "AutomatismoFatturaElettronicaPush",
+      "className": "it.indacosoftware.yap.shared.models.AutomatismoFatturaElettronicaPush/249725763",
+      "likelyTriggerTags": [
+        "revisione",
+        "fattura",
+        "man"
+      ],
+      "sources": [
+        "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json"
+      ],
+      "giorgioRelevance": "Fattura elettronica — fuori scope agenda"
+    },
+    {
+      "name": "AutomatismoFatturaElettronicaMittenteDestinatario",
+      "className": "it.indacosoftware.yap.shared.models.AutomatismoFatturaElettronicaMittenteDestinatario/498374560",
+      "likelyTriggerTags": [
+        "revisione",
+        "fattura",
+        "man"
+      ],
+      "sources": [
+        "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json"
+      ],
+      "giorgioRelevance": "FE mittente/destinatario — fuori scope agenda"
+    }
+  ],
+  "tagContextsObserved": [
+    {
+      "reparto": "officina",
+      "index": 9,
+      "nearbyTags": [
+        "borali",
+        "preventivo",
+        "gieffegi",
+        "carrozzeria",
+        "autochiuduno"
+      ]
+    },
+    {
+      "reparto": "carrozzeria",
+      "index": 13,
+      "nearbyTags": [
+        "autochiuduno"
+      ]
+    },
+    {
+      "reparto": "pneumatici",
+      "index": 35,
+      "nearbyTags": [
+        "castellauto",
+        "comunicato",
+        "perizia",
+        "roba già ordinata"
+      ]
+    }
+  ],
+  "propertyEvidence": {
+    "hasManodoperaCatalog": true,
+    "note": "PropertyGetAction espone catalogo MANODOPERA e CausaleAutomatismo — YAP ha infrastruttura ODL/magazzino nativa."
+  },
+  "scopeDecision": {
+    "summary": "YAP ha automatismi nativi ODL + articoli da tag prenotazione. Probabile che impostando i tag agenda corretti YAP crei pratica/ODL/righe senza automazione UI aggiuntiva. Scope Giorgio: focus su agenda + tag, non su ODL manuale.",
+    "delegateOdlToYap": true,
+    "delegateArticoliToYap": true,
+    "delegateRevisioneToYap": true,
+    "giorgioMustImplement": {
+      "agenda": true,
+      "tagChips": true,
+      "gestionePraticaManual": false,
+      "odlManual": false,
+      "oreMaterialiRicambiManual": false
+    },
+    "revisedScopePercent": {
+      "agenda": "70-75%",
+      "gestionePratica": "30-40% (YAP auto, verificare campi residui)",
+      "odl": "20-35% (YAP auto da tag, verificare ore/materiali)",
+      "fullFlow": "45-55%"
+    }
+  },
+  "implicationsForGiorgio": [
+    "Giorgio deve concentrarsi su: targa (Cosa), data/ora, tag chip corretti per reparto.",
+    "Ore, materiali, ricambi: NON in agenda popup — flusso cliente = gestione pratica → ODL.",
+    "Se AutomatismoOdlDaPrenotazione è attivo: creare appuntamento con tag giusti potrebbe bastare per ODL base.",
+    "Tag osservati vicino a ODL automatismo: tagliando base, tagliando completo, pneumatici.",
+    "AutomatismoArticoloDocumentoFromTagPrenotazione: tag prenotazione possono generare righe documento/magazzino.",
+    "Tag 'revisione' collegato ad automatismo revisione — conferma mapping R007."
+  ],
+  "nextSteps": [
+    "Verificare read-only su appuntamento con tag revisione/tagliando se esiste ODL collegato",
+    "Non implementare ODL manuale finché non si conferma che gli automatismi non coprono il caso",
+    "Priorità agenda: tag chip corretti (officina, revisione, preventivo+comunicato) — YAP potrebbe propagare il resto",
+    "Settimana scraping RPC per correlare tag→categoria→automatismi su N appuntamenti reali"
+  ],
+  "confidence": "high (classi automatismo presenti nel tenant); medium (trigger esatti per ogni tag)"
+}

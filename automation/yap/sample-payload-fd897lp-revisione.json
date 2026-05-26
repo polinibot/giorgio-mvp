@@ -1,0 +1,47 @@
+{
+  "mapping": {
+    "contexts": ["officina", "revisione"],
+    "anagrafica": {
+      "cliente_nome": "MARTIGNAGO ORESTE",
+      "cliente_telefono": "3928767320",
+      "cliente_tipo": null,
+      "targa": "FD897LP"
+    },
+    "agenda": {
+      "data": "2026-05-25",
+      "ora": "09:24",
+      "durata_minuti": 20,
+      "tipo_pratica": "ordine_di_lavoro"
+    },
+    "lavorazioni": [
+      {
+        "reparto": "officina",
+        "descrizioni": [
+          "RIPARARE FORATURA",
+          "Verificare foratura ad una ruota",
+          "Fare check pressioni",
+          "Controllo livelli"
+        ],
+        "ore_man": null,
+        "ore_mac": null,
+        "materiali_euro": null,
+        "ricambi": []
+      },
+      {
+        "reparto": "revisione",
+        "descrizioni": ["Revisione"],
+        "ore_man": null,
+        "ore_mac": null,
+        "materiali_euro": null,
+        "ricambi": []
+      }
+    ],
+    "note_interne": "",
+    "meta": {
+      "practice_id": "fd897lp-2026-05-25-0924",
+      "source": "telegram_message",
+      "source_message": "09:24 25/05/2026 Revisione, verificare foratura ad una ruota fare check pressioni. Controllo livelli.",
+      "photo_plate_detected": "FD897LP"
+    }
+  }
+}

@@ -1,0 +1,83 @@
+{
+  "generatedAt": "2026-05-22T16:10:00.000Z",
+  "source": "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json",
+  "method": "GWT-RPC interception (yap-rpc-interceptor.mjs)",
+  "summary": "Il popup 'Dettagli appuntamento' è renderizzato client-side da dati pre-caricati: nessuna chiamata RPC al click. La fonte è PrenotazioneTableAction (caricata su day-change).",
+  "keyFindings": [
+    {
+      "id": "F1_no_rpc_on_click",
+      "title": "Nessuna RPC al click sull'evento",
+      "evidence": "0 POST /yap/action/* tra stage 'click-event' e 'wait-popup' del trace",
+      "implication": "Bypass DOM via API non richiede aprire il popup: basta intercettare PrenotazioneTableAction sul cambio data."
+    },
+    {
+      "id": "F2_chip_catalog_officiale",
+      "title": "Catalogo chip officiale ridotto",
+      "values": ["carrozzeria", "meccanica leggera", "meccanica pesante", "officina", "pneumatici"],
+      "source": "PropertyGetAction (login stage)",
+      "implication": "I tag osservati nei popup ('preventivo', 'comunicato', 'tagliando', 'revisione') NON sono parte del chip-set ufficiale. Sono probabilmente tag liberi o etichette da TroublesGetAction. Da confermare ispezionando un popup con quei chip."
+    },
+    {
+      "id": "F3_category_flag_encoding",
+      "title": "Categoria appuntamento codificata C/O/P/R",
+      "alphabet": ["C=Carrozzeria", "O=Officina", "P=Pneumatici", "R=Revisione"],
+      "combinations": ["O", "C", "P", "R", "CO", "CP", "CR", "OP", "OR", "PR", "COP", "COR", "CPR", "OPR", "COPR", "tutti con eventuale prefisso '-'"],
+      "evidence": "stringTable[12..34] di PrenotazioneTableAction contiene tutte le combinazioni (-COP, -COPR, -O, PR, -P, OR, CPR, -R, COR, -COR, -CPR, -OP, -PR, CR, -OR, OPR, -OPR, COPR, -C, -CO, -CP).",
+      "implication": "Ogni appuntamento ha UN flag combinato (es 'O'=solo officina, 'CO'=carrozzeria+officina). Il prefisso '-' è probabilmente per varianti (es 'evaso', 'cancellato')."
+    },
+    {
+      "id": "F4_dp126gz_categoria_O",
+      "title": "DP126GZ è categoria Officina pura",
+      "evidence": "Nel vicinato del titolo 'DP126GZ - KIT  FRIZIONE' (idx 113) compaiono i flag CO, O. La colonna DOM è LCWVQRD-b-e (osservata).",
+      "implication": "Mapping: column LCWVQRD-b-e -> categoria O (Officina). Da verificare con altri esempi."
+    },
+    {
+      "id": "F5_no_notes_for_dp126gz",
+      "title": "Nessuna nota libera per DP126GZ",
+      "evidence": "Nel vicinato del record (60 entry) non compaiono stringhe testuali >40 char di tipo prosa.",
+      "implication": "I campi note popup sono vuoti per la maggior parte degli appuntamenti (consistente con osservazioni precedenti)."
+    },
+    {
+      "id": "F6_columns_to_categoria",
+      "title": "Mappatura colonna CSS -> categoria (proposta)",
+      "proposed": {
+        "LCWVQRD-b-e": "O (Officina)",
+        "LCWVQRD-b-r": "R (Revisione) o C (Carrozzeria)",
+        "LCWVQRD-b-f": "C o P (da verificare)"
+      },
+      "todo": "Eseguire RPC interceptor su giornate diverse per popolare la mappa colonna<->categoria"
+    }
+  ],
+  "actionsList": [
+    "EnvironmentGetAction",
+    "LoginAction",
+    "SessionCreateAction",
+    "PropertyGetAction (catalogo chip + setting)",
+    "DynamicConfigGetAction",
+    "ClientDayChangeEventAction (notify cambio giorno)",
+    "AllContextsGetAction",
+    "UbicazioniCrudAction",
+    "MagazziniParentGetAction",
+    "ShareCrudAction",
+    "KromedaListinoGetAction",
+    "StrumentiIntegrazioneGetAction",
+    "MagazziniFiscaliParentGetAction",
+    "StrumentiIncassoGetAction",
+    "UserPreferitoGetAction",
+    "InitContractsAction",
+    "TroublesGetAction (potenzialmente: tag liberi/etichette)",
+    "UserFeedItemTableAction",
+    "InboxItemTableAction",
+    "PrenotazioneTableAction (DATI APPUNTAMENTI - source of truth)",
+    "TodoDeadLineGetAction",
+    "RemoteSignaturesNotifierAction"
+  ],
+  "nextSteps": [
+    "Aggiungere TroublesGetAction al filtro: probabile fonte di etichette extra (preventivo/comunicato/tagliando)",
+    "Eseguire interceptor su 2026-03-25 (Frigor preventivo+revisione) per validare la fonte dei tag aggiuntivi",
+    "Costruire un decoder GWT-RPC strutturale per estrarre i record correttamente (string-table sola non basta per associazione campo<->record)",
+    "Mappare le 4 colonne DOM (b-e/b-r/b-f/b-?) sui 4 valori categoria C/O/P/R con campioni multipli"
+  ],
+  "blockers": [],
+  "confidence": "high (catalogo chip e codifica categoria); medium (mapping colonna<->categoria - serve campionamento)"
+}

@@ -1,0 +1,240 @@
+{
+  "generatedAt": "2026-05-22T20:24:59.483Z",
+  "mode": "shadow_management_plan",
+  "planCount": 3,
+  "plans": [
+    {
+      "mode": "shadow_plan_no_yap_write",
+      "practiceId": "sample",
+      "anagrafica": {
+        "cliente": "CLIENTE TEST",
+        "telefono": "+393331112233",
+        "targa": "AB123CD"
+      },
+      "agenda": {
+        "cosa": "AB123CD",
+        "quando": "07/05/2026",
+        "dalle": "14.30",
+        "alle": "14.50",
+        "tag": [
+          "officina"
+        ],
+        "note": null,
+        "action": "create_appointment",
+        "delegatedToYap": [
+          "pratica",
+          "odl_base"
+        ]
+      },
+      "gestione_pratica": {
+        "action": "skip_automation",
+        "reason": "Link 'Gestione pratica' nativo in YAP dopo save appuntamento",
+        "fieldsFromGiorgio": [
+          "cliente",
+          "telefono",
+          "targa",
+          "veicolo"
+        ]
+      },
+      "odl": {
+        "action": "skip_automation",
+        "reason": "AutomatismoOdlDaPrenotazione + righe da tag",
+        "lavorazioniGiorgio": [
+          {
+            "reparto": "officina",
+            "descrizioni": [
+              "Controllo veicolo"
+            ],
+            "ore_man": 1,
+            "ore_mac": null,
+            "materiali_euro": null,
+            "ricambi": [],
+            "smaltimento": {
+              "applica": false,
+              "percentuale": null
+            },
+            "yapTarget": "gestione_pratica_odl",
+            "giorgioAutomates": false,
+            "note": "YAP crea pratica/ODL da prenotazione (AutomatismoOdlDaPrenotazione verificato UI)"
+          }
+        ],
+        "yapPopulates": [
+          "revisione_righe",
+          "manodopera_catalog",
+          "materiali_consumo"
+        ]
+      },
+      "confidence": {
+        "agenda": "high",
+        "gestione_pratica": "medium (delegato YAP)",
+        "odl": "medium (delegato YAP, ore/materiali fase 2)"
+      },
+      "dedupKey": "AB123CD|2026-05-07|14:30",
+      "sourceFile": "sample-payload.json",
+      "contexts": [
+        "officina"
+      ]
+    },
+    {
+      "mode": "shadow_plan_no_yap_write",
+      "practiceId": "frigor-sample",
+      "anagrafica": {
+        "cliente": "Frigor Trasporti",
+        "telefono": "+39035953876",
+        "targa": "GA019BC"
+      },
+      "agenda": {
+        "cosa": "GA019BC",
+        "quando": "25/03/2026",
+        "dalle": "08.00",
+        "alle": "08.20",
+        "tag": [
+          "revisione"
+        ],
+        "note": null,
+        "action": "create_appointment",
+        "delegatedToYap": [
+          "pratica",
+          "odl_base"
+        ]
+      },
+      "gestione_pratica": {
+        "action": "skip_automation",
+        "reason": "Link 'Gestione pratica' nativo in YAP dopo save appuntamento",
+        "fieldsFromGiorgio": [
+          "cliente",
+          "telefono",
+          "targa",
+          "veicolo"
+        ]
+      },
+      "odl": {
+        "action": "skip_automation",
+        "reason": "AutomatismoOdlDaPrenotazione + righe da tag",
+        "lavorazioniGiorgio": [
+          {
+            "reparto": "carrozzeria",
+            "descrizioni": [
+              "Verniciatura cerchi",
+              "revisione"
+            ],
+            "ore_man": null,
+            "ore_mac": null,
+            "materiali_euro": null,
+            "ricambi": [],
+            "smaltimento": {
+              "applica": false,
+              "percentuale": null
+            },
+            "yapTarget": "gestione_pratica_odl",
+            "giorgioAutomates": false,
+            "note": "YAP crea pratica/ODL da prenotazione (AutomatismoOdlDaPrenotazione verificato UI)"
+          }
+        ],
+        "yapPopulates": [
+          "revisione_righe",
+          "manodopera_catalog",
+          "materiali_consumo"
+        ]
+      },
+      "confidence": {
+        "agenda": "high",
+        "gestione_pratica": "medium (delegato YAP)",
+        "odl": "medium (delegato YAP, ore/materiali fase 2)"
+      },
+      "dedupKey": "GA019BC|2026-03-25|08:00",
+      "sourceFile": "sample-payload-carrozzeria-revisione.json",
+      "contexts": [
+        "carrozzeria"
+      ]
+    },
+    {
+      "mode": "shadow_plan_no_yap_write",
+      "practiceId": "revisione-pura-sample",
+      "anagrafica": {
+        "cliente": "MORELLI LILIANA",
+        "telefono": "+393456953099",
+        "targa": "EL733YJ"
+      },
+      "agenda": {
+        "cosa": "REVISIONE",
+        "quando": "04/04/2025",
+        "dalle": "10.20",
+        "alle": "10.40",
+        "tag": [
+          "revisione"
+        ],
+        "note": null,
+        "action": "create_appointment",
+        "delegatedToYap": [
+          "pratica",
+          "odl_base"
+        ]
+      },
+      "gestione_pratica": {
+        "action": "skip_automation",
+        "reason": "Link 'Gestione pratica' nativo in YAP dopo save appuntamento",
+        "fieldsFromGiorgio": [
+          "cliente",
+          "telefono",
+          "targa",
+          "veicolo"
+        ]
+      },
+      "odl": {
+        "action": "skip_automation",
+        "reason": "AutomatismoOdlDaPrenotazione + righe da tag",
+        "lavorazioniGiorgio": [
+          {
+            "reparto": "revisione",
+            "descrizioni": [
+              "Revisione periodica"
+            ],
+            "ore_man": null,
+            "ore_mac": null,
+            "materiali_euro": null,
+            "ricambi": [],
+            "smaltimento": {
+              "applica": false,
+              "percentuale": null
+            },
+            "yapTarget": "gestione_pratica_odl",
+            "giorgioAutomates": false,
+            "note": "YAP crea pratica/ODL da prenotazione (AutomatismoOdlDaPrenotazione verificato UI)"
+          }
+        ],
+        "yapPopulates": [
+          "revisione_righe",
+          "manodopera_catalog",
+          "materiali_consumo"
+        ]
+      },
+      "confidence": {
+        "agenda": "high",
+        "gestione_pratica": "medium (delegato YAP)",
+        "odl": "medium (delegato YAP, ore/materiali fase 2)"
+      },
+      "dedupKey": "EL733YJ|2025-04-04|10:20",
+      "sourceFile": "sample-payload-revisione-pura.json",
+      "contexts": [
+        "revisione"
+      ]
+    }
+  ],
+  "summary": {
+    "giorgioAutomates": [
+      "agenda popup: cosa, quando, dalle, alle, tag"
+    ],
+    "yapDelegates": [
+      "gestione pratica",
+      "ODL base",
+      "righe revisione da tag"
+    ],
+    "phase2Optional": [
+      "ore_man",
+      "ore_mac",
+      "materiali_euro",
+      "ricambi in ODL"
+    ]
+  }
+}

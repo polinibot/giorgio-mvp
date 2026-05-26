@@ -1,0 +1,41 @@
+{
+  "generatedAt": "2026-05-22T20:01:07.679Z",
+  "mode": "preview_only_no_yap_write",
+  "source": "automation/yap/sample-payload.json",
+  "giorgioSummary": {
+    "cliente": "CLIENTE TEST",
+    "telefono": "+393331112233",
+    "targa": "AB123CD",
+    "data": "2026-05-07",
+    "ora": "14:30",
+    "durata_minuti": 20,
+    "contesti": [
+      "officina"
+    ],
+    "tipo_pratica": "intervento",
+    "lavorazioniCount": 1
+  },
+  "proposedYap": {
+    "popup": {
+      "cosa": "AB123CD",
+      "quando": "07/05/2026",
+      "dalle": "14.30",
+      "alle": "14.50",
+      "tag": [
+        "officina"
+      ],
+      "note1_proposed": null,
+      "note2_proposed": null
+    },
+    "agendaBar_expectedPattern": "YAP compone automaticamente: ora - targa - modello - cliente - telefono - suffisso"
+  },
+  "confidence": {
+    "cosa": "high",
+    "quando": "high",
+    "dalle_alle": "high",
+    "tag": "medium-high",
+    "note1_note2": "blocked"
+  },
+  "openQuestions": [],
+  "mappingVersion": "1.0-frozen"
+}

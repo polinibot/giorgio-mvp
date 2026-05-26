@@ -1,0 +1,252 @@
+{
+  "scannedAt": "2026-05-25T09:32:42.490Z",
+  "date": "2026-05-25",
+  "mode": "readonly",
+  "eventCount": 27,
+  "events": [
+    {
+      "time": "",
+      "title": "FW549TA - JEEP RENEGADE - KHVARASTSIANAYA ALENA - 3456540885 - FW549TA !!!!!!!!!!!!!!!!!!!! PERIZIA ORE 9.30 MAESTRI !!!!!!!!!!!!!!!!!!!",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "1120px"
+    },
+    {
+      "time": "",
+      "title": "GF183JK - AUDI Q2 «GAB» - FARINELLI CARLA - GF183JK - !!!!!!!!!!!! PERIZIA CARLCINIC ORE 11 !!!!!!!!!!!",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "1120px"
+    },
+    {
+      "time": "",
+      "title": "LUCA IL 26 DEVE ANDARE DAL GIUDICE DI PACE A MILANO",
+      "repartoClass": "",
+      "bgColor": "rgb(248, 248, 248)",
+      "borderColor": "rgb(101, 168, 235)",
+      "left": "0px",
+      "width": "1120px"
+    },
+    {
+      "time": "10:00 - 10:20",
+      "title": "FA143DA - TOYOTA VERSO - KUQI ZENUN - 3297905011 - FA143DA",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "546.906px"
+    },
+    {
+      "time": "10:00 - 10:20",
+      "title": "FD897LP - MERCEDES CLASSE A «W176» - MARTIGNAGO ORESTE - 3928767320 - FD897LP - RIPARARE FORATURA",
+      "repartoClass": "LCWVQRD-b-h",
+      "bgColor": "rgb(242, 166, 64)",
+      "borderColor": "rgb(238, 136, 0)",
+      "left": "548.906px",
+      "width": "546.906px"
+    },
+    {
+      "time": "10:20 - 10:40",
+      "title": "CW891AF - TOYOTA YARIS (FRANCE ) «I» - ZERBINI NICOLETTA - CW891AF - VUOLE RITIRARLA IL GIORGIO",
+      "repartoClass": "LCWVQRD-b-r",
+      "bgColor": "rgb(135, 206, 250)",
+      "borderColor": "rgb(135, 206, 235)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "10:40 - 11:00",
+      "title": "DB185XF - FIAT PANDA «II» - PEZZOTTA VALTER - 3400693167 - DB185XF",
+      "repartoClass": "LCWVQRD-b-r",
+      "bgColor": "rgb(135, 206, 250)",
+      "borderColor": "rgb(135, 206, 235)",
+      "left": "0px",
+      "width": "546.906px"
+    },
+    {
+      "time": "10:40 - 11:00",
+      "title": "FX681TK - FIAT PANDA «III» VAN - ASSO TECNO SERVICE SRL - FX681TK",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "548.906px",
+      "width": "546.906px"
+    },
+    {
+      "time": "11:00 - 11:20",
+      "title": "GJ727BY - LANCIA YPSILON «III» - STERLI NICOLETTA - GJ727BY",
+      "repartoClass": "LCWVQRD-b-h",
+      "bgColor": "rgb(242, 166, 64)",
+      "borderColor": "rgb(238, 136, 0)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "11:20 - 11:40",
+      "title": "ET856MS - BMW SERIE 1 «F20» BERLINA - RATTU PARMOD KUMAR - 3312937474 - ET856MS",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "546.906px"
+    },
+    {
+      "time": "11:20 - 11:40",
+      "title": "FB821PS - FORD TRANSIT «VI» - TEKECO - 3476178588 - FB821PS",
+      "repartoClass": "LCWVQRD-b-h",
+      "bgColor": "rgb(242, 166, 64)",
+      "borderColor": "rgb(238, 136, 0)",
+      "left": "548.906px",
+      "width": "546.906px"
+    },
+    {
+      "time": "12:00 - 12:20",
+      "title": "GM581SB - AUDI RS 6 AVANT - VL GENERAL SERVICE SRLS - 3426302506 - GM581SB",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "13:20 - 13:40",
+      "title": "DJ214GW - KIA CARNIVAL «III» - ZAMBELLI DAVIDE - 3757200119 - DJ214GW",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "14:00 - 14:20",
+      "title": "PEUGEOT 206",
+      "repartoClass": "",
+      "bgColor": "rgb(248, 248, 248)",
+      "borderColor": "rgb(101, 168, 235)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "14:40 - 15:00",
+      "title": "VALERIO",
+      "repartoClass": "",
+      "bgColor": "rgb(248, 248, 248)",
+      "borderColor": "rgb(101, 168, 235)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "15:20 - 15:40",
+      "title": "CB363FP - TOYOTA YARIS (JAPAN) «I» - MUJI FESTIM - 3291262954 - CB363FP",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "16:00 - 16:20",
+      "title": "FP591RJ - RENAULT CLIO «IV» - SANGIORGI SAMUELA - 3398514826 - SANGIORGI SAMUELA",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "17:40 - 18:00",
+      "title": "BONASSI ALESSANDRO",
+      "repartoClass": "",
+      "bgColor": "rgb(248, 248, 248)",
+      "borderColor": "rgb(101, 168, 235)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "8:00 - 8:20",
+      "title": "FC735FR - TOYOTA AURIS TOURING SPORTS - BACCI NEREO - 3276686506 - FC735FR",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "546.906px"
+    },
+    {
+      "time": "8:00 - 8:20",
+      "title": "FP554LA - PEUGEOT 5008 «II» - NDIAYE CHEIKH - FP554LA",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "548.906px",
+      "width": "546.906px"
+    },
+    {
+      "time": "8:20 - 8:40",
+      "title": "FE960ND - FIAT 500L - BELOTTI FRANCESCO - FE960ND",
+      "repartoClass": "LCWVQRD-b-r",
+      "bgColor": "rgb(135, 206, 250)",
+      "borderColor": "rgb(135, 206, 235)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "8:40 - 9:00",
+      "title": "EM712PV - SKODA YETI - BOLIS PAOLO GIOVANNI - 3497531530 - BOLIS PAOLO",
+      "repartoClass": "LCWVQRD-b-r",
+      "bgColor": "rgb(135, 206, 250)",
+      "borderColor": "rgb(135, 206, 235)",
+      "left": "0px",
+      "width": "546.906px"
+    },
+    {
+      "time": "8:40 - 9:00",
+      "title": "FV784PP - JEEP RENEGADE - AUTOMOBILI RICCI SRL - 3450380100 - FV784PP",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "548.906px",
+      "width": "546.906px"
+    },
+    {
+      "time": "9:00 - 9:20",
+      "title": "CP843DC - RENAULT CLIO «II» - ANTONELLA GIUDICI (GIUDICI ANTONELLA) - CP843DC",
+      "repartoClass": "LCWVQRD-b-r",
+      "bgColor": "rgb(135, 206, 250)",
+      "borderColor": "rgb(135, 206, 235)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "9:20 - 9:40",
+      "title": "FA869VN - VOLKSWAGEN GOLF «VII» - NATH SOM - 3881132806 - FA869VN",
+      "repartoClass": "LCWVQRD-b-r",
+      "bgColor": "rgb(135, 206, 250)",
+      "borderColor": "rgb(135, 206, 235)",
+      "left": "0px",
+      "width": "1095.81px"
+    },
+    {
+      "time": "9:40 - 10:00",
+      "title": "EY488VX - LANCIA YPSILON «III» - DONZELLI MARILISA - 3458253533 - EY488VX",
+      "repartoClass": "LCWVQRD-b-e",
+      "bgColor": "rgb(224, 194, 64)",
+      "borderColor": "rgb(214, 174, 0)",
+      "left": "0px",
+      "width": "546.906px"
+    },
+    {
+      "time": "9:40 - 10:00",
+      "title": "FM401JG - RENAULT CLIO «IV» SW - PM AUTO DI MAFFIOLETTI PAOLO - 335228776 - FM401JG",
+      "repartoClass": "LCWVQRD-b-r",
+      "bgColor": "rgb(135, 206, 250)",
+      "borderColor": "rgb(135, 206, 235)",
+      "left": "548.906px",
+      "width": "546.906px"
+    }
+  ],
+  "screenshot": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-readonly\\day-2026-05-25.png"
+}

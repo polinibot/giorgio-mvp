@@ -1,0 +1,57 @@
+{
+  "updatedAt": "2026-05-22T12:08:00.000Z",
+  "mode": "readonly",
+  "scans": [
+    {
+      "date": "2026-03-15",
+      "eventCount": 0,
+      "file": "readonly-scan-2026-03-15.json",
+      "interpretation": "Domenica o giorno senza slot in agenda UI. Cofano+revisione NON visibile come appuntamento. Match API su 20260315 (PropertyGetAction) probabile falso positivo (snippet numerico, non prenotazione)."
+    },
+    {
+      "date": "2026-03-20",
+      "eventCount": 11,
+      "file": "readonly-scan-2026-03-20.json",
+      "interpretation": "Kit frizione Giorgio (3351324672, dp126gz, 20/03/2026) ASSENTE. Nessun titolo con frizione/bisio/pikhlyk. Esempio Giorgio probabilmente non ancora in YAP o data diversa."
+    },
+    {
+      "date": "2025-04-04",
+      "eventCount": 18,
+      "file": "readonly-scan-2025-04-04.json",
+      "kitFrizioneMatch": {
+        "time": "14:00 - 14:20",
+        "title": "DP126GZ - MERCEDES-BENZ A-CLASS (169) (04-12) - PIKHLYK PETRO - 3280524550 - DP126GZ - KIT FRIZIONE",
+        "repartoClass": "LCWVQRD-b-e",
+        "bgColor": "rgb(224, 194, 64)",
+        "giorgioPhone": "3351324672",
+        "yapPhoneInTitle": "3280524550",
+        "note": "Stesso cliente/targa storica; telefono in barra agenda differisce da esempio Giorgio 2026."
+      }
+    }
+  ],
+  "conclusions": {
+    "cofanoRevisione2026": {
+      "status": "not_in_agenda_ui",
+      "giorgioDate": "2026-03-15",
+      "action": "Verificare se pratica solo pianificata in Giorgio; non cercare in YAP finché non compare in agenda o API PrenotazioneTableAction."
+    },
+    "kitFrizioneOfficina": {
+      "status": "found_historical_only",
+      "giorgioDate": "2026-03-20",
+      "yapHistoricalDate": "2025-04-04",
+      "searchTermsForUi": ["DP126GZ", "KIT FRIZIONE", "PIKHLYK", "3280524550"],
+      "repartoClass": "LCWVQRD-b-e",
+      "action": "Usare 2025-04-04 per studio popup officina (read-only). Aggiornare esempi Giorgio con data YAP reale se si allineano."
+    },
+    "live2026Api": {
+      "kitFrizione": "bestScore 0, no matches in agenda-message-matches-live-2026.json",
+      "rumoreMotore": "bestScore 0",
+      "cofanoUsato": "bestScore 0"
+    }
+  },
+  "nextReadOnlySteps": [
+    "Completare yap-agenda-inspector su 2025-04-04 --search DP126GZ (popup tag/campi officina)",
+    "Rieseguire readonly-scan 2026-03-16 quando YAP risponde (timeout precedente)",
+    "Non usare date Giorgio 2026 per officina finché API/UI non mostrano l'appuntamento"
+  ]
+}

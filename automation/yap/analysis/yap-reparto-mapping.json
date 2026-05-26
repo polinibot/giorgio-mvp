@@ -1,0 +1,168 @@
+{
+  "version": "2026-05",
+  "analyzedAt": "2026-05-22T11:42:18.614Z",
+  "note": "Colonna agenda (CSS) e tag popup sono sistemi distinti. Non mappare carrozzeria→officina in modo automatico.",
+  "cssColumnClasses": [
+    {
+      "repartoClass": "LCWVQRD-b-f",
+      "observedOnAgenda": null,
+      "giorgioContextsSeen": [
+        "carrozzeria"
+      ],
+      "yapTagsSeen": [
+        "pneumatici"
+      ],
+      "examples": [
+        {
+          "name": "Italtrans",
+          "date": "2026-03-16",
+          "giorgioContext": "carrozzeria",
+          "tagChips": [
+            "pneumatici"
+          ],
+          "agendaTitle": "8:20 - 8:40FX339TM - SPA ITALTRANS - FX339TM"
+        }
+      ],
+      "inferredLabel": "Colonna gialla (osservata su Italtrans/carrozzeria-pneumatici)"
+    },
+    {
+      "repartoClass": "LCWVQRD-b-r",
+      "observedOnAgenda": null,
+      "giorgioContextsSeen": [
+        "misto",
+        "carrozzeria"
+      ],
+      "yapTagsSeen": [
+        "revisione"
+      ],
+      "examples": [
+        {
+          "name": "Passat",
+          "date": "2026-03-23",
+          "giorgioContext": "misto",
+          "tagChips": [
+            "revisione"
+          ],
+          "agendaTitle": "12:00 - 12:20DK140TP - VOLKSWAGEN PASSAT «V» VARIANT - KYAL NEZHA - 3669584120 - RADWAN"
+        },
+        {
+          "name": "Frigor_Trasporti",
+          "date": "2026-03-25",
+          "giorgioContext": "carrozzeria",
+          "tagChips": [
+            "revisione"
+          ],
+          "agendaTitle": "8:00 - 8:20GA019BC - MERCEDES-BENZ GLC - FRIGOR TRASPORTI OROBICO - 035953876 - GA019BC"
+        }
+      ],
+      "inferredLabel": "Colonna azzurra (osservata su Passat/Frigor/revisione)"
+    },
+    {
+      "repartoClass": "LCWVQRD-b-e",
+      "observedOnAgenda": null,
+      "giorgioContextsSeen": [
+        "carrozzeria"
+      ],
+      "yapTagsSeen": [
+        "pneumatici",
+        "comunicato",
+        "preventivo"
+      ],
+      "examples": [
+        {
+          "name": "Porta_posteriore",
+          "date": "2026-03-30",
+          "giorgioContext": "carrozzeria",
+          "tagChips": [
+            "pneumatici",
+            "comunicato",
+            "preventivo"
+          ],
+          "agendaTitle": "9:00 - 9:20GD109AR - PEUGEOT 5008 «II» - SINGH GURWINDER - 3899885954 - GD109AR"
+        }
+      ],
+      "inferredLabel": "Colonna alternativa (Porta posteriore / pneumatici+preventivo)"
+    }
+  ],
+  "giorgioContextToYapTags": {
+    "officina": {
+      "primaryTags": [
+        "officina"
+      ],
+      "fallbackTags": [],
+      "confidence": "medium-high",
+      "note": "Categoria O confermata via RPC (DP126GZ). Chip officina."
+    },
+    "carrozzeria": {
+      "primaryTags": [
+        "pneumatici"
+      ],
+      "fallbackTags": [
+        "preventivo",
+        "comunicato"
+      ],
+      "confidence": "high",
+      "note": "Italtrans e Porta posteriore usano pneumatici; Frigor usa revisione nel tag."
+    },
+    "revisione": {
+      "primaryTags": [
+        "revisione"
+      ],
+      "fallbackTags": [],
+      "confidence": "high",
+      "note": "Passat misto mostra solo tag revisione nel popup."
+    },
+    "misto": {
+      "primaryTags": [
+        "revisione"
+      ],
+      "strategy": "single_appointment",
+      "confidence": "medium",
+      "note": "Passat: un appuntamento, tag revisione nel popup."
+    }
+  },
+  "observedAppointments": [
+    {
+      "name": "Italtrans",
+      "date": "2026-03-16",
+      "giorgioContext": "carrozzeria",
+      "repartoClass": "LCWVQRD-b-f",
+      "tagChips": [
+        "pneumatici"
+      ],
+      "cosa": "FX339TM"
+    },
+    {
+      "name": "Passat",
+      "date": "2026-03-23",
+      "giorgioContext": "misto",
+      "repartoClass": "LCWVQRD-b-r",
+      "tagChips": [
+        "revisione"
+      ],
+      "cosa": "RADWAN"
+    },
+    {
+      "name": "Frigor_Trasporti",
+      "date": "2026-03-25",
+      "giorgioContext": "carrozzeria",
+      "repartoClass": "LCWVQRD-b-r",
+      "tagChips": [
+        "revisione"
+      ],
+      "cosa": "GA019BC"
+    },
+    {
+      "name": "Porta_posteriore",
+      "date": "2026-03-30",
+      "giorgioContext": "carrozzeria",
+      "repartoClass": "LCWVQRD-b-e",
+      "tagChips": [
+        "pneumatici",
+        "comunicato",
+        "preventivo"
+      ],
+      "cosa": "GD109AR"
+    }
+  ]
+}

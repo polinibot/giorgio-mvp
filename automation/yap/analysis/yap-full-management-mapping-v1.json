@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "1.0-management",
+  "generatedAt": "2026-05-22T21:00:00.000Z",
+  "mode": "readonly_study_complete",
+  "percentages": {
+    "agenda_read_preview": { "value": 85, "confidence": "high" },
+    "agenda_write_validated": { "value": 0, "confidence": "none", "note": "Nessun commit reale su YAP" },
+    "agenda_overall": { "value": 78, "confidence": "high" },
+    "gestione_pratica": { "value": 35, "confidence": "medium", "note": "Delegato a YAP; UI verificata read-only" },
+    "odl": { "value": 30, "confidence": "medium", "note": "Delegato a YAP; righe revisione auto osservate" },
+    "ore_materiali_ricambi": { "value": 15, "confidence": "low", "note": "Payload Giorgio pronto; inserimento ODL fase 2" },
+    "full_flow_1_1": { "value": 52, "confidence": "medium" }
+  },
+  "scopeDecision": {
+    "v1GiorgioAutomates": [
+      "Appuntamento agenda: Cosa, Quando, Dalle, Alle, tag chip",
+      "Dedup pre-insert (targa+data+ora)",
+      "Sync status su Giorgio (external_id, sync_status)"
+    ],
+    "v1YapDelegates": [
+      "Creazione/collegamento gestione pratica da prenotazione",
+      "ODL base via AutomatismoOdlDaPrenotazione",
+      "Righe revisione/tag via automatismi tag"
+    ],
+    "v2Optional": [
+      "Inserimento ore_man, ore_mac, materiali_euro, ricambi in ODL",
+      "Smaltimento in pratica",
+      "Note popup agenda (bloccate finché non richieste)"
+    ]
+  },
+  "areas": [
+    {
+      "area": "agenda_cosa",
+      "giorgioFields": ["anagrafica.targa", "meta.cosa_override"],
+      "yapTarget": "popup.cosa",
+      "rules": [
+        { "id": "R001", "rule": "Default Cosa=targa", "state": "accepted", "confidence": "high" },
+        { "id": "R001b", "rule": "Revisione pura → Cosa=REVISIONE", "state": "accepted", "confidence": "high", "evidence": "pratica-odl-probe EL733YJ 2025-04-04" },
+        { "id": "R001c", "rule": "Misto → riferimento breve se fornito, altrimenti targa", "state": "accepted", "confidence": "medium" }
+      ],
+      "percent": 90
+    },
+    {
+      "area": "agenda_quando_ora",
+      "giorgioFields": ["agenda.data", "agenda.ora", "agenda.durata_minuti"],
+      "yapTarget": "popup.quando / dalle / alle",
+      "rules": ["R002", "R003"],
+      "percent": 95
+    },
+    {
+      "area": "agenda_tag",
+      "giorgioFields": ["contexts", "lavorazioni", "agenda.tipo_pratica"],
+      "yapTarget": "popup.tag chips",
+      "rules": ["R004", "R005", "R006", "R007"],
+      "mapping": {
+        "officina": ["officina"],
+        "carrozzeria": ["pneumatici"],
+        "carrozzeria_preventivo": ["pneumatici", "preventivo"],
+        "revisione": ["revisione"],
+        "misto": ["revisione"]
+      },
+      "percent": 85
+    },
+    {
+      "area": "gestione_pratica",
+      "giorgioFields": ["anagrafica", "note_interne"],
+      "yapTarget": "PraticaGetOverviewAction / UI Gestione pratica",
+      "giorgioAutomates": false,
+      "yapAutomatismi": ["AutomatismoOdlDaPrenotazione"],
+      "evidence": "pratica-odl-discovery-findings.json",
+      "percent": 35
+    },
+    {
+      "area": "odl",
+      "giorgioFields": ["lavorazioni[].descrizioni", "ore_man", "ore_mac", "materiali_euro", "ricambi"],
+      "yapTarget": "Ordini di lavoro / MANODOPERA / MATERIALI DI CONSUMO",
+      "giorgioAutomates": false,
+      "yapAutomatismi": ["AutomatismoOdlDaPrenotazione", "AutomatismoArticoloDocumentoFromTagPrenotazione", "AutomatismoRevisioneInPrenotazione"],
+      "percent": 30
+    }
+  ],
+  "openItems": [],
+  "resolvedByEvidence": [
+    "Pratiche miste → un appuntamento (dataset settimana + probe revisione)",
+    "Officina tag=officina (RPC DP126GZ)",
+    "ODL non manuale in V1 (automatismi + UI pratica verificata)",
+    "Preventivo carrozzeria: comunicato manuale solo dopo invio preventivo al cliente"
+  ],
+  "sources": [
+    "yap-giorgio-bridge-mapping-v1.json",
+    "yap-automatismi-findings.json",
+    "pratica-odl-discovery-findings.json",
+    "yap-week-dataset.json",
+    "agenda-v1-audit.json"
+  ]
+}

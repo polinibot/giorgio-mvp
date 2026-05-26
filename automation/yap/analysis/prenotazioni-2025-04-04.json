@@ -1,0 +1,244 @@
+{
+  "generatedAt": "2026-05-22T14:10:50.696Z",
+  "source": "automation\\yap\\analysis\\rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json",
+  "records": [
+    {
+      "dateIdx": 40,
+      "dateIso": "2025-04-04T09:00:00",
+      "fields": {
+        "client": "KAUR RAMANDEEP",
+        "vehicle": "FORD C-MAX «III»",
+        "code": "25000998",
+        "plate": "EH892LP",
+        "vin": "WF0JXXWPBJAA21288"
+      }
+    },
+    {
+      "dateIdx": 62,
+      "dateIso": "2025-04-04T14:20:00",
+      "fields": {
+        "code": "v25040101",
+        "phones": [
+          "3481662863",
+          "25001004",
+          "3473814702",
+          "20250404104000",
+          "25001013"
+        ],
+        "client": "ROBERTI LODOVICO",
+        "plate": "DH166EY",
+        "vin": "VF7CHNFUC25913196",
+        "vehicle": "OPEL VIVARO «B»"
+      }
+    },
+    {
+      "dateIdx": 70,
+      "dateIso": "2025-04-04T10:40:00",
+      "fields": {
+        "plate": "DH166EY",
+        "vin": "VF7CHNFUC25913196",
+        "code": "3473814702",
+        "client": "BREVI ELENA",
+        "vehicle": "OPEL VIVARO «B»",
+        "phones": [
+          "25001013",
+          "20250404144000",
+          "25001005"
+        ]
+      }
+    },
+    {
+      "dateIdx": 79,
+      "dateIso": "2025-04-04T14:40:00",
+      "fields": {
+        "plate": "FV620JS",
+        "vin": "W0VJ7H603KV625316",
+        "code": "v25040901",
+        "client": "RONCORONI ANDREA",
+        "vehicle": "AUDI A4 «8K5» AVANT",
+        "phones": [
+          "25001005",
+          "20250404084000",
+          "25000997"
+        ]
+      }
+    },
+    {
+      "dateIdx": 87,
+      "dateIso": "2025-04-04T08:40:00",
+      "fields": {
+        "plate": "EK494XK",
+        "vin": "WAUZZZ8KXBA118784",
+        "code": "v25040801",
+        "client": "MSAAD FATIMA",
+        "vehicle": "FIAT PUNTO «III»",
+        "phones": [
+          "25000997",
+          "3351808436",
+          "20250404140000"
+        ],
+        "flags": [
+          "OP",
+          "COP",
+          "CP",
+          "P"
+        ]
+      }
+    },
+    {
+      "dateIdx": 100,
+      "dateIso": "2025-04-04T14:00:00",
+      "fields": {
+        "flags": [
+          "COP",
+          "CP",
+          "P",
+          "CO",
+          "O"
+        ],
+        "label": "Documento",
+        "client": "K COSTRUZIONI SRL",
+        "vehicle": "FIAT DOBLÒ «III»",
+        "plate": "EJ737EG",
+        "vin": "ZFA26300009103542",
+        "code": "3280524550",
+        "title": "DP126GZ - KIT  FRIZIONE"
+      }
+    },
+    {
+      "dateIdx": 118,
+      "dateIso": "2025-04-04T10:20:00",
+      "fields": {
+        "plate": "DP126GZ",
+        "vin": "WDD1690071J414374",
+        "code": "v25061801",
+        "phones": [
+          "3456953099",
+          "25001002",
+          "20250404094000",
+          "25001000"
+        ],
+        "client": "MORELLI LILIANA",
+        "vehicle": "RENAULT CLIO «IV»"
+      }
+    },
+    {
+      "dateIdx": 126,
+      "dateIso": "2025-04-04T09:40:00",
+      "fields": {
+        "client": "REVISIONE",
+        "plate": "EL733YJ",
+        "vin": "VF7SH9HP0BT560910",
+        "vehicle": "RENAULT CLIO «IV»",
+        "code": "25001000",
+        "phones": [
+          "20250404152000",
+          "25001007"
+        ]
+      }
+    },
+    {
+      "dateIdx": 133,
+      "dateIso": "2025-04-04T15:20:00",
+      "fields": {
+        "code": "25001000",
+        "plate": "FJ616CL",
+        "vin": "VF15RSN0A57241301",
+        "client": "LETO ELISA",
+        "phones": [
+          "25001007",
+          "3333713923",
+          "20250404082000"
+        ],
+        "vehicle": "MAZDA CX5 «I»"
+      }
+    },
+    {
+      "dateIdx": 141,
+      "dateIso": "2025-04-04T08:20:00",
+      "fields": {
+        "plate": "GH572TV",
+        "vin": "ZFA3340000P889493",
+        "code": "3333713923",
+        "client": "KAUR HARMANJIT",
+        "vehicle": "MAZDA CX5 «I»",
+        "phones": [
+          "3458599139",
+          "25000996",
+          "3289699760",
+          "20250404080000"
+        ]
+      }
+    },
+    {
+      "dateIdx": 154,
+      "dateIso": "2025-04-04T08:00:00",
+      "fields": {
+        "code": "25000996",
+        "plate": "ER898VV",
+        "vin": "VSSZZZ6JZDR177952",
+        "phones": [
+          "3289699760",
+          "25000995",
+          "3455102971",
+          "20250404150000"
+        ],
+        "client": "VAVASSORI PABLO",
+        "vehicle": "FIAT DOBLÒ «III» CARGO"
+      }
+    },
+    {
+      "dateIdx": 167,
+      "dateIso": "2025-04-04T15:00:00",
+      "fields": {
+        "plate": "FE263TG",
+        "vin": "ZFA26300006D08272",
+        "code": "3455102971",
+        "client": "BENWADIH KHALID",
+        "vehicle": "VOLKSWAGEN POLO «V»",
+        "phones": [
+          "25001006",
+          "20250404092000",
+          "25000999",
+          "3384738808",
+          "20250404100000"
+        ]
+      }
+    },
+    {
+      "dateIdx": 173,
+      "dateIso": "2025-04-04T09:20:00",
+      "fields": {
+        "vehicle": "VOLKSWAGEN POLO «V»",
+        "code": "25001006",
+        "plate": "FP352RL",
+        "vin": "WVWZZZ9NZ6Y187698",
+        "client": "COPPA PIETRO",
+        "phones": [
+          "25000999",
+          "3384738808",
+          "20250404100000",
+          "25001001",
+          "3477862149"
+        ]
+      }
+    },
+    {
+      "dateIdx": 180,
+      "dateIso": "2025-04-04T10:00:00",
+      "fields": {
+        "code": "25000999",
+        "plate": "EP847ZR",
+        "vin": "TSMNZC92S00292148",
+        "phones": [
+          "3384738808",
+          "25001001",
+          "3477862149",
+          "25001003"
+        ],
+        "client": "SERUGHETTI LUCIANO",
+        "vehicle": "CITROEN C4 PICASSO «I»"
+      }
+    }
+  ]
+}

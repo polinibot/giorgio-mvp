@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "2.0",
+  "frozenAt": "2026-05-25",
+  "sourceOfTruth": "mini_app_practice_contexts",
+  "supersedes": "yap-giorgio-bridge-mapping-v1.json (regole tag Frigor/misto non attive)",
+  "rules": {
+    "tags": {
+      "officina": ["officina"],
+      "revisione": ["revisione"],
+      "carrozzeria": ["pneumatici"],
+      "carrozzeria_preventivo": ["pneumatici", "preventivo"],
+      "multi_context": "union_of_all_selected_contexts",
+      "never_auto": ["comunicato"],
+      "no_text_inference": true
+    },
+    "cosa": {
+      "revisione_pura_only_context_revisione": "REVISIONE",
+      "otherwise": "best_effort_from_miniapp",
+      "work_brief_priority": ["officina", "carrozzeria", "revisione"],
+      "yap_agenda_bar": "composed_by_yap_not_giorgio"
+    },
+    "agenda_slot_minutes": 20,
+    "appointment_time_format": "HH:MM_any_minute"
+  },
+  "clientAnswers": {
+    "triple_context_tags": "all",
+    "cosa": "giorgio_compiles_yap_displays",
+    "descriptions": "mini_app_only_not_telegram_parse"
+  }
+}

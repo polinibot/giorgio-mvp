@@ -628,9 +628,48 @@ async function runYapAutomation(job, args) {
       },
       message: "Appuntamento salvato su YAP.",
     };
+  } catch (error) {
+    const errorSuffix = `${job.practiceId || "payload"}-${Date.now()}`;
+    const errorScreenshotPath = path.join(args.artifactDir, `error-${errorSuffix}.png`);
+    try {
+      await page.screenshot({ path: errorScreenshotPath, fullPage: true });
+      error.screenshotPath = errorScreenshotPath;
+      console.warn(`Screenshot dell'errore salvato in: ${errorScreenshotPath}`);
+    } catch (screenshotError) {
+      console.warn(`Fallito screenshot dell'errore: ${screenshotError.message}`);
+    }
+    throw error;
   } finally {
     await context.close();
     await browser.close();
+  }
+}
+
+async function notifyError(error, job, args) {
+  const apiBaseUrl = args.apiBaseUrl || process.env.API_BASE_URL;
+  if (!apiBaseUrl) return;
+
+  const payload = {
+    error_message: error.message,
+    stack_trace: error.stack,
+    screenshot_path: error.screenshotPath || null,
+    practice_id: job?.practiceId || null,
+    customer: job?.customer ? { name: job.customer.name, plate: job.customer.plate } : null,
+    appointment: job?.appointment ? { date: job.appointment.date, time: job.appointment.time } : null,
+    worker: "yap-worker.mjs",
+  };
+
+  try {
+    const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/yap/notify-error`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (response.ok) {
+      console.warn("Notifica errore inviata al backend");
+    }
+  } catch (notifyErr) {
+    console.warn(`Fallito invio notifica errore: ${notifyErr.message}`);
   }
 }
 
@@ -661,10 +700,23 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+  // Prova a notificare l'errore al backend (se possibile)
+  try {
+    const args = parseArgs(process.argv.slice(2));
+    const job = args.payloadFile
+      ? await readPayloadFile(args.payloadFile, args).catch(() => null)
+      : await readPracticeFromApi(args).catch(() => null);
+    await notifyError(error, job, args);
+  } catch {
+    // Ignora errori nella notifica
+  }
+
   console.error(JSON.stringify({
     ok: false,
     error: error.message,
+    stack: error.stack,
+    screenshot: error.screenshotPath || null,
   }, null, 2));
   process.exit(1);
 });

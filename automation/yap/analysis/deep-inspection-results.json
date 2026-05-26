@@ -1,0 +1,3821 @@
+{
+  "inspectedAt": "2026-05-22T11:33:54.453Z",
+  "results": [
+    {
+      "type": "appointment",
+      "target": {
+        "id": 8,
+        "name": "Italtrans",
+        "date": "2026-03-16",
+        "term": "italtrans",
+        "context": "carrozzeria"
+      },
+      "found": true,
+      "clickedEvent": {
+        "success": true,
+        "text": "8:20 - 8:40FX339TM - SPA ITALTRANS - FX339TM",
+        "repartoClass": "LCWVQRD-b-f",
+        "bgColor": ""
+      },
+      "allEvents": [
+        {
+          "title": "DJ235EJ - DAIHATSU TERIOS «II» - BALDASSARI ALFREDO - 3348419866 - DJ235EJ",
+          "time": "8:00 - 8:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FX339TM - SPA ITALTRANS - FX339TM",
+          "time": "8:20 - 8:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GC543SR - AUDI Q2 «GAB» - AUTOMOBILI RICCI SRL - 3450380100 - GC543SR",
+          "time": "8:20 - 8:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "FH905BC - VOLKSWAGEN GOLF «VII» - PLEBANI ROBERTO - 3490923575 - FH905BC",
+          "time": "8:40 - 9:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "G.B. TRASPORTI",
+          "time": "8:40 - 9:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-n",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-n",
+          "bgColor": "rgb(132, 62, 24)",
+          "borderColor": "rgb(113, 92, 71)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "DY176NE - OPEL COMBO «C» (CORSA) - SOCIETA' AGRICOLA CORNA  DI CORNA ALBERTO & C - 3388354843 - DY176NE BOMBOLA POI FAR SAPERE A FRATELLI PEZZONI - CHAT WHTSAPP",
+          "time": "9:00 - 9:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "BM251DR",
+          "time": "9:20 - 9:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "fc-event",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "",
+          "bgColor": "rgb(248, 248, 248)",
+          "borderColor": "rgb(101, 168, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EM847JJ - VOLKSWAGEN POLO «VI» - DIOP DJIBY - 3312142681 - EM847JJ",
+          "time": "9:20 - 9:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "FC277RV - FORD FOCUS «IV» SW - MASPER NICOLA - FC277RV",
+          "time": "9:40 - 10:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "BP058ZY - MERCEDES SPRINTER «II» - CORTESI CARLO - 3441632355 - BP058ZY",
+          "time": "10:00 - 10:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FC419SL - FIAT DOBLÒ «III» CARGO - SRL CARRARA GROUP - FC419SL",
+          "time": "10:20 - 10:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DJ877JS - FIAT SCUDO «II» - NDIAYE AMDY - 3293212991 - DJ877JS",
+          "time": "10:40 - 11:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GW772KK - JOSHI ARUN - 3516446750 - GW772KK",
+          "time": "12:20 - 12:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DS656ND - EFFEDI GASOLONE - OFFICINA MECCANICA GERMINARA LUIGI (GERMINARA LUIGI) - 3335238128 - DS656ND",
+          "time": "13:40 - 14:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EL878HP - VOLKSWAGEN POLO «VI» - LORENZI ANGELA MARIA - 3389264973 - EL878HP",
+          "time": "14:00 - 14:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EG902TA - FIAT PUNTO EVO - SERRAOUI SALAH - 3279803393 - EG902TA",
+          "time": "15:20 - 15:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CO730389 - FIAT 900T - PATELLI GIORGIO - 3476178588 - C0730389",
+          "time": "15:40 - 16:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "ED70024 - L3E 300EXC - LAZZARONI BORTOLO - 3357030371 - ED70024",
+          "time": "16:20 - 16:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FF608KG - AUDI A4 «8W5» AVANT - HMIDA NAJEH - 3271664491 - FF608KG",
+          "time": "16:40 - 17:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-a",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-a",
+          "bgColor": "rgb(192, 192, 192)",
+          "borderColor": "rgb(194, 194, 194)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EA049VX - AUDI A5 «8TA» SPORTBACK - HADOUI MOUNIM - 3478889310 - EA049VX",
+          "time": "17:00 - 17:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "X9M7TF - PIAGGIO FREE - PIRECI NEVAHIR - 3517357797 - X9M7TF",
+          "time": "17:20 - 17:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "X4M69B - KYMCO U3 01 00 - KUMAR VIPAN - 3280505108 - X4M69B",
+          "time": "17:40 - 18:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        }
+      ],
+      "popup": {
+        "textNodes": [
+          {
+            "text": "check",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "Dettagli appuntamento",
+            "tagName": "DIV",
+            "className": "LCWVQRD-ib-b"
+          },
+          {
+            "text": "{",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "Cosa",
+            "tagName": "DIV",
+            "className": "LCWVQRD-jb-z"
+          },
+          {
+            "text": "Quando",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "y",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "dalle",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "S",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "alle",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "S",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "Tag",
+            "tagName": "DIV",
+            "className": ""
+          },
+          {
+            "text": "close",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "pneumatici",
+            "tagName": "SPAN",
+            "className": "gwt-InlineHTML"
+          },
+          {
+            "text": "ĕ",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "“",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": ",",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "«",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "mpgucell423",
+            "id": "gwt-uid-987",
+            "value": "FX339TM",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 425,
+              "y": 140.6875,
+              "width": 368.296875,
+              "height": 20.90625,
+              "top": 140.6875,
+              "right": 793.296875,
+              "bottom": 161.59375,
+              "left": 425
+            }
+          },
+          {
+            "name": "mpgucels81",
+            "id": "gwt-uid-1063",
+            "value": "16/03/2026",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 425,
+              "y": 167.328125,
+              "width": 116.109375,
+              "height": 20.90625,
+              "top": 167.328125,
+              "right": 541.109375,
+              "bottom": 188.234375,
+              "left": 425
+            }
+          },
+          {
+            "name": "mpgucelv771",
+            "id": "gwt-uid-1067",
+            "value": "08.20",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 580.109375,
+              "y": 167.328125,
+              "width": 87.078125,
+              "height": 20.90625,
+              "top": 167.328125,
+              "right": 667.1875,
+              "bottom": 188.234375,
+              "left": 580.109375
+            }
+          },
+          {
+            "name": "mpgucelw773",
+            "id": "gwt-uid-1071",
+            "value": "08.40",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 706.1875,
+              "y": 167.328125,
+              "width": 87.078125,
+              "height": 20.90625,
+              "top": 167.328125,
+              "right": 793.265625,
+              "bottom": 188.234375,
+              "left": 706.1875
+            }
+          },
+          {
+            "name": "mpgucelx147",
+            "id": "gwt-uid-1075",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": true,
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "name": "mpgucelx10",
+            "id": "gwt-uid-1079",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": true,
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "name": "mpgucelj159",
+            "id": "gwt-uid-982",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "closepneumatici",
+            "hidden": false,
+            "rect": {
+              "x": 523.765625,
+              "y": 191.71875,
+              "width": 20,
+              "height": 20,
+              "top": 191.71875,
+              "right": 543.765625,
+              "bottom": 211.71875,
+              "left": 523.765625
+            }
+          }
+        ],
+        "tagChips": [
+          "pneumatici"
+        ],
+        "buttons": [],
+        "rawVisibleText": "check | Dettagli appuntamento | { | Cosa | Quando | y | dalle | S | alle | S | Tag | close | pneumatici | ĕ | “ | , | «",
+        "popupHTML": "<div class=\"gwt-DecoratedPopupPanel LCWVQRD-ib-i LCWVQRD-ib-j\" style=\"left: 361px; top: 99px; visibility: visible; position: absolute; overflow: visible;\"><div class=\"\"><table cellspacing=\"0\" cellpadding=\"0\" class=\"\"><tbody><tr class=\"popupTop\"><td class=\"popupTopLeft\"><div class=\"popupTopLeftInner\"></div></td><td class=\"popupTopCenter\"><div class=\"popupTopCenterInner\"></div></td><td class=\"popupTopRight\"><div class=\"popupTopRightInner\"></div></td></tr><tr class=\"popupMiddle\"><td class=\"popupMiddleLeft\"><div class=\"popupMiddleLeftInner\"></div></td><td class=\"popupMiddleCenter\"><div class=\"popupMiddleCenterInner popupContent\"><div style=\"width: 33.1em;\"><div class=\"LCWVQRD-ib-f\"> <table cellpadding=\"0\" cellspacing=\"0\"> <tbody><tr> <td valign=\"middle\" width=\"100%\"> <div class=\"LCWVQRD-ib-b\"> <div class=\"LCWVQRD-ib-p LCWVQRD-ib-h\"><div class=\"gwt-HTML LCWVQRD-ib-q LCWVQRD-k-O LCWVQRD-k-Q\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">check</span></div></div> Dettagli appuntamento </div> </td> <td align=\"center\" style=\"white-space: nowrap;\" valign=\"middle\"> <button type=\"button\" class=\"gwt-Button waves-effect waves-default\" aria-hidden=\"true\" style=\"display: none;\"><img class=\"gwt-Image LCWVQRD-a-l\" aria-hidden=\"true\" style=\"display: none;\"><span class=\"\"></span></button>  <div class=\"gwt-HTML LCWVQRD-jb-o LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">{</span></div> </td> </tr> </tbody></table> </div> <div class=\"LCWVQRD-ib-c\"> <div aria-hidden=\"true\" style=\"display: none;\"><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Veicolo </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"LCWVQRD-jb-B\"><div class=\"LCWVQRD-n-u\"><span class=\"LCWVQRD-n-ib LCWVQRD-n-Bc LCWVQRD-n-qb\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">?</span></span></span><span class=\"LCWVQRD-n-Fc LCWVQRD-n-S\">Nessun veicolo selezionato</span></div></div> <div class=\"LCWVQRD-jb-A\" style=\"display: none;\"> <div class=\"LCWVQRD-hb-a\" style=\"width: 100%;\"><div class=\"LCWVQRD-n-u\" style=\"height: 100%; width: 100%;\"><div class=\"LCWVQRD-n-pb LCWVQRD-n-uc\"><div></div></div></div></div> <a class=\"gwt-Anchor LCWVQRD-a-h LCWVQRD-f-M LCWVQRD-jb-r\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">Ē</span></span><span class=\"LCWVQRD-a-K\"></span></a> <a class=\"gwt-Anchor LCWVQRD-a-h LCWVQRD-f-M LCWVQRD-jb-r\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">Č</span></span><span class=\"LCWVQRD-a-K\"></span></a> </div> </div> </div></div>  <div><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Cosa </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"\"><div class=\"LCWVQRD-a-Db LCWVQRD-a-bb\" style=\"position: relative;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; left: 0px; top: 0px; bottom: 0px; width: 0px;\"><div class=\"LCWVQRD-a-Ab\" style=\"position: absolute; inset: 0px;\"><label class=\"LCWVQRD-Z-b LCWVQRD-a-Bb\" for=\"gwt-uid-987\" title=\"\"></label> <div class=\"gwt-HTML LCWVQRD-Z-a\" style=\"display: none;\"></div></div></div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div class=\"LCWVQRD-a-wb LCWVQRD-a-xb\" style=\"position: absolute; inset: 0px;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div id=\"gwt-uid-990\" style=\"position: absolute; inset: 0px;\"><input type=\"text\" class=\"gwt-TextBox LCWVQRD-a-tc LCWVQRD-a-ab focus-visible\" id=\"gwt-uid-987\" autocomplete=\"off\" name=\"mpgucell423\" data-focus-visible-added=\"\" style=\"text-transform: uppercase;\"></div></div><div style=\"position: absolute; overflow: hidden; display: none; left: 4px; top: 0px; bottom: 0px; width: 16px;\"><span class=\"gwt-InlineHTML LCWVQRD-a-tb\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"></span></div><div style=\"position: absolute; overflow: hidden; display: none; top: 0px; right: 4px; bottom: 0px; width: 12px;\"><span class=\"gwt-InlineHTML LCWVQRD-a-v\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"></span></div></div></div><div style=\"position: absolute; overflow: hidden; display: none; top: 0px; right: 0px; bottom: 0px; width: 0%;\"><span class=\"gwt-InlineLabel LCWVQRD-a-Eb LCWVQRD-k-O LCWVQRD-k-Q\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">lightbulb</span></span></div></div></div> </div> </div></div> <div class=\"LCWVQRD-f-V\" style=\"position: relative;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div style=\"position: absolute; inset: 0px;\"><div class=\"LCWVQRD-f-V LCWVQRD-jb-m\" style=\"width: 100%;\"> <div class=\"LCWVQRD-a-Db LCWVQRD-a-bb\" style=\"po"
+      }
+    },
+    {
+      "type": "appointment",
+      "target": {
+        "id": 5,
+        "name": "Passat",
+        "date": "2026-03-23",
+        "term": "passat",
+        "context": "misto"
+      },
+      "found": true,
+      "clickedEvent": {
+        "success": true,
+        "text": "12:00 - 12:20DK140TP - VOLKSWAGEN PASSAT «V» VARIANT - KYAL NEZHA - 3669584120 - RADWAN",
+        "repartoClass": "LCWVQRD-b-r",
+        "bgColor": ""
+      },
+      "allEvents": [
+        {
+          "title": "DN326MF - OPEL CORSA «D» - YAGHNI WIDAD - 3511482137 - DN326MF",
+          "time": "8:00 - 8:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-a",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-a",
+          "bgColor": "rgb(192, 192, 192)",
+          "borderColor": "rgb(194, 194, 194)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DN576DD - CITROEN C3 «I» - TRAPLETTI DEBORAH - 3495519198 - DN576DD",
+          "time": "8:20 - 8:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FM228LC - FORD C-MAX - SINGH BALJINDER - 3898757086 - FM228LC - CONTROLLARE FRENI E CONVERGENZA",
+          "time": "8:20 - 8:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "EH508TD - OPEL CORSA «D» - ROSSI ELENA FRANCESCA - 3317821190 - ROSSI ELENA",
+          "time": "8:40 - 9:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GH311AM - AUDI Q8 «4MN» - PROPERSI STERBIATI MICHELE GIUSEPPE - GH311AM",
+          "time": "8:40 - 9:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "DZ476PY - VOLKSWAGEN POLO «VI» - CHIODO ROBERTO - 3473613106 - DZ476PY",
+          "time": "9:00 - 9:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CB173MH - SEAT IBIZA IV «6L1» - ZENTILI FABIO - CB173MH",
+          "time": "9:20 - 9:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EV166EB - CITROEN C3 «II» - MARINI MARIA - 3482842398 - CADEI",
+          "time": "9:40 - 10:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CJ89224 - SUZUKI GSR600 - NOVALI ALBERTO - 3383518299 - NOVALI ALBERTO",
+          "time": "10:00 - 10:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EJ276TK - FIAT FREEMONT - RAM BACHITTAR - 3807617145 - EJ276TK",
+          "time": "10:20 - 10:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FC458WD - PEUGEOT 2008 - MAZZOLA GIUSEPPE - 3315335032 - FC458WD",
+          "time": "10:20 - 10:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "FC424VG - DANGEL EXPERT - SRL CARRARA GROUP - FC424VG",
+          "time": "10:40 - 11:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CA442BL - HYUNDAI ATOS PRIME «I» - PIN ALEXANDRE - 3899392425 - CA442BL",
+          "time": "11:00 - 11:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DJ360ZZ - MERCEDES CLASSE B «W245» - PLEBANI EUGENIO - 3339747542 - DJ360ZZ",
+          "time": "11:20 - 11:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CL065JJ - AUDI A3 - SEMPLICIANO GIUSEPPE - CL065JJ",
+          "time": "11:40 - 12:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EK620PY - RENAULT CLIO «III» - EL HAIRANI MOHAMMED - 3665366182 - EK620PY",
+          "time": "11:40 - 12:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "DK140TP - VOLKSWAGEN PASSAT «V» VARIANT - KYAL NEZHA - 3669584120 - RADWAN",
+          "time": "12:00 - 12:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GA368BE - CITROEN BERLINGO «IV» - BENINI MAURO - GA368BE",
+          "time": "12:20 - 12:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GA078RR - FIAT DOBLÒ «III» CARGO - F.A.B.A. DI FINAZZI EMANUELE E C. S.N.C. - 035838641 - FINAZZI",
+          "time": "12:40 - 13:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GH225AJ - AUDI Q5 - VESCOVI SILVIA - GH225AJ",
+          "time": "13:00 - 13:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "XBGF2M - PIAGGIO VESPA - VILLA MICHELE - 3284143282 - XBGF2M OMAGGIO",
+          "time": "13:20 - 13:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "ER360RJ - JEEP WRANGLER «III» - SPA ITALTRANS - ER360RJ",
+          "time": "13:40 - 14:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FN100VT - VOLKSWAGEN TIGUAN «II» - CREAZIONI BEPPE E SANDRA SRL - FN100VT",
+          "time": "13:40 - 14:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "EB645RG - PEUGEOT 206 - LOCATELLI STEFANIA",
+          "time": "14:00 - 14:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FK419FV - FIAT PANDA «III» VAN - BELOTTI GIORDANO - 3889570041 - PANDA PANETTIERE",
+          "time": "14:00 - 14:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "GA026BD - MERCEDES CLASSE B «W247» - MANENTI GIANPAOLO - GA026BD",
+          "time": "14:20 - 14:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CB772MB - FIAT PUNTO «II» VAN - EMMEBI TECNOIMPIANTI SRLS - 3409249267 - CB772MB",
+          "time": "14:40 - 15:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EH677MC - OPEL MOVANO B - PELLIZZOLI MANUELA ASSUNTA - 3477862140 - EH677MC",
+          "time": "14:40 - 15:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "GA848PE - PEUGEOT 3008 «II» - RHO GIULIO - RHO GIULIO",
+          "time": "15:00 - 15:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CL448VK - PEUGEOT 307 «I» SW - SENE ALIOU - 3331907817 - CL448VK",
+          "time": "15:20 - 15:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EJ942TM - AUDI A3 «8PA» SPORTBACK - PANSANA ALESSANDRO - 3474506247 - EJ942TM",
+          "time": "15:40 - 16:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "ET414ES - FIAT FIORINO «III» - BETTONI SILVANA - 3394984644 - ET414ES",
+          "time": "15:40 - 16:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "DG097MV - MERCEDES CLASSE ML «W164» - BEDDA ABDERRAHIM - 3358300546 - DG097MV",
+          "time": "16:00 - 16:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FJ617RX - JAGUAR F-PACE - SINGH KULDEEP - 3202649982 - FJ617RX",
+          "time": "16:20 - 16:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FM293PT - FIAT 500X - FRANCHI SIMONA - FM293PT",
+          "time": "16:40 - 17:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FC315RS - OPEL MOKKA - TADDEO MARZIO - 3488130281 - FC315RS",
+          "time": "17:00 - 17:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CD662FJ - MINI MINI COOPER «R50» - TOMASONI DANIELE - 3355609900 - CD6623FJ",
+          "time": "17:20 - 17:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EB077RD - FIAT PUNTO EVO - CALDARA TERESINA - EB077RD",
+          "time": "17:40 - 18:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FY960VH - FIAT DUCATO «290» - OMNIA IMPIANTI DI FINAZZI MATTEO - 3382136104 - FY960VH",
+          "time": "18:00 - 18:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-a",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-a",
+          "bgColor": "rgb(192, 192, 192)",
+          "borderColor": "rgb(194, 194, 194)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        }
+      ],
+      "popup": {
+        "textNodes": [
+          {
+            "text": "check",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "Dettagli appuntamento",
+            "tagName": "DIV",
+            "className": "LCWVQRD-ib-b"
+          },
+          {
+            "text": "{",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "Cosa",
+            "tagName": "DIV",
+            "className": "LCWVQRD-jb-z"
+          },
+          {
+            "text": "Quando",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "y",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "dalle",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "S",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "alle",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "S",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "Tag",
+            "tagName": "DIV",
+            "className": ""
+          },
+          {
+            "text": "close",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "revisione",
+            "tagName": "SPAN",
+            "className": "gwt-InlineHTML"
+          },
+          {
+            "text": "ĕ",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "“",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": ",",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "«",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "mpgucell423",
+            "id": "gwt-uid-987",
+            "value": "RADWAN",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 700,
+              "y": 365.6875,
+              "width": 368.296875,
+              "height": 20.90625,
+              "top": 365.6875,
+              "right": 1068.296875,
+              "bottom": 386.59375,
+              "left": 700
+            }
+          },
+          {
+            "name": "mpgucels81",
+            "id": "gwt-uid-1063",
+            "value": "23/02/2026",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 700,
+              "y": 392.328125,
+              "width": 116.109375,
+              "height": 20.90625,
+              "top": 392.328125,
+              "right": 816.109375,
+              "bottom": 413.234375,
+              "left": 700
+            }
+          },
+          {
+            "name": "mpgucelv771",
+            "id": "gwt-uid-1067",
+            "value": "12.00",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 855.109375,
+              "y": 392.328125,
+              "width": 87.078125,
+              "height": 20.90625,
+              "top": 392.328125,
+              "right": 942.1875,
+              "bottom": 413.234375,
+              "left": 855.109375
+            }
+          },
+          {
+            "name": "mpgucelw773",
+            "id": "gwt-uid-1071",
+            "value": "12.20",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 981.1875,
+              "y": 392.328125,
+              "width": 87.078125,
+              "height": 20.90625,
+              "top": 392.328125,
+              "right": 1068.265625,
+              "bottom": 413.234375,
+              "left": 981.1875
+            }
+          },
+          {
+            "name": "mpgucelx147",
+            "id": "gwt-uid-1075",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": true,
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "name": "mpgucelx10",
+            "id": "gwt-uid-1079",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": true,
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "name": "mpgucelj159",
+            "id": "gwt-uid-982",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "closerevisione",
+            "hidden": false,
+            "rect": {
+              "x": 786.296875,
+              "y": 416.71875,
+              "width": 20,
+              "height": 20,
+              "top": 416.71875,
+              "right": 806.296875,
+              "bottom": 436.71875,
+              "left": 786.296875
+            }
+          }
+        ],
+        "tagChips": [
+          "revisione"
+        ],
+        "buttons": [],
+        "rawVisibleText": "check | Dettagli appuntamento | { | Cosa | Quando | y | dalle | S | alle | S | Tag | close | revisione | ĕ | “ | , | «",
+        "popupHTML": "<div class=\"gwt-DecoratedPopupPanel LCWVQRD-ib-i LCWVQRD-ib-j\" style=\"left: 636px; top: 324px; visibility: visible; position: absolute; overflow: visible;\"><div class=\"\"><table cellspacing=\"0\" cellpadding=\"0\" class=\"\"><tbody><tr class=\"popupTop\"><td class=\"popupTopLeft\"><div class=\"popupTopLeftInner\"></div></td><td class=\"popupTopCenter\"><div class=\"popupTopCenterInner\"></div></td><td class=\"popupTopRight\"><div class=\"popupTopRightInner\"></div></td></tr><tr class=\"popupMiddle\"><td class=\"popupMiddleLeft\"><div class=\"popupMiddleLeftInner\"></div></td><td class=\"popupMiddleCenter\"><div class=\"popupMiddleCenterInner popupContent\"><div style=\"width: 33.1em;\"><div class=\"LCWVQRD-ib-f\"> <table cellpadding=\"0\" cellspacing=\"0\"> <tbody><tr> <td valign=\"middle\" width=\"100%\"> <div class=\"LCWVQRD-ib-b\"> <div class=\"LCWVQRD-ib-p LCWVQRD-ib-h\"><div class=\"gwt-HTML LCWVQRD-ib-q LCWVQRD-k-O LCWVQRD-k-Q\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">check</span></div></div> Dettagli appuntamento </div> </td> <td align=\"center\" style=\"white-space: nowrap;\" valign=\"middle\"> <button type=\"button\" class=\"gwt-Button waves-effect waves-default\" aria-hidden=\"true\" style=\"display: none;\"><img class=\"gwt-Image LCWVQRD-a-l\" aria-hidden=\"true\" style=\"display: none;\"><span class=\"\"></span></button>  <div class=\"gwt-HTML LCWVQRD-jb-o LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">{</span></div> </td> </tr> </tbody></table> </div> <div class=\"LCWVQRD-ib-c\"> <div aria-hidden=\"true\" style=\"display: none;\"><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Veicolo </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"LCWVQRD-jb-B\"><div class=\"LCWVQRD-n-u\"><span class=\"LCWVQRD-n-ib LCWVQRD-n-Bc LCWVQRD-n-qb\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">?</span></span></span><span class=\"LCWVQRD-n-Fc LCWVQRD-n-S\">Nessun veicolo selezionato</span></div></div> <div class=\"LCWVQRD-jb-A\" style=\"display: none;\"> <div class=\"LCWVQRD-hb-a\" style=\"width: 100%;\"><div class=\"LCWVQRD-n-u\" style=\"height: 100%; width: 100%;\"><div class=\"LCWVQRD-n-pb LCWVQRD-n-uc\"><div></div></div></div></div> <a class=\"gwt-Anchor LCWVQRD-a-h LCWVQRD-f-M LCWVQRD-jb-r\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">Ē</span></span><span class=\"LCWVQRD-a-K\"></span></a> <a class=\"gwt-Anchor LCWVQRD-a-h LCWVQRD-f-M LCWVQRD-jb-r\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">Č</span></span><span class=\"LCWVQRD-a-K\"></span></a> </div> </div> </div></div>  <div><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Cosa </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"\"><div class=\"LCWVQRD-a-Db LCWVQRD-a-bb\" style=\"position: relative;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; left: 0px; top: 0px; bottom: 0px; width: 0px;\"><div class=\"LCWVQRD-a-Ab\" style=\"position: absolute; inset: 0px;\"><label class=\"LCWVQRD-Z-b LCWVQRD-a-Bb\" for=\"gwt-uid-987\" title=\"\"></label> <div class=\"gwt-HTML LCWVQRD-Z-a\" style=\"display: none;\"></div></div></div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div class=\"LCWVQRD-a-wb LCWVQRD-a-xb\" style=\"position: absolute; inset: 0px;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div id=\"gwt-uid-990\" style=\"position: absolute; inset: 0px;\"><input type=\"text\" class=\"gwt-TextBox LCWVQRD-a-tc LCWVQRD-a-ab focus-visible\" id=\"gwt-uid-987\" autocomplete=\"off\" name=\"mpgucell423\" data-focus-visible-added=\"\" style=\"text-transform: uppercase;\"></div></div><div style=\"position: absolute; overflow: hidden; display: none; left: 4px; top: 0px; bottom: 0px; width: 16px;\"><span class=\"gwt-InlineHTML LCWVQRD-a-tb\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"></span></div><div style=\"position: absolute; overflow: hidden; display: none; top: 0px; right: 4px; bottom: 0px; width: 12px;\"><span class=\"gwt-InlineHTML LCWVQRD-a-v\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"></span></div></div></div><div style=\"position: absolute; overflow: hidden; display: none; top: 0px; right: 0px; bottom: 0px; width: 0%;\"><span class=\"gwt-InlineLabel LCWVQRD-a-Eb LCWVQRD-k-O LCWVQRD-k-Q\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">lightbulb</span></span></div></div></div> </div> </div></div> <div class=\"LCWVQRD-f-V\" style=\"position: relative;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div style=\"position: absolute; inset: 0px;\"><div class=\"LCWVQRD-f-V LCWVQRD-jb-m\" style=\"width: 100%;\"> <div class=\"LCWVQRD-a-Db LCWVQRD-a-bb\" style=\"p"
+      }
+    },
+    {
+      "type": "appointment",
+      "target": {
+        "id": 1,
+        "name": "Frigor_Trasporti",
+        "date": "2026-03-25",
+        "term": "frigor",
+        "context": "carrozzeria"
+      },
+      "found": true,
+      "clickedEvent": {
+        "success": true,
+        "text": "8:00 - 8:20GA019BC - MERCEDES-BENZ GLC - FRIGOR TRASPORTI OROBICO - 035953876 - GA019BC",
+        "repartoClass": "LCWVQRD-b-r",
+        "bgColor": ""
+      },
+      "allEvents": [
+        {
+          "title": "CW603AE - FIAT IDEA - SELINI BATTISTA - 3356872843 - CW603AE",
+          "time": "8:00 - 8:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DJ598JG - MINI MINI COOPER «R56» - ANTALI DANIELE ALESSANDRO - 3490969297 - DJ598JG",
+          "time": "8:00 - 8:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "33.3333%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "GA019BC - MERCEDES-BENZ GLC - FRIGOR TRASPORTI OROBICO - 035953876 - GA019BC",
+          "time": "8:00 - 8:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "66.6667%",
+          "width": "",
+          "zIndex": "3"
+        },
+        {
+          "title": "EG125FX - LANCIA YPSILON «II» - TESTA LILIANA - 3420291549 - EG125FX",
+          "time": "8:20 - 8:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EK634XH - LANCIA YPSILON «II» - BACCI NEREO - 3276686506 - EK634XH",
+          "time": "8:40 - 9:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FK751GA - FORD ECOSPORT - BELOMETTI ROBERTO - FK751GA",
+          "time": "8:40 - 9:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "FC571PB - DACIA DOKKER VAN - FENAROLI NADIA - 3338183602 - GANNASCHI PAOLO",
+          "time": "9:00 - 9:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "3473177934 - ERNESTO - FIAT PANDA 750 PREVENTIVO CARROZZERIA",
+          "time": "9:20 - 9:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "fc-event",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "",
+          "bgColor": "rgb(248, 248, 248)",
+          "borderColor": "rgb(101, 168, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "BY830ED - ALFA ROMEO 156 «I» SPORTWAGON - MUTTI FABRIZIO - 035942371 - BY830ED",
+          "time": "9:20 - 9:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "CL943MB - AUDI A3 «8P1» - COLNAGHI MARCO - 3207416592 - COIMAGHI",
+          "time": "9:40 - 10:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DN336DC - TOYOTA YARIS (FRANCE ) «II» - GAVAZZENI GIUSEPPINA DENISIA - DN336DC",
+          "time": "10:00 - 10:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GW009GY - FIAT SCUDO «III» - CEDRONI SRL - 035952505 - GW009GY",
+          "time": "10:00 - 10:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "BZ065WN - LAND ROVER TIPPER - FIM  SRL - 3771179242 - FIN SRL DI FINAZZI",
+          "time": "10:20 - 10:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EP805HM - MERCEDES CLASSE B «W246» - CAMINADA MATTEO - 3357378967 - EP805HM",
+          "time": "10:20 - 10:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "33.3333%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "GB TRASPORT - 1 CERCHHIO",
+          "time": "10:20 - 10:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-n",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-n",
+          "bgColor": "rgb(132, 62, 24)",
+          "borderColor": "rgb(113, 92, 71)",
+          "left": "66.6667%",
+          "width": "",
+          "zIndex": "3"
+        },
+        {
+          "title": "EP805HM - MERCEDES CLASSE B «W246» - CAMINADA MATTEO - 3357378967 - EP805HM",
+          "time": "10:40 - 11:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GH150AN - JEEP RENEGADE - COLOSIO GIULIA - 3401012565 - COLOSIO",
+          "time": "10:40 - 11:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "BM73220 - HONDA JAZZ - PODDA CATERINA - BM73220",
+          "time": "11:00 - 11:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GB TRASPORTI - 6 CERCHI",
+          "time": "11:00 - 11:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-n",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-n",
+          "bgColor": "rgb(132, 62, 24)",
+          "borderColor": "rgb(113, 92, 71)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "DJ95368 - PIAGGIO M28 VAR 8 VERS.00 - GIAVAZZI PAOLO - 3470749212 - PAOLO",
+          "time": "11:20 - 11:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DS881YL - MERCEDES CLASSE A - SPIRONELLI KATIA - 3356618402 - DS881YL",
+          "time": "11:40 - 12:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "X8ZGLN - PIAGGIO GRILLO - VALENTINI MATTEO - X92GZ4",
+          "time": "11:40 - 12:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-a",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-a",
+          "bgColor": "rgb(192, 192, 192)",
+          "borderColor": "rgb(194, 194, 194)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "CZ660DS - PEUGEOT 407 SW - BEN NHILA HATEM - 3512857004 - CZ660DS",
+          "time": "12:00 - 12:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DT137TY",
+          "time": "12:20 - 12:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "fc-event",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "",
+          "bgColor": "rgb(248, 248, 248)",
+          "borderColor": "rgb(101, 168, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "X92GZ4 - PIAGGIO GRILLO - ILLIPRONTI FABRIZIO - X92GZ4",
+          "time": "12:20 - 12:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "DT137TY - FORD TRANSIT TOURNEO «II» - CRYSTAL CEM - DT137TY",
+          "time": "12:40 - 13:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "ZA580XZ - LAND ROVER DEFENDER 90 «II» - LOCATELLI GIANLUCA - ZA580XZ",
+          "time": "13:00 - 13:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "BG096755 - GUZZI GALLETTO - AUTOCHIUDUNO DI MAFFIOLETTI ANDREA E COLOMBO DULIO SNC - BG096755",
+          "time": "14:00 - 14:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-a",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-a",
+          "bgColor": "rgb(192, 192, 192)",
+          "borderColor": "rgb(194, 194, 194)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FF564ES - FIAT PANDA «III» - BERZI ANTONELLA - 3336659051 - BELOTTI",
+          "time": "14:00 - 14:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "33.3333%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "FS985EV - MERCEDES CLASSE B «W246» - TRAPLETTI BRUNO - 3713819667 - FS985EV -",
+          "time": "14:00 - 14:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "66.6667%",
+          "width": "",
+          "zIndex": "3"
+        },
+        {
+          "title": "X8GRW2 - PIAGGIO VESPA PRIMAVERA - SINGH GURJAIV - 3208762727 - X8GRW2",
+          "time": "14:20 - 14:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "BV343BP - MERCEDES CLASSE CLK «C208» - BELOTTI ENZA LILIANA - 3406426175 - BV343BP",
+          "time": "14:40 - 15:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DZ670HD - KIA SOUL «I» - SICARO CATIA - 3473700524 - OLDRATI GIAMBATTISTA",
+          "time": "15:00 - 15:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DZ523ST - MERCEDES CLASSE A «W169» - POMPIGLIO LORENZO - 3336681821 - POMPIGLIO LORENZO",
+          "time": "15:20 - 15:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EK608LH - FIAT PANDA «II» - FINAZZI ALESSANDRA - 3395216912 - EK608LH",
+          "time": "15:40 - 16:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "ET902JS - FIAT FREEMONT - RAVELLI MARCO - 3925734978 - ET902JS",
+          "time": "15:40 - 16:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "EG618FR - CITROEN C4 GRAND PICASSO «I» - MUTTI GIANMARIA - 3391648188 - EG618FR",
+          "time": "16:00 - 16:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GD670GC - BMW SERIE 3 «E93» CABRIO - PIERMAURO GRENA - GD670GC",
+          "time": "16:20 - 16:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "BE735CH - FIAT PANDA «I» - SOARDI NADIA - 3274090905 - BE735CH",
+          "time": "16:40 - 17:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GH701LZ - FIAT 500X - SANTINI EMILIA - 3450745670 - GH701LZ FIAT 500X",
+          "time": "17:20 - 17:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FA412RR - OPEL CORSA «E» - DGUIDEG FATIMA - 3518099286 - OSSAM",
+          "time": "17:40 - 18:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        }
+      ],
+      "popup": {
+        "textNodes": [
+          {
+            "text": "check",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "Dettagli appuntamento",
+            "tagName": "DIV",
+            "className": "LCWVQRD-ib-b"
+          },
+          {
+            "text": "{",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "Cosa",
+            "tagName": "DIV",
+            "className": "LCWVQRD-jb-z"
+          },
+          {
+            "text": "Quando",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "y",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "dalle",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "S",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "alle",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "S",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "Tag",
+            "tagName": "DIV",
+            "className": ""
+          },
+          {
+            "text": "close",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "revisione",
+            "tagName": "SPAN",
+            "className": "gwt-InlineHTML"
+          },
+          {
+            "text": "ĕ",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "“",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": ",",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "«",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "mpgucell423",
+            "id": "gwt-uid-987",
+            "value": "GA019BC",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 1060,
+              "y": 120.6875,
+              "width": 368.296875,
+              "height": 20.90625,
+              "top": 120.6875,
+              "right": 1428.296875,
+              "bottom": 141.59375,
+              "left": 1060
+            }
+          },
+          {
+            "name": "mpgucels81",
+            "id": "gwt-uid-1063",
+            "value": "25/02/2026",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 1060,
+              "y": 147.328125,
+              "width": 116.109375,
+              "height": 20.90625,
+              "top": 147.328125,
+              "right": 1176.109375,
+              "bottom": 168.234375,
+              "left": 1060
+            }
+          },
+          {
+            "name": "mpgucelv771",
+            "id": "gwt-uid-1067",
+            "value": "08.00",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 1215.109375,
+              "y": 147.328125,
+              "width": 87.078125,
+              "height": 20.90625,
+              "top": 147.328125,
+              "right": 1302.1875,
+              "bottom": 168.234375,
+              "left": 1215.109375
+            }
+          },
+          {
+            "name": "mpgucelw773",
+            "id": "gwt-uid-1071",
+            "value": "08.20",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 1341.1875,
+              "y": 147.328125,
+              "width": 87.078125,
+              "height": 20.90625,
+              "top": 147.328125,
+              "right": 1428.265625,
+              "bottom": 168.234375,
+              "left": 1341.1875
+            }
+          },
+          {
+            "name": "mpgucelx147",
+            "id": "gwt-uid-1075",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": true,
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "name": "mpgucelx10",
+            "id": "gwt-uid-1079",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": true,
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "name": "mpgucelj159",
+            "id": "gwt-uid-982",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "closerevisione",
+            "hidden": false,
+            "rect": {
+              "x": 1146.296875,
+              "y": 171.71875,
+              "width": 20,
+              "height": 20,
+              "top": 171.71875,
+              "right": 1166.296875,
+              "bottom": 191.71875,
+              "left": 1146.296875
+            }
+          }
+        ],
+        "tagChips": [
+          "revisione"
+        ],
+        "buttons": [],
+        "rawVisibleText": "check | Dettagli appuntamento | { | Cosa | Quando | y | dalle | S | alle | S | Tag | close | revisione | ĕ | “ | , | «",
+        "popupHTML": "<div class=\"gwt-DecoratedPopupPanel LCWVQRD-ib-i LCWVQRD-ib-k\" style=\"visibility: visible; overflow: visible; position: absolute; left: 996px; top: 79px;\"><div class=\"\"><table cellspacing=\"0\" cellpadding=\"0\" class=\"\"><tbody><tr class=\"popupTop\"><td class=\"popupTopLeft\"><div class=\"popupTopLeftInner\"></div></td><td class=\"popupTopCenter\"><div class=\"popupTopCenterInner\"></div></td><td class=\"popupTopRight\"><div class=\"popupTopRightInner\"></div></td></tr><tr class=\"popupMiddle\"><td class=\"popupMiddleLeft\"><div class=\"popupMiddleLeftInner\"></div></td><td class=\"popupMiddleCenter\"><div class=\"popupMiddleCenterInner popupContent\"><div style=\"width: 33.1em;\"><div class=\"LCWVQRD-ib-f\"> <table cellpadding=\"0\" cellspacing=\"0\"> <tbody><tr> <td valign=\"middle\" width=\"100%\"> <div class=\"LCWVQRD-ib-b\"> <div class=\"LCWVQRD-ib-p LCWVQRD-ib-h\"><div class=\"gwt-HTML LCWVQRD-ib-q LCWVQRD-k-O LCWVQRD-k-Q\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">check</span></div></div> Dettagli appuntamento </div> </td> <td align=\"center\" style=\"white-space: nowrap;\" valign=\"middle\"> <button type=\"button\" class=\"gwt-Button waves-effect waves-default\" aria-hidden=\"true\" style=\"display: none;\"><img class=\"gwt-Image LCWVQRD-a-l\" aria-hidden=\"true\" style=\"display: none;\"><span class=\"\"></span></button>  <div class=\"gwt-HTML LCWVQRD-jb-o LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">{</span></div> </td> </tr> </tbody></table> </div> <div class=\"LCWVQRD-ib-c\"> <div aria-hidden=\"true\" style=\"display: none;\"><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Veicolo </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"LCWVQRD-jb-B\"><div class=\"LCWVQRD-n-u\"><span class=\"LCWVQRD-n-ib LCWVQRD-n-Bc LCWVQRD-n-qb\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">?</span></span></span><span class=\"LCWVQRD-n-Fc LCWVQRD-n-S\">Nessun veicolo selezionato</span></div></div> <div class=\"LCWVQRD-jb-A\" style=\"display: none;\"> <div class=\"LCWVQRD-hb-a\" style=\"width: 100%;\"><div class=\"LCWVQRD-n-u\" style=\"height: 100%; width: 100%;\"><div class=\"LCWVQRD-n-pb LCWVQRD-n-uc\"><div></div></div></div></div> <a class=\"gwt-Anchor LCWVQRD-a-h LCWVQRD-f-M LCWVQRD-jb-r\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">Ē</span></span><span class=\"LCWVQRD-a-K\"></span></a> <a class=\"gwt-Anchor LCWVQRD-a-h LCWVQRD-f-M LCWVQRD-jb-r\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">Č</span></span><span class=\"LCWVQRD-a-K\"></span></a> </div> </div> </div></div>  <div><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Cosa </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"\"><div class=\"LCWVQRD-a-Db LCWVQRD-a-bb\" style=\"position: relative;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; left: 0px; top: 0px; bottom: 0px; width: 0px;\"><div class=\"LCWVQRD-a-Ab\" style=\"position: absolute; inset: 0px;\"><label class=\"LCWVQRD-Z-b LCWVQRD-a-Bb\" for=\"gwt-uid-987\" title=\"\"></label> <div class=\"gwt-HTML LCWVQRD-Z-a\" style=\"display: none;\"></div></div></div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div class=\"LCWVQRD-a-wb LCWVQRD-a-xb\" style=\"position: absolute; inset: 0px;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div id=\"gwt-uid-990\" style=\"position: absolute; inset: 0px;\"><input type=\"text\" class=\"gwt-TextBox LCWVQRD-a-tc LCWVQRD-a-ab focus-visible\" id=\"gwt-uid-987\" autocomplete=\"off\" name=\"mpgucell423\" style=\"text-transform: uppercase;\" data-focus-visible-added=\"\"></div></div><div style=\"position: absolute; overflow: hidden; display: none; left: 4px; top: 0px; bottom: 0px; width: 16px;\"><span class=\"gwt-InlineHTML LCWVQRD-a-tb\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"></span></div><div style=\"position: absolute; overflow: hidden; display: none; top: 0px; right: 4px; bottom: 0px; width: 12px;\"><span class=\"gwt-InlineHTML LCWVQRD-a-v\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"></span></div></div></div><div style=\"position: absolute; overflow: hidden; display: none; top: 0px; right: 0px; bottom: 0px; width: 0%;\"><span class=\"gwt-InlineLabel LCWVQRD-a-Eb LCWVQRD-k-O LCWVQRD-k-Q\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">lightbulb</span></span></div></div></div> </div> </div></div> <div class=\"LCWVQRD-f-V\" style=\"position: relative;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div style=\"position: absolute; inset: 0px;\"><div class=\"LCWVQRD-f-V LCWVQRD-jb-m\" style=\"width: 100%;\"> <div class=\"LCWVQRD-a-Db LCWVQRD-a-bb\" style=\"po"
+      }
+    },
+    {
+      "type": "appointment",
+      "target": {
+        "id": 7,
+        "name": "Porta_posteriore",
+        "date": "2026-03-30",
+        "term": "3899885954",
+        "context": "carrozzeria"
+      },
+      "found": true,
+      "clickedEvent": {
+        "success": true,
+        "text": "9:00 - 9:20GD109AR - PEUGEOT 5008 «II» - SINGH GURWINDER - 3899885954 - GD109AR",
+        "repartoClass": "LCWVQRD-b-e",
+        "bgColor": ""
+      },
+      "allEvents": [
+        {
+          "title": "DB538MG - FIAT GRANDE PUNTO - SINGH JASVIR - DB538MG",
+          "time": "8:00 - 8:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EB870ZR - IVECO DAILY C «II» - STIL EDIL COSTRUZIONI - 3484413271 - STIL EDIL",
+          "time": "8:20 - 8:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FC521PY - OPEL ASTRA «J» SW - PATUCELLI MAURIZIO - FC521PY",
+          "time": "8:20 - 8:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "XBKWXJ - MALAGUTI F 10 CAT - PEREZ GUTIERREZ GASTON - 3801749358 - XBKWXJ",
+          "time": "8:40 - 9:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DE765TP - CITROEN C4 «I» - SECK MOUSTAPHA - 3271167658 - DE765TP",
+          "time": "9:00 - 9:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FN762VW - RENAULT CLIO «IV» SW - GURIONI DAVIDE - FN762VW",
+          "time": "9:00 - 9:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "33.3333%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "GD109AR - PEUGEOT 5008 «II» - SINGH GURWINDER - 3899885954 - GD109AR",
+          "time": "9:00 - 9:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "66.6667%",
+          "width": "",
+          "zIndex": "3"
+        },
+        {
+          "title": "EC764BA - BMW SERIE 1 «E87» BERLINA - CARRRARA NADIA - 3495654579 - NADIA",
+          "time": "9:20 - 9:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FC184SP - VOLKSWAGEN CADDY «V» - SOCIETA COOPERATIVA SOCIALE MEMPHIS SOCIETA SEMPLICE  STR DEI TERRAGLI SNC - FC184SP",
+          "time": "9:40 - 10:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DZ040SW - TOYOTA AYGO «I» - VECCHI SILVANA - DZ040SW",
+          "time": "10:00 - 10:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "GA307LY - VOLKSWAGEN E-UP - SAPIO SIMONA - GA307LY",
+          "time": "10:20 - 10:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FZ392MM - FORD TRANSIT COURIER - GIUSY SRL - FZ392MM",
+          "time": "10:40 - 11:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FD303DB - FIAT PANDA «III» - BELOTTI SEBASTIANO - FD303DB - TOTI",
+          "time": "11:00 - 11:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FP698RP - RENAULT KADJAR - REALINI GRAZIELLA - 3394429704 - FP698RP",
+          "time": "11:00 - 11:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "50%",
+          "width": "",
+          "zIndex": "2"
+        },
+        {
+          "title": "BGA26544 - MERCEDES SERIE «W201» - PERLETTI SALVATORE - BGA26544 - TOTI",
+          "time": "11:20 - 11:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "ER223CW - VOLKSWAGEN GOLF «VII» - AIROLDI MATTEO - 3791910323 - ER223CW - MOTORE",
+          "time": "11:40 - 12:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CR690ZR - FIAT PUNTO «II» - VALLE CHRISTIAN - 3402421533 - CR690ZR",
+          "time": "12:20 - 12:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-f",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-f",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CR690ZR - FIAT PUNTO «II» - VALLE CHRISTIAN - 3402421533 - CR690ZR",
+          "time": "12:40 - 13:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-e",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-e",
+          "bgColor": "rgb(224, 194, 64)",
+          "borderColor": "rgb(214, 174, 0)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "BS773WT - MITSUBISHI L200 «II» - BELOTTI GIUSEPPE - BS773WT",
+          "time": "14:00 - 14:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DY539ND - FIAT BRAVO «II» - PATELLI ZAIRA - 3494271950 - DY539ND",
+          "time": "14:20 - 14:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "ES897MK - OPEL VIVARO «A» - MSAAD MOHA - 3492326220 - ES897MK",
+          "time": "14:40 - 15:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FL187ZD - RENAULT CLIO «IV» - WORLD SECURITY INTELLIGENCE SRL - 3456908989 - FL187ZD",
+          "time": "15:00 - 15:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "CZ189PP - AUDI A3 «8PA» SPORTBACK - NAJHI AHMED - 3276840395 - NACHAL - AUDI A3",
+          "time": "15:20 - 15:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "FP899BL - FIAT TIPO «II» - PARIS CRISTINA - FP899BL",
+          "time": "15:40 - 16:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "DC892JP - PIAGGIO PORTER «II» - DI ADAMO MAGNO PAOLO - DC892JP",
+          "time": "16:00 - 16:20",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "EN013911 - GILERA G 98 - POMA GIUSEPPE - EN13911",
+          "time": "16:20 - 16:40",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        },
+        {
+          "title": "BD090LK - HONDA HR-V «I» - EUROCARS DI PIOTR  KIERUJ (KIERUJ PIOTR) - BD090LK",
+          "time": "16:40 - 17:00",
+          "allClasses": [
+            "fc-time-grid-event",
+            "fc-v-event",
+            "fc-event",
+            "fc-start",
+            "fc-end",
+            "LCWVQRD-b-r",
+            "LCWVQRD-b-s",
+            "fc-draggable",
+            "fc-resizable",
+            "fc-short"
+          ],
+          "repartoClass": "LCWVQRD-b-r",
+          "bgColor": "rgb(135, 206, 250)",
+          "borderColor": "rgb(135, 206, 235)",
+          "left": "0%",
+          "width": "",
+          "zIndex": "1"
+        }
+      ],
+      "popup": {
+        "textNodes": [
+          {
+            "text": "check",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "Dettagli appuntamento",
+            "tagName": "DIV",
+            "className": "LCWVQRD-ib-b"
+          },
+          {
+            "text": "{",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "Cosa",
+            "tagName": "DIV",
+            "className": "LCWVQRD-jb-z"
+          },
+          {
+            "text": "Quando",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "y",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "dalle",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "S",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "alle",
+            "tagName": "LABEL",
+            "className": "LCWVQRD-Z-b LCWVQRD-a-Bb"
+          },
+          {
+            "text": "S",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "Tag",
+            "tagName": "DIV",
+            "className": ""
+          },
+          {
+            "text": "close",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "pneumatici",
+            "tagName": "SPAN",
+            "className": "gwt-InlineHTML"
+          },
+          {
+            "text": "close",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "comunicato",
+            "tagName": "SPAN",
+            "className": "gwt-InlineHTML"
+          },
+          {
+            "text": "close",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-P"
+          },
+          {
+            "text": "preventivo",
+            "tagName": "SPAN",
+            "className": "gwt-InlineHTML"
+          },
+          {
+            "text": "ĕ",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "“",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": ",",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          },
+          {
+            "text": "«",
+            "tagName": "SPAN",
+            "className": "gwt-InlineLabel LCWVQRD-k-W"
+          }
+        ],
+        "inputs": [
+          {
+            "name": "mpgucell423",
+            "id": "gwt-uid-987",
+            "value": "GD109AR",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 1060,
+              "y": 181.6875,
+              "width": 368.296875,
+              "height": 20.90625,
+              "top": 181.6875,
+              "right": 1428.296875,
+              "bottom": 202.59375,
+              "left": 1060
+            }
+          },
+          {
+            "name": "mpgucels81",
+            "id": "gwt-uid-1063",
+            "value": "30/03/2026",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 1060,
+              "y": 208.328125,
+              "width": 116.109375,
+              "height": 20.90625,
+              "top": 208.328125,
+              "right": 1176.109375,
+              "bottom": 229.234375,
+              "left": 1060
+            }
+          },
+          {
+            "name": "mpgucelv771",
+            "id": "gwt-uid-1067",
+            "value": "09.00",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 1215.109375,
+              "y": 208.328125,
+              "width": 87.078125,
+              "height": 20.90625,
+              "top": 208.328125,
+              "right": 1302.1875,
+              "bottom": 229.234375,
+              "left": 1215.109375
+            }
+          },
+          {
+            "name": "mpgucelw773",
+            "id": "gwt-uid-1071",
+            "value": "09.20",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": false,
+            "rect": {
+              "x": 1341.1875,
+              "y": 208.328125,
+              "width": 87.078125,
+              "height": 20.90625,
+              "top": 208.328125,
+              "right": 1428.265625,
+              "bottom": 229.234375,
+              "left": 1341.1875
+            }
+          },
+          {
+            "name": "mpgucelx147",
+            "id": "gwt-uid-1075",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": true,
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "name": "mpgucelx10",
+            "id": "gwt-uid-1079",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "",
+            "hidden": true,
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 0,
+              "height": 0,
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          {
+            "name": "mpgucelj159",
+            "id": "gwt-uid-982",
+            "value": "",
+            "type": "text",
+            "placeholder": "",
+            "labelText": "closepreventivo",
+            "hidden": false,
+            "rect": {
+              "x": 1349.78125,
+              "y": 232.71875,
+              "width": 20,
+              "height": 20,
+              "top": 232.71875,
+              "right": 1369.78125,
+              "bottom": 252.71875,
+              "left": 1349.78125
+            }
+          }
+        ],
+        "tagChips": [
+          "pneumatici",
+          "comunicato",
+          "preventivo"
+        ],
+        "buttons": [],
+        "rawVisibleText": "check | Dettagli appuntamento | { | Cosa | Quando | y | dalle | S | alle | S | Tag | close | pneumatici | close | comunicato | close | preventivo | ĕ | “ | , | «",
+        "popupHTML": "<div class=\"gwt-DecoratedPopupPanel LCWVQRD-ib-i LCWVQRD-ib-k\" style=\"visibility: visible; overflow: visible; position: absolute; left: 996px; top: 140px;\"><div class=\"\"><table cellspacing=\"0\" cellpadding=\"0\" class=\"\"><tbody><tr class=\"popupTop\"><td class=\"popupTopLeft\"><div class=\"popupTopLeftInner\"></div></td><td class=\"popupTopCenter\"><div class=\"popupTopCenterInner\"></div></td><td class=\"popupTopRight\"><div class=\"popupTopRightInner\"></div></td></tr><tr class=\"popupMiddle\"><td class=\"popupMiddleLeft\"><div class=\"popupMiddleLeftInner\"></div></td><td class=\"popupMiddleCenter\"><div class=\"popupMiddleCenterInner popupContent\"><div style=\"width: 33.1em;\"><div class=\"LCWVQRD-ib-f\"> <table cellpadding=\"0\" cellspacing=\"0\"> <tbody><tr> <td valign=\"middle\" width=\"100%\"> <div class=\"LCWVQRD-ib-b\"> <div class=\"LCWVQRD-ib-p LCWVQRD-ib-h\"><div class=\"gwt-HTML LCWVQRD-ib-q LCWVQRD-k-O LCWVQRD-k-Q\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">check</span></div></div> Dettagli appuntamento </div> </td> <td align=\"center\" style=\"white-space: nowrap;\" valign=\"middle\"> <button type=\"button\" class=\"gwt-Button waves-effect waves-default\" aria-hidden=\"true\" style=\"display: none;\"><img class=\"gwt-Image LCWVQRD-a-l\" aria-hidden=\"true\" style=\"display: none;\"><span class=\"\"></span></button>  <div class=\"gwt-HTML LCWVQRD-jb-o LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">{</span></div> </td> </tr> </tbody></table> </div> <div class=\"LCWVQRD-ib-c\"> <div aria-hidden=\"true\" style=\"display: none;\"><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Veicolo </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"LCWVQRD-jb-B\"><div class=\"LCWVQRD-n-u\"><span class=\"LCWVQRD-n-ib LCWVQRD-n-Bc LCWVQRD-n-qb\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">?</span></span></span><span class=\"LCWVQRD-n-Fc LCWVQRD-n-S\">Nessun veicolo selezionato</span></div></div> <div class=\"LCWVQRD-jb-A\" style=\"display: none;\"> <div class=\"LCWVQRD-hb-a\" style=\"width: 100%;\"><div class=\"LCWVQRD-n-u\" style=\"height: 100%; width: 100%;\"><div class=\"LCWVQRD-n-pb LCWVQRD-n-uc\"><div></div></div></div></div> <a class=\"gwt-Anchor LCWVQRD-a-h LCWVQRD-f-M LCWVQRD-jb-r\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">Ē</span></span><span class=\"LCWVQRD-a-K\"></span></a> <a class=\"gwt-Anchor LCWVQRD-a-h LCWVQRD-f-M LCWVQRD-jb-r\"><span class=\"LCWVQRD-k-V\"><span class=\"gwt-InlineLabel LCWVQRD-k-W\">Č</span></span><span class=\"LCWVQRD-a-K\"></span></a> </div> </div> </div></div>  <div><div class=\"LCWVQRD-jb-x\"> <div class=\"LCWVQRD-jb-z\"> Cosa </div> <div class=\"LCWVQRD-jb-y\"> <div class=\"\"><div class=\"LCWVQRD-a-Db LCWVQRD-a-bb\" style=\"position: relative;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; left: 0px; top: 0px; bottom: 0px; width: 0px;\"><div class=\"LCWVQRD-a-Ab\" style=\"position: absolute; inset: 0px;\"><label class=\"LCWVQRD-Z-b LCWVQRD-a-Bb\" for=\"gwt-uid-987\" title=\"\"></label> <div class=\"gwt-HTML LCWVQRD-Z-a\" style=\"display: none;\"></div></div></div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div class=\"LCWVQRD-a-wb LCWVQRD-a-xb\" style=\"position: absolute; inset: 0px;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div id=\"gwt-uid-990\" style=\"position: absolute; inset: 0px;\"><input type=\"text\" class=\"gwt-TextBox LCWVQRD-a-tc LCWVQRD-a-ab focus-visible\" id=\"gwt-uid-987\" autocomplete=\"off\" name=\"mpgucell423\" style=\"text-transform: uppercase;\" data-focus-visible-added=\"\"></div></div><div style=\"position: absolute; overflow: hidden; display: none; left: 4px; top: 0px; bottom: 0px; width: 16px;\"><span class=\"gwt-InlineHTML LCWVQRD-a-tb\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"></span></div><div style=\"position: absolute; overflow: hidden; display: none; top: 0px; right: 4px; bottom: 0px; width: 12px;\"><span class=\"gwt-InlineHTML LCWVQRD-a-v\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"></span></div></div></div><div style=\"position: absolute; overflow: hidden; display: none; top: 0px; right: 0px; bottom: 0px; width: 0%;\"><span class=\"gwt-InlineLabel LCWVQRD-a-Eb LCWVQRD-k-O LCWVQRD-k-Q\" aria-hidden=\"true\" style=\"position: absolute; inset: 0px; display: none;\"><span class=\"gwt-InlineLabel LCWVQRD-k-P\">lightbulb</span></span></div></div></div> </div> </div></div> <div class=\"LCWVQRD-f-V\" style=\"position: relative;\"><div aria-hidden=\"true\" style=\"position: absolute; z-index: -32767; top: -20ex; width: 10em; height: 10ex; visibility: hidden;\">&nbsp;</div><div style=\"position: absolute; overflow: hidden; inset: 0px;\"><div style=\"position: absolute; inset: 0px;\"><div class=\"LCWVQRD-f-V LCWVQRD-jb-m\" style=\"width: 100%;\"> <div class=\"LCWVQRD-a-Db LCWVQRD-a-bb\" style=\"p"
+      }
+    }
+  ]
+}
