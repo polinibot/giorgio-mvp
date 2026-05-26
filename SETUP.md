@@ -162,7 +162,7 @@ giorgio/
 │   ├── main.py              # FastAPI server
 │   ├── bot.py               # Telegram bot
 │   ├── config.py            # Configurazione
-│   ├── database.py          # SQLAlchemy models
+│   ├── database_sqlite.py   # SQLAlchemy models attivi
 │   ├── models.py            # Pydantic models
 │   ├── ocr_service.py       # OCR targa
 │   ├── security.py          # Validazioni sicurezza
