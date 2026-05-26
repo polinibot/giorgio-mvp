@@ -102,6 +102,7 @@ Mapping tag Giorgio → YAP (conservativo):
 - **Commit**: doppio click slot, compila popup, tag chip, salva
 - **Non usare** `page.goto` su `#!agenda` dopo login (perde sessione GWT)
 - **Cosa** = targa uppercase, non titolo cliente+contesto
+- Se un delete appuntamento torna `blocked_by_odl`, la sequenza giusta e': elimina prima l'ODL da `Gestione pratica > Ordini di lavoro`, poi rilancia il delete appuntamento.
 
 ## Fase 5: Testing
 

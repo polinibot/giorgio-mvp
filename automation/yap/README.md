@@ -55,3 +55,14 @@ Le sezioni operative sono gia nel mapping `lavorazioni`. Quando saranno conferma
 - YAP mostra spesso slot visuali da 20 minuti; in `--commit` il worker clicca uno slot vicino e poi forza `dalle/alle` nel popup.
 - Il dry-run non apre il popup, per evitare bozze involontarie nel gestionale.
 - Gli screenshot finiscono in `automation/artifacts/yap`.
+
+## Recovery di appuntamenti bloccati da ODL
+
+Se `yap-delete-appointment.mjs` risponde `blocked_by_odl`, l'appuntamento non si puo cancellare direttamente perche e' legato a un ordine di lavoro.
+
+La sequenza corretta e':
+
+1. eliminare prima l'ODL collegato con `node automation/yap/yap-delete-linked-odl.mjs --date YYYY-MM-DD --search TESTO`
+2. rilanciare `node automation/yap/yap-delete-appointment.mjs --date YYYY-MM-DD --search TESTO`
+
+Il dialog di conferma ODL osservato e': `Confermi di voler eliminare l'ordine di lavoro?`

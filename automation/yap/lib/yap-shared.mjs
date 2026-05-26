@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 export const YAP_BASE_URL = process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it";
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 export const YAP_SESSION_STATE = process.env.YAP_SESSION_STATE || path.join(ROOT_DIR, "automation", "artifacts", "yap", "session-state.json");
+export const YAP_APPOINTMENT_DELETE_CONFIRM = "Confermi l'eliminazione dell'appuntamento?";
+export const YAP_ODL_DELETE_CONFIRM = "Confermi di voler eliminare l'ordine di lavoro?";
 
 export function normalize(value) {
   return String(value || "")
@@ -66,6 +68,32 @@ export async function waitForAgendaReady(page, timeout = 20000) {
     state: "visible",
     timeout,
   });
+}
+
+async function dismissUnsupportedBrowserWarning(page) {
+  const warningVisible = await page
+    .getByText(/ATTENZIONE! La versione del browser in uso non è più supportata!/i)
+    .first()
+    .isVisible({ timeout: 1500 })
+    .catch(() => false);
+  if (!warningVisible) return false;
+
+  const dialog = page.locator(".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel");
+  const ok = dialog.locator("button, .gwt-Button, [role='button']").filter({ hasText: /^OK$/i }).first();
+
+  if (await ok.isVisible({ timeout: 1500 }).catch(() => false)) {
+    await ok.click({ force: true }).catch(() => {});
+    await page.waitForTimeout(300);
+    return true;
+  }
+
+  await page.evaluate(() => {
+    const btns = [...document.querySelectorAll("button, .gwt-Button, [role=\"button\"]")];
+    const okBtn = btns.find((b) => (b.textContent || "").trim().toUpperCase() === "OK");
+    if (okBtn) okBtn.click();
+  }).catch(() => {});
+  await page.waitForTimeout(300);
+  return true;
 }
 
 export async function waitForYapAction(page, actionName, trigger, timeout = 15000) {
@@ -135,6 +163,7 @@ export async function gotoAgendaDate(page, isoDate) {
 export async function loginYap(page, username, password) {
   await page.goto(YAP_BASE_URL, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(500);
+  await dismissUnsupportedBrowserWarning(page);
 
   const loginInputVisible = await page.locator('input[name="u"]').first().isVisible({ timeout: 2500 }).catch(() => false);
   if (!loginInputVisible) {
@@ -144,6 +173,7 @@ export async function loginYap(page, username, password) {
       return;
     }
     await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
+    await dismissUnsupportedBrowserWarning(page);
     const agendaReady = await waitForAgendaReady(page, 5000).then(() => true).catch(() => false);
     if (agendaReady) {
       await persistYapSession(page.context()).catch(() => {});
@@ -164,6 +194,7 @@ export async function loginYap(page, username, password) {
   }
 
   await page.waitForTimeout(300);
+  await dismissUnsupportedBrowserWarning(page);
   await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 12000 });
   const filled = await page.evaluate(({ u, p }) => {
     const userEl = document.querySelector('input[name="u"]');
@@ -202,6 +233,7 @@ export async function loginYap(page, username, password) {
     });
   }
   await page.waitForTimeout(1200);
+  await dismissUnsupportedBrowserWarning(page);
   await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
   await page.getByText("Agenda", { exact: true }).first().waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
   await persistYapSession(page.context()).catch(() => {});
@@ -210,6 +242,7 @@ export async function loginYap(page, username, password) {
 export async function openAgendaInApp(page) {
   await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(700);
+  await dismissUnsupportedBrowserWarning(page);
 
   const selectors = [".fc-time-grid", ".fc-view-container", ".view-switch", ".fc-agenda-view"];
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -223,6 +256,7 @@ export async function openAgendaInApp(page) {
     }
     await page.waitForTimeout(800);
     await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
+    await dismissUnsupportedBrowserWarning(page);
     await waitForAgendaReady(page, 8000).catch(() => {});
   }
 

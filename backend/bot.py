@@ -58,6 +58,23 @@ class TelegramBot:
             "Ti faccio confermare la targa e poi apri direttamente la Mini App."
         )
 
+    def _draft_appointment_date(self) -> datetime:
+        raw_value = os.getenv("GIORGIO_DRAFT_APPOINTMENT_DATE", "").strip()
+        if raw_value:
+            try:
+                return datetime.fromisoformat(raw_value)
+            except ValueError:
+                try:
+                    return datetime.strptime(raw_value, "%Y-%m-%d")
+                except ValueError:
+                    logger.warning(
+                        "Invalid GIORGIO_DRAFT_APPOINTMENT_DATE=%s, falling back to November 2026",
+                        raw_value,
+                    )
+
+        # Test window coerente con gli E2E di produzione.
+        return datetime(2026, 11, 12)
+
     @staticmethod
     def _dashboard_url(user_id: int) -> str:
         return f"https://giorgio-mvp-nine.vercel.app?user_id={user_id}"
@@ -253,7 +270,7 @@ class TelegramBot:
                 created_by_telegram_id=telegram_user_id,
                 status=PracticeStatus.DRAFT,
                 customer_type=CustomerType.PRIVATO,
-                appointment_date=datetime.utcnow(),
+                appointment_date=self._draft_appointment_date(),
                 appointment_time="09:00",
                 practice_type=PracticeType.PREVENTIVO,
                 contexts="officina",

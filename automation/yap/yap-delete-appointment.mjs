@@ -260,6 +260,14 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
   const failureStatus = stillPresent
     ? classifyDeleteFailure(deleteRpcResponse?.body || visibleMessage)
     : null;
+  // Quando YAP blocca l'appuntamento per ODL, la correzione e' a due passi:
+  // cancellare prima l'ordine di lavoro e poi rilanciare questo script.
+  const repairHint = failureStatus === "blocked_by_odl"
+    ? {
+      script: `node automation/yap/yap-delete-linked-odl.mjs --date ${dateIso} --search ${searchTerm}`,
+      reason: "L'appuntamento e' collegato a un ordine di lavoro. Prima elimina l'ODL, poi rilancia questo script.",
+    }
+    : null;
 
   return {
     found: true,
@@ -276,9 +284,10 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
     yapMessage: visibleMessage || undefined,
     note: stillPresent
       ? failureStatus === "blocked_by_odl"
-        ? "YAP blocca la cancellazione perché l'appuntamento è associato a un ordine di lavoro."
+        ? "YAP blocca la cancellazione perche l'appuntamento e' associato a un ordine di lavoro."
         : "Richiesta delete inviata ma evento ancora visibile in agenda."
       : undefined,
+    repairHint,
   };
 }
 

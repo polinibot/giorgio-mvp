@@ -250,8 +250,8 @@ describe('Mini App user-simulation suite', () => {
         customer_name: 'Mario Rossi',
         contexts: ['officina'],
         synced: false,
-        appointment_date: '2026-06-10T09:00:00.000Z',
-        created_at: '2026-06-10T09:00:00.000Z',
+        appointment_date: '2026-11-10T09:00:00.000Z',
+        created_at: '2026-11-10T09:00:00.000Z',
       },
       {
         id: 2,
@@ -259,8 +259,8 @@ describe('Mini App user-simulation suite', () => {
         customer_name: 'Luca Bianchi',
         contexts: ['carrozzeria'],
         synced: true,
-        appointment_date: '2026-06-11T10:00:00.000Z',
-        created_at: '2026-06-11T10:00:00.000Z',
+        appointment_date: '2026-11-11T10:00:00.000Z',
+        created_at: '2026-11-11T10:00:00.000Z',
       },
     ];
 
@@ -281,7 +281,7 @@ describe('Mini App user-simulation suite', () => {
                 customer_name: 'Mario Rossi',
                 customer_type: 'privato',
                 billing_to_complete: false,
-                appointment_date: '2026-06-10T09:00:00.000Z',
+                appointment_date: '2026-11-10T09:00:00.000Z',
                 appointment_time: '09:00',
                 practice_type: 'preventivo',
                 contexts: 'officina',
@@ -386,7 +386,7 @@ describe('Mini App user-simulation suite', () => {
                 customer_name: 'Cliente Demo',
                 customer_type: 'privato',
                 billing_to_complete: false,
-                appointment_date: '2026-06-10T09:00:00.000Z',
+                appointment_date: '2026-11-10T09:00:00.000Z',
                 appointment_time: '09:00',
                 practice_type: 'preventivo',
                 contexts: 'officina',
@@ -415,8 +415,8 @@ describe('Mini App user-simulation suite', () => {
                 customer_name: 'Cliente Demo',
                 contexts: ['officina'],
                 synced: false,
-                appointment_date: '2026-06-10T09:00:00.000Z',
-                created_at: '2026-06-10T09:00:00.000Z',
+                appointment_date: '2026-11-10T09:00:00.000Z',
+                created_at: '2026-11-10T09:00:00.000Z',
               },
             ],
           },
@@ -456,7 +456,7 @@ describe('Mini App user-simulation suite', () => {
 
     setValueBySelector('#phone', '3331234567');
     setValueBySelector('#customer_name', 'Bozza Cliente');
-    setValueBySelector('#appointment_date', '2026-07-01');
+    setValueBySelector('#appointment_date', '2026-11-01');
     setValueBySelector('#appointment_time', '10:30');
 
     clickElement(getCheckboxLabel('Officina').querySelector('input[type="checkbox"]'));
@@ -579,7 +579,7 @@ describe('Mini App user-simulation suite', () => {
                 customer_name: 'Flotta Test',
                 customer_type: 'azienda',
                 billing_to_complete: false,
-                appointment_date: '2026-07-05T08:30:00.000Z',
+                appointment_date: '2026-11-05T08:30:00.000Z',
                 appointment_time: '08:30',
                 practice_type: 'ordine_di_lavoro',
                 contexts: 'officina,carrozzeria',
@@ -610,8 +610,8 @@ describe('Mini App user-simulation suite', () => {
                 customer_name: 'Flotta Test',
                 contexts: ['officina', 'carrozzeria'],
                 synced: true,
-                appointment_date: '2026-07-05T08:30:00.000Z',
-                created_at: '2026-07-05T08:30:00.000Z',
+                appointment_date: '2026-11-05T08:30:00.000Z',
+                created_at: '2026-11-05T08:30:00.000Z',
               },
             ],
           },
@@ -732,7 +732,7 @@ describe('Mini App user-simulation suite', () => {
     setValueBySelector('#phone', '+393331234567');
     setValueBySelector('#customer_name', 'Mario Rossi');
     setValueBySelector('#customer_type', 'azienda');
-    setValueBySelector('#appointment_date', '2026-06-15');
+    setValueBySelector('#appointment_date', '2026-11-15');
     setValueBySelector('#appointment_time', '09:30');
     setValueBySelector('#practice_type', 'ordine_di_lavoro');
 
@@ -832,7 +832,7 @@ describe('Mini App user-simulation suite', () => {
     setValueBySelector('#phone', '3331234567');
     setValueBySelector('#customer_name', 'Mario Rossi');
     setValueBySelector('#customer_type', 'privato');
-    setValueBySelector('#appointment_date', '2026-06-20');
+    setValueBySelector('#appointment_date', '2026-11-20');
     setValueBySelector('#appointment_time', '10:00');
     setValueBySelector('#practice_type', 'preventivo');
 
@@ -862,7 +862,7 @@ describe('Mini App user-simulation suite', () => {
             customer_name: 'Mario Rossi',
             customer_type: 'privato',
             billing_to_complete: false,
-            appointment_date: '2026-06-15T00:00:00.000Z',
+            appointment_date: '2026-11-15T00:00:00.000Z',
             appointment_time: '09:00',
             practice_type: 'preventivo',
             contexts: 'officina',

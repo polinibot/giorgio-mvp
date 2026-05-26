@@ -1,6 +1,6 @@
 /**
- * Destinazioni YAP canoniche (dove va ogni dato Giorgio).
- * writer: chi inserisce oggi | worker: implementazione worker Giorgio
+ * Canonical YAP destinations (where each Giorgio datum belongs).
+ * writer: what inserts today | worker: Giorgio worker implementation
  */
 
 export const WRITERS = {
@@ -11,29 +11,31 @@ export const WRITERS = {
 };
 
 export const YAP_NAV = {
-  agendaPopup: "Agenda › doppio click appuntamento › popup «Dettagli appuntamento»",
-  agendaBar: "Agenda › barra evento (titolo composto da YAP)",
-  praticaFromPopup: "Popup appuntamento › link «Gestione pratica»",
-  praticaOverview: "Gestione pratica › overview (PraticaGetOverviewAction)",
-  praticaRevisione: "Gestione pratica › menu «Revisione»",
-  praticaPreventivi: "Gestione pratica › menu «Preventivi»",
-  praticaOdl: "Gestione pratica › menu «Ordini di lavoro»",
-  praticaMateriali: "Gestione pratica › menu «Materiali di consumo»",
-  praticaSmaltimento: "Gestione pratica › menu «Smaltimento rifiuti»",
-  praticaDocumenti: "Gestione pratica › menu «Documenti fiscali»",
-  odlManodopera: "Ordini di lavoro › righe MANODOPERA (catalogo PropertyGetAction)",
-  odlMateriali: "Ordini di lavoro › MATERIALI DI CONSUMO",
-  odlArticoli: "Ordini di lavoro › articoli magazzino / righe documento",
+  agendaPopup: "Agenda > double click appointment > popup 'Dettagli appuntamento'",
+  agendaBar: "Agenda > event bar (title composed by YAP)",
+  praticaFromPopup: "Appointment popup > link 'Gestione pratica'",
+  praticaOverview: "Gestione pratica > overview (PraticaGetOverviewAction)",
+  praticaRevisione: "Gestione pratica > menu 'Revisione'",
+  praticaPreventivi: "Gestione pratica > menu 'Preventivi'",
+  praticaOdl: "Gestione pratica > menu 'Ordini di lavoro'",
+  praticaMateriali: "Gestione pratica > menu 'Materiali di consumo'",
+  praticaSmaltimento: "Gestione pratica > menu 'Smaltimento rifiuti'",
+  praticaDocumenti: "Gestione pratica > menu 'Documenti fiscali'",
+  odlManodopera: "Ordini di lavoro > MANODOPERA rows (PropertyGetAction catalog)",
+  odlMateriali: "Ordini di lavoro > MATERIALI DI CONSUMO",
+  odlArticoli: "Ordini di lavoro > warehouse items / document rows",
+  odlDeleteToolbar: "Ordini di lavoro > toolbar 'Elimina'",
+  odlDeleteConfirm: "Ordini di lavoro > confirm 'Confermi di voler eliminare l'ordine di lavoro?'",
 };
 
-/** Campi popup agenda (ordine UI osservato). */
+/** Agenda popup fields (observed UI order). */
 export const AGENDA_POPUP_FIELDS = {
   cosa: { id: "cosa", label: "Cosa", index: 1, writer: WRITERS.GIORGIO_WORKER, worker: "implemented" },
   quando: { id: "quando", label: "Quando", writer: WRITERS.GIORGIO_WORKER, worker: "implemented" },
   dalle: { id: "dalle", label: "dalle", writer: WRITERS.GIORGIO_WORKER, worker: "implemented" },
   alle: { id: "alle", label: "alle", writer: WRITERS.GIORGIO_WORKER, worker: "implemented" },
-  note1: { id: "note1", label: "note (campo 1)", writer: WRITERS.GIORGIO_PLANNED, worker: "planned", env: "YAP_FILL_NOTES=1" },
-  note2: { id: "note2", label: "note (campo 2)", writer: WRITERS.GIORGIO_PLANNED, worker: "planned" },
+  note1: { id: "note1", label: "note (field 1)", writer: WRITERS.GIORGIO_PLANNED, worker: "planned", env: "YAP_FILL_NOTES=1" },
+  note2: { id: "note2", label: "note (field 2)", writer: WRITERS.GIORGIO_PLANNED, worker: "planned" },
   tag: { id: "tag", label: "Tag (chip)", writer: WRITERS.GIORGIO_WORKER, worker: "implemented" },
 };
 
@@ -46,9 +48,9 @@ export const AUTOMATISMI = {
 export function writerLabel(writer) {
   const map = {
     [WRITERS.GIORGIO_WORKER]: "Giorgio worker",
-    [WRITERS.GIORGIO_PLANNED]: "Giorgio worker (pianificato)",
-    [WRITERS.YAP_AUTO]: "Automatismo YAP",
-    [WRITERS.OPERATORE]: "Operatore in YAP",
+    [WRITERS.GIORGIO_PLANNED]: "Giorgio worker (planned)",
+    [WRITERS.YAP_AUTO]: "YAP automation",
+    [WRITERS.OPERATORE]: "YAP operator",
   };
   return map[writer] || writer;
 }
