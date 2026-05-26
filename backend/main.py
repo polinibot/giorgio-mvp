@@ -1342,7 +1342,7 @@ async def sync_practice_to_yap(
         if body.fresh_login:
             args.append("--fresh-login")
 
-        result = await _run_yap_script("yap-worker.mjs", args)
+        result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=420)
         saved = bool((result.get("result") or {}).get("saved"))
         duplicate = (result.get("result") or {}).get("mode") == "commit-blocked-duplicate"
         if not body.dry_run and (saved or duplicate):
