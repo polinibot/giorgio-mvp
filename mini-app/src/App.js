@@ -2892,11 +2892,9 @@ function App() {
 
           <div className="section-inline-actions" style={{ marginBottom: 12 }}>
             <h1>🔧 Dati Pratica</h1>
-            {showDeveloperUi && (
-              <button type="button" className="btn-secondary" onClick={applyRandomPracticeDraft}>
-                Casuale
-              </button>
-            )}
+            <button type="button" className="btn-secondary" onClick={applyRandomPracticeDraft}>
+              Casuale
+            </button>
           </div>
           {showDeveloperUi && (
             <>
