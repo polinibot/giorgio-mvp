@@ -1534,8 +1534,11 @@ function App() {
   const [yapLastResult, setYapLastResult] = useState(null);
 
   const syncToYap = useCallback(async (id, options = {}) => {
+    const silent = options.silent || false;
+    const apiOptions = { ...options };
+    delete apiOptions.silent;
     if (browserPreviewMode) {
-      addToast('Anteprima: sync YAP simulato', 'success');
+      if (!silent) addToast('Anteprima: sync YAP simulato', 'success');
       setYapLastResult({ status: 'synced', simulated: true });
       return;
     }
@@ -1544,24 +1547,24 @@ function App() {
     try {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
       const res = await fetchWithRetry(() =>
-        axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
+        axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
       );
       const data = res.data?.data || {};
       setYapLastResult(data);
       rememberResponse('yap.sync');
       if (data.status === 'synced') {
-        addToast('Appuntamento sincronizzato con YAP', 'success');
+        if (!silent) addToast('Appuntamento sincronizzato con YAP', 'success');
         loadDetail(id);
       } else if (data.status === 'dry_run_or_duplicate') {
-        addToast('Dry-run o duplicato: nessuna modifica YAP', 'info');
+        if (!silent) addToast('Dry-run o duplicato: nessuna modifica YAP', 'info');
       } else if (data.status === 'not_ready') {
-        addToast('Pratica non pronta per sync YAP', 'warning');
+        if (!silent) addToast('Pratica non pronta per sync YAP', 'warning');
       } else {
-        addToast(`Sync YAP: ${data.status}`, 'info');
+        if (!silent) addToast(`Sync YAP: ${data.status}`, 'info');
       }
     } catch (err) {
       rememberError('yap.sync', err);
-      addToast(classifyError(err), 'error');
+      if (!silent) addToast(classifyError(err), 'error');
     } finally {
       setYapSyncLoading(false);
     }
@@ -2387,11 +2390,7 @@ function App() {
         // Wrapped in its own try/catch so a YAP failure doesn't
         // produce a confusing error toast alongside the success one.
         if (practiceId) {
-          try {
-            await syncToYap(practiceId, { dry_run: false });
-          } catch (_yapErr) {
-            // syncToYap already shows its own toast on failure
-          }
+          await syncToYap(practiceId, { dry_run: false, silent: true });
         }
 
         if (startedFromBot && !practice) {
