@@ -2380,12 +2380,19 @@ function App() {
           await uploadQueuedPhotos(practiceId);
         }
 
-        // Keep YAP aligned automatically after a successful save.
-        if (practiceId) {
-          await syncToYap(practiceId, { dry_run: false });
-        }
-
+        // Show success toast immediately, before YAP sync attempt
         addToast(practice ? 'Pratica aggiornata con successo!' : 'Pratica creata con successo!', 'success');
+
+        // Keep YAP aligned automatically after a successful save.
+        // Wrapped in its own try/catch so a YAP failure doesn't
+        // produce a confusing error toast alongside the success one.
+        if (practiceId) {
+          try {
+            await syncToYap(practiceId, { dry_run: false });
+          } catch (_yapErr) {
+            // syncToYap already shows its own toast on failure
+          }
+        }
 
         if (startedFromBot && !practice) {
           // Created from bot startapp
