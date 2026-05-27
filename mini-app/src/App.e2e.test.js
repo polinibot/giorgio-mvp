@@ -900,8 +900,8 @@ describe('Mini App user-simulation suite', () => {
     setValueWithin(getSection('Officina'), 'input[placeholder="Descrizione lavoro..."]', 'Tagliando completo');
 
     clickElement(getButton('Salva'));
-    await waitFor(() => document.body.textContent.includes('Pratica creata e sincronizzata con YAP.'));
-    expect(document.body.textContent).toContain('Pratica creata e sincronizzata con YAP.');
+    await waitFor(() => document.body.textContent.includes('Pratica salvata!'));
+    expect(document.body.textContent).toContain('Pratica salvata!');
 
     clickElement(getButton('📋 Vai alla Dashboard'));
     await waitFor(() => document.querySelector('.empty-state'));

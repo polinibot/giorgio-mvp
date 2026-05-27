@@ -755,6 +755,53 @@ def _ensure_yap_credentials(action: str) -> None:
         )
 
 
+def _extract_json_blob(text: str) -> Optional[dict]:
+    if not text:
+        return None
+    raw = text.strip()
+    if not raw:
+        return None
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end >= start:
+        candidate = raw[start:end + 1]
+        try:
+            parsed = _json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    try:
+        parsed = _json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _build_yap_failure_detail(out: str, err: str) -> dict:
+    parsed = _extract_json_blob(err) or _extract_json_blob(out) or {}
+    message = (
+        parsed.get("error")
+        or parsed.get("message")
+        or (err.splitlines()[-1].strip() if err else "")
+        or (out.splitlines()[-1].strip() if out else "")
+        or "Automazione YAP fallita"
+    )
+    detail = {
+        "message": message,
+        "error": parsed.get("error") or parsed.get("message") or message,
+    }
+    screenshot = parsed.get("screenshot") or parsed.get("screenshotPath")
+    if screenshot:
+        detail["screenshot"] = screenshot
+    stack = parsed.get("stack")
+    if stack:
+        detail["stack"] = stack
+    return detail
+
+
 async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180, db: Optional[Session] = None) -> Dict[str, Any]:
     root = _project_root()
     script_path = os.path.join(root, "automation", "yap", script_name)
@@ -811,9 +858,19 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
             logger.warning("Impossibile salvare la sessione YAP nel database: %s", e)
 
     if process.returncode != 0:
+        failure_detail = _build_yap_failure_detail(out, err)
+        logger.error(
+            "YAP script failed (%s): %s",
+            script_name,
+            failure_detail.get("message"),
+            extra={
+                "stdout_tail": out[-3000:],
+                "stderr_tail": err[-3000:],
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={"message": "Automazione YAP fallita", "stdout": out[-3000:], "stderr": err[-3000:]},
+            detail=failure_detail,
         )
 
     start = out.find("{")

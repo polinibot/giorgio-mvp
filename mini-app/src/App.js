@@ -41,12 +41,12 @@ function extractErrorDetail(detail) {
     return detail.map((item) => extractErrorDetail(item)).filter(Boolean).join(' | ');
   }
   if (typeof detail === 'object') {
+    if (detail.message || detail.error || detail.detail) {
+      return detail.message || detail.error || detail.detail;
+    }
     const parts = [
       detail.stderr,
       detail.stdout,
-      detail.message,
-      detail.error,
-      detail.detail,
       detail.reason,
     ].filter(Boolean);
     return (
@@ -973,7 +973,6 @@ function App() {
   const [practice, setPractice] = useState(null);
   const [error, setError] = useState('');
   const [successDone, setSuccessDone] = useState(false);
-  const [lastSavedPracticeId, setLastSavedPracticeId] = useState(null);
 
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [slowRequest, setSlowRequest] = useState(false);
@@ -1268,7 +1267,6 @@ function App() {
     setEditingPractice(null);
     setStartedFromBot(false);
     setSuccessDone(false);
-    setLastSavedPracticeId(null);
     setYapLastPracticeId(null);
     setYapLastResult(null);
     setError('');
@@ -2554,36 +2552,17 @@ function App() {
         const practiceId = responseData.id || (practice && practice.id);
 
         clearDraft();
-        setLastSavedPracticeId(practiceId || null);
 
         // Upload queued photos after practice creation
         if (formPhotos.length > 0 && practiceId) {
           await uploadQueuedPhotos(practiceId);
         }
 
-        // Keep YAP aligned automatically after a successful save.
-        // Wrapped in its own try/catch so a YAP failure doesn't
-        // produce a confusing second result alongside the save outcome.
+        addToast(practice ? 'Pratica aggiornata con successo!' : 'Pratica creata con successo!', 'success');
+
+        // Keep YAP aligned automatically after a successful save, but don't block the user.
         if (practiceId) {
-          const syncResult = await syncToYap(practiceId, { dry_run: false, silent: true });
-          if (syncResult) {
-            const actionLabel = practice ? 'aggiornata' : 'creata';
-            const finalMessage = syncResult.status === 'synced' || syncResult.status === 'duplicate'
-              ? `Pratica ${actionLabel} e sincronizzata con YAP.`
-              : syncResult.status === 'dry_run'
-                ? `Pratica ${actionLabel}. Dry-run YAP completato.`
-                : syncResult.status === 'not_ready'
-                  ? `Pratica ${actionLabel}, ma non pronta per YAP.`
-                  : `Pratica ${actionLabel}, ma sync YAP fallita: ${syncResult.message || 'errore sconosciuto'}`;
-            const finalSyncResult = { ...syncResult, message: finalMessage };
-            setYapLastResult(finalSyncResult);
-            if (!startedFromBot && !selectedPracticeId) {
-              const toastTone = syncResult.status === 'sync_failed'
-                ? 'error'
-                : (syncResult.status === 'not_ready' || syncResult.status === 'dry_run' ? 'warning' : 'success');
-              addToast(finalMessage, toastTone);
-            }
-          }
+          void syncToYap(practiceId, { dry_run: false, silent: true });
         }
 
         if (startedFromBot && !practice) {
@@ -2619,7 +2598,6 @@ function App() {
     setEditingPractice(null);
     setStartedFromBot(false);
     setShowDraftBanner(false);
-    setLastSavedPracticeId(null);
     setYapLastPracticeId(null);
     setYapLastResult(null);
     setSelectedContexts([]);
@@ -3186,7 +3164,9 @@ function App() {
         <div className="view-form view-enter">
           <div className="container">
             <div className="success-screen">
-              {yapLastPracticeId && renderYapResultBanner(yapLastResult, { practiceId: lastSavedPracticeId || yapLastPracticeId, showRetry: true, showDelete: false })}
+              <div className="success-icon">✅</div>
+              <h2>Pratica salvata!</h2>
+              <p>La pratica è stata salvata con successo.</p>
               <button className="button-submit" onClick={() => { openDashboard(); setSuccessDone(false); }} type="button">
                 📋 Vai alla Dashboard
               </button>
