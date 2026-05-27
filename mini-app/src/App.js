@@ -949,6 +949,29 @@ function App() {
     }
   }, [getValues, selectedContexts, sections, parts]);
 
+  const hasMeaningfulDraft = useCallback(() => {
+    const data = getValues();
+    const formHasValue = Object.values(data || {}).some((value) => !isEmptyFormValue(value));
+    const contextsHasValue = (selectedContexts || []).length > 0;
+    const sectionsHasValue = Object.values(sections || {}).some((section) => {
+      if (!section) return false;
+      return [
+        section.description_rows,
+        section.man_hours,
+        section.mac_hours,
+        section.materials_amount,
+        section.waste_apply,
+        section.waste_percentage,
+        section.notes,
+      ].some((value) => !isEmptyFormValue(value));
+    });
+    const partsHasValue = Object.values(parts || {}).some((items) => Array.isArray(items) && items.some((item) => {
+      if (!item) return false;
+      return !isEmptyFormValue(item.name) || !isEmptyFormValue(item.quantity);
+    }));
+    return formHasValue || contextsHasValue || sectionsHasValue || partsHasValue;
+  }, [getValues, selectedContexts, sections, parts]);
+
   const watchedValues = watch();
 
   const clearDraft = useCallback(() => {
@@ -986,14 +1009,18 @@ function App() {
   }, [setValue]);
 
   useEffect(() => {
-    if (currentView !== 'form' || loading || successDone) return undefined;
+    if (loading || successDone) return undefined;
 
-    const persistDraftOnLeave = () => { persistDraft(); };
+    const persistDraftOnLeave = () => {
+      if (hasMeaningfulDraft()) persistDraft();
+    };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') persistDraft();
+      if (document.visibilityState === 'hidden' && hasMeaningfulDraft()) persistDraft();
     };
 
-    const timer = setTimeout(() => persistDraft(), 250);
+    const timer = setTimeout(() => {
+      if (hasMeaningfulDraft()) persistDraft();
+    }, 250);
     window.addEventListener('beforeunload', persistDraftOnLeave);
     window.addEventListener('pagehide', persistDraftOnLeave);
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -1004,7 +1031,7 @@ function App() {
       window.removeEventListener('pagehide', persistDraftOnLeave);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [watchedValues, currentView, loading, successDone, selectedContexts, sections, parts, persistDraft]);
+  }, [watchedValues, currentView, loading, successDone, selectedContexts, sections, parts, persistDraft, hasMeaningfulDraft]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
