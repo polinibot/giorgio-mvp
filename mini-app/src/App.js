@@ -2415,7 +2415,7 @@ function App() {
   };
 
   // --- Reset form for new practice ---
-  const resetFormForNew = () => {
+  const resetFormForNew = useCallback(() => {
     setPractice(null);
     setEditingPractice(null);
     setStartedFromBot(false);
@@ -2446,7 +2446,7 @@ function App() {
     setExistingPhotos([]);
     setFormPhotoUploadProgress('');
     setLoading(false);
-  };
+  }, [setValue]);
 
   const discardDraft = useCallback(() => {
     clearDraft();
