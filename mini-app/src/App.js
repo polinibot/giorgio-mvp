@@ -41,11 +41,16 @@ function extractErrorDetail(detail) {
     return detail.map((item) => extractErrorDetail(item)).filter(Boolean).join(' | ');
   }
   if (typeof detail === 'object') {
+    const parts = [
+      detail.stderr,
+      detail.stdout,
+      detail.message,
+      detail.error,
+      detail.detail,
+      detail.reason,
+    ].filter(Boolean);
     return (
-      detail.message
-      || detail.error
-      || detail.detail
-      || [detail.stdout, detail.stderr].filter(Boolean).join(' | ')
+      parts.join(' | ')
       || JSON.stringify(detail)
     );
   }
