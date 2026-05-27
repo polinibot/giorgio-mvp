@@ -10,6 +10,8 @@ import {
   toItalianDate,
   toYapTime,
   addMinutes,
+  normalizeAppointmentTime,
+  getYapSlotMinutes,
   yapContextOptions,
   waitForYapAction,
 } from "./lib/yap-shared.mjs";
@@ -135,8 +137,12 @@ function normalizeJob(rawInput, overrides = {}) {
       },
       appointment: {
         date: toIsoDate(overrides.date || input.agenda.data),
-        time: overrides.time || input.agenda.ora,
-        duration: Number(overrides.duration || input.agenda.durata_minuti || 20),
+        rawTime: overrides.time || input.agenda.ora || "",
+        time: (() => {
+          const rawTime = overrides.time || input.agenda.ora || "";
+          return rawTime ? normalizeAppointmentTime(rawTime) : "";
+        })(),
+        duration: Number(overrides.duration || input.agenda.durata_minuti || getYapSlotMinutes()),
         type: input.agenda.tipo_pratica || "",
       },
       contexts,
@@ -175,8 +181,12 @@ function normalizeJob(rawInput, overrides = {}) {
     },
     appointment: {
       date: toIsoDate(overrides.date || appointment.date),
-      time: overrides.time || appointment.time,
-      duration: Number(overrides.duration || appointment.slot_duration || 20),
+      rawTime: overrides.time || appointment.time || "",
+      time: (() => {
+        const rawTime = overrides.time || appointment.time || "";
+        return rawTime ? normalizeAppointmentTime(rawTime) : "";
+      })(),
+      duration: Number(overrides.duration || appointment.slot_duration || getYapSlotMinutes()),
       type: appointment.practice_type || "",
     },
     contexts: input.contexts || sections.map((section) => section.reparto).filter(Boolean),
@@ -277,44 +287,78 @@ async function visibleTimeLabels(page) {
 }
 
 function minutesOf(time) {
-  const [hours, minutes] = time.split(":").map(Number);
+  const [hours, minutes] = String(time || "").replace(".", ":").split(":").map(Number);
   return hours * 60 + minutes;
 }
 
 async function clickApproximateSlot(page, targetTime) {
-  const rows = await page.evaluate(() => {
-    return [...document.querySelectorAll(".fc-slats tr")]
-      .map((row) => {
-        const cell = row.querySelector("td:not(.fc-axis)");
-        const rect = cell?.getBoundingClientRect();
-        const time = row.getAttribute("data-time");
-        return rect && time
-          ? { time: time.slice(0, 5), x: rect.x, y: rect.y, width: rect.width, height: rect.height }
-          : null;
-      })
-      .filter(Boolean)
-      .filter((item) => item.height > 0 && item.width > 0);
-  });
+  const normalizedTarget = normalizeAppointmentTime(targetTime);
+  const candidate = await page.evaluate((requestedTime) => {
+    const toMinutes = (time) => {
+      const raw = String(time || "").replace(".", ":");
+      const match = raw.match(/^(\d{2}):(\d{2})$/);
+      if (!match) return null;
+      return Number(match[1]) * 60 + Number(match[2]);
+    };
+    const targetMinutes = toMinutes(requestedTime);
+    if (targetMinutes == null) return null;
 
-  const labels = rows.length ? rows : await visibleTimeLabels(page);
-  if (!labels.length) {
-    throw new Error("Non trovo la griglia oraria YAP");
-  }
+    const rows = [...document.querySelectorAll(".fc-slats tr[data-time]")].map((row) => {
+      const cell = row.querySelector("td:not(.fc-axis)");
+      const time = String(row.getAttribute("data-time") || "").slice(0, 5);
+      const minutes = toMinutes(time);
+      if (!cell || minutes == null) return null;
+      return { row, cell, time, minutes };
+    }).filter(Boolean);
 
-  const targetMinutes = minutesOf(targetTime);
-  const sorted = labels.sort((a, b) => minutesOf(a.text || a.time) - minutesOf(b.text || b.time));
-  let label = sorted[0];
-  for (const candidate of sorted) {
-    const candidateTime = candidate.text || candidate.time;
-    if (minutesOf(candidateTime) <= targetMinutes) {
-      label = candidate;
+    if (!rows.length) return null;
+
+    let best = rows[0];
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const item of rows) {
+      const diff = Math.abs(item.minutes - targetMinutes);
+      const penalty = item.minutes < targetMinutes ? 1 : 0;
+      const score = diff + penalty;
+      if (score < bestScore) {
+        best = item;
+        bestScore = score;
+      }
+    }
+
+    best.cell.scrollIntoView({ block: "center", inline: "nearest" });
+    const rect = best.cell.getBoundingClientRect();
+    return {
+      time: best.time,
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+    };
+  }, normalizedTarget).catch(() => null);
+
+  let slot = candidate;
+  if (!slot) {
+    const labels = await visibleTimeLabels(page);
+    if (!labels.length) {
+      throw new Error("Non trovo la griglia oraria YAP");
+    }
+
+    const targetMinutes = minutesOf(normalizedTarget);
+    const sorted = labels.sort((a, b) => minutesOf(a.text || a.time) - minutesOf(b.text || b.time));
+    slot = sorted[0];
+    for (const item of sorted) {
+      const candidateTime = item.text || item.time;
+      if (minutesOf(candidateTime) <= targetMinutes) {
+        slot = item;
+      }
     }
   }
 
-  const clickX = label.text
-    ? label.x + label.width + 260
-    : label.x + Math.min(220, label.width / 2);
-  const clickY = label.y + Math.max(8, label.height / 2);
+  await page.waitForTimeout(120);
+  const clickX = (slot.text || slot.time)
+    ? slot.x + slot.width + 260
+    : slot.x + Math.min(220, slot.width / 2);
+  const clickY = slot.y + Math.max(8, slot.height / 2);
   await page.mouse.dblclick(clickX, clickY);
   await page.getByText("Dettagli appuntamento").first().waitFor({ state: "visible", timeout: 15000 });
 }
@@ -490,6 +534,25 @@ async function runYapAutomation(job, args) {
     await openAgenda(page, job.appointment.date);
 
     const yapTags = pickYapTagsFromJob(job);
+    if (args.debug) {
+      console.log(
+        JSON.stringify(
+          {
+            event: "yap-job-debug",
+            practiceId: job.practiceId || null,
+            plate: job.customer.plate,
+            rawTime: job.appointment.rawTime || job.appointment.time,
+            normalizedTime: job.appointment.time,
+            duration: job.appointment.duration,
+            contexts: job.contexts || [],
+            tags: yapTags,
+            phone: job.customer.phone || "",
+          },
+          null,
+          2,
+        ),
+      );
+    }
     const existingEvents = await scanAgendaEvents(page);
     const dedup = findExistingAppointment(existingEvents, {
       plate: job.customer.plate,

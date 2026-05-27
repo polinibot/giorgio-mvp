@@ -70,7 +70,7 @@ class TestE2ESecurity:
             "plate_confirmed": "AB123CD",
             "customer_name": "<script>alert('xss')</script>",
             "customer_type": "privato",
-            "appointment_date": "2026-11-24T00:00:00",
+            "appointment_date": "2026-11-23T00:00:00",
             "appointment_time": "11:00",
             "practice_type": "preventivo",
             "contexts": ["officina"],

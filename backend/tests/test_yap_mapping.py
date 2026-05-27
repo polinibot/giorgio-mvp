@@ -1,6 +1,6 @@
 """Test regole mapping Giorgio → YAP (contesti mini-app)."""
 
-from yap_mapping import pick_cosa, pick_yap_tags, build_yap_preview
+from yap_mapping import pick_cosa, pick_yap_tags, build_yap_preview, to_yap_time
 
 
 def _mapping(contexts, targa, lavorazioni, tipo="ordine_di_lavoro"):
@@ -48,6 +48,15 @@ def test_build_preview_has_odl_block():
     assert preview["proposedYap"]["popup"]["cosa"] == "AB123CD - CONTROLLO"
     assert preview["proposedYap"]["odl"]["action"] == "mapping_complete_worker_planned"
     assert preview["proposedYap"]["odl"]["yapMenu"]
+
+
+def test_preview_normalizes_time_to_yap_slot():
+    m = _mapping(["officina"], "AB123CD", [{"reparto": "officina", "descrizioni": ["Controllo"]}])
+    m["agenda"]["ora"] = "07:15"
+    preview = build_yap_preview(m)
+    assert preview["proposedYap"]["popup"]["dalle"] == "07.20"
+    assert preview["proposedYap"]["popup"]["alle"] == "07.40"
+    assert to_yap_time("07:15") == "07.20"
 
 
 def test_cosa_priority_officina_over_revisione():

@@ -178,6 +178,14 @@ function randomSubset(items, minCount = 1, maxCount = items.length) {
   return pool.slice(0, target);
 }
 
+function isEmptyFormValue(value) {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.length === 0;
+  if (value instanceof Date) return Number.isNaN(value.getTime());
+  return false;
+}
+
 function randomPlate() {
   const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   const digits = '0123456789';
@@ -483,7 +491,7 @@ const DASHBOARD_DEMO_PRACTICES = [
       customer_name: 'Luca Bianchi',
       customer_type: 'privato',
       billing_to_complete: false,
-      appointment_date: '2026-11-24T09:00:00',
+      appointment_date: '2026-11-23T09:00:00',
       appointment_time: '09:00',
       practice_type: 'preventivo',
       contexts: ['officina', 'revisione'],
@@ -930,8 +938,7 @@ function App() {
   const showDeveloperUi = isDebugUiEnabled();
 
   // --- Draft persistence ---
-  const saveDraft = useCallback(() => {
-    if (currentView !== 'form') return false;
+  const persistDraft = useCallback(() => {
     try {
       const data = getValues();
       const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now() };
@@ -940,7 +947,12 @@ function App() {
     } catch (_) {
       return false;
     }
-  }, [getValues, selectedContexts, sections, parts, currentView]);
+  }, [getValues, selectedContexts, sections, parts]);
+
+  const saveDraft = useCallback(() => {
+    if (currentView !== 'form') return false;
+    return persistDraft();
+  }, [persistDraft, currentView]);
 
   const watchedValues = watch();
 
@@ -981,23 +993,23 @@ function App() {
   useEffect(() => {
     if (currentView !== 'form' || loading || successDone) return undefined;
 
-    const persistDraft = () => { saveDraft(); };
+    const persistDraftOnLeave = () => { persistDraft(); };
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') saveDraft();
+      if (document.visibilityState === 'hidden') persistDraft();
     };
 
-    const timer = setTimeout(() => saveDraft(), 250);
-    window.addEventListener('beforeunload', persistDraft);
-    window.addEventListener('pagehide', persistDraft);
+    const timer = setTimeout(() => persistDraft(), 250);
+    window.addEventListener('beforeunload', persistDraftOnLeave);
+    window.addEventListener('pagehide', persistDraftOnLeave);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('beforeunload', persistDraft);
-      window.removeEventListener('pagehide', persistDraft);
+      window.removeEventListener('beforeunload', persistDraftOnLeave);
+      window.removeEventListener('pagehide', persistDraftOnLeave);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [watchedValues, currentView, loading, successDone, selectedContexts, sections, parts, saveDraft]);
+  }, [watchedValues, currentView, loading, successDone, selectedContexts, sections, parts, persistDraft]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1091,7 +1103,7 @@ function App() {
 
   const navigateBack = useCallback(() => {
     if (currentView === 'form') {
-      saveDraft();
+      persistDraft();
     }
     const prev = navigationStack[navigationStack.length - 1] || 'dashboard';
     setNavigationStack(s => s.slice(0, -1));
@@ -1107,17 +1119,17 @@ function App() {
     setFormPhotoUploadProgress('');
     setPractice(null);
     setError('');
-  }, [navigationStack, currentView, saveDraft]);
+  }, [navigationStack, currentView, persistDraft]);
 
   const openDashboard = useCallback(() => {
-    saveDraft();
+    persistDraft();
     setCurrentView('dashboard');
     setNavigationStack([]);
     setSelectedPracticeId(null);
     setEditingPractice(null);
     setDetailData(null);
     setLoading(false);
-  }, [saveDraft]);
+  }, [persistDraft]);
 
   // --- Telegram BackButton ---
   useEffect(() => {
@@ -2338,6 +2350,11 @@ function App() {
           await uploadQueuedPhotos(practiceId);
         }
 
+        // Keep YAP aligned automatically after a successful save.
+        if (practiceId) {
+          await syncToYap(practiceId, { dry_run: false });
+        }
+
         addToast(practice ? 'Pratica aggiornata con successo!' : 'Pratica creata con successo!', 'success');
 
         if (startedFromBot && !practice) {
@@ -2436,40 +2453,69 @@ function App() {
   };
 
   const applyRandomPracticeDraft = () => {
-    clearDraft();
     const randomDraft = buildRandomPracticeDraft();
 
-    setPractice(null);
-    setEditingPractice(null);
-    setSelectedPracticeId(null);
-    setStartedFromBot(false);
-    setLoading(false);
-    setSuccessDone(false);
-    setError('');
-    setShowDraftBanner(false);
-    setFieldErrors({});
-    setFormPhotos([]);
-    setExistingPhotos([]);
-    setFormPhotoUploadProgress('');
-    setSelectedContexts(randomDraft.selectedContexts);
-    setValue('contexts', randomDraft.selectedContexts);
-    setSections(randomDraft.sections);
-    setParts(randomDraft.parts);
-    setValue('plate_confirmed', randomDraft.formData.plate_confirmed);
-    setValue('phone', randomDraft.formData.phone);
-    setValue('customer_name', randomDraft.formData.customer_name);
-    setValue('customer_type', randomDraft.formData.customer_type);
-    setValue('billing_to_complete', randomDraft.formData.billing_to_complete);
-    setValue('company_name', randomDraft.formData.company_name);
-    setValue('vat_number', randomDraft.formData.vat_number);
-    setValue('fiscal_code', randomDraft.formData.fiscal_code);
-    setValue('billing_address', randomDraft.formData.billing_address);
-    setValue('billing_city', randomDraft.formData.billing_city);
-    setValue('billing_zip', randomDraft.formData.billing_zip);
-    setValue('appointment_date', randomDraft.formData.appointment_date);
-    setValue('appointment_time', randomDraft.formData.appointment_time);
-    setValue('practice_type', randomDraft.formData.practice_type);
-    setValue('internal_notes', randomDraft.formData.internal_notes);
+    const currentValues = getValues();
+    const currentContexts = normalizeContexts(currentValues.contexts || selectedContexts);
+    const nextContexts = currentContexts.length ? currentContexts : randomDraft.selectedContexts;
+    const contextSeeds = nextContexts.length ? nextContexts : randomDraft.selectedContexts;
+
+    if (!currentContexts.length && nextContexts.length) {
+      setSelectedContexts(nextContexts);
+      setValue('contexts', nextContexts);
+    } else if (currentContexts.length) {
+      setSelectedContexts(currentContexts);
+      setValue('contexts', currentContexts);
+    }
+
+    const setIfEmpty = (field, value) => {
+      if (isEmptyFormValue(currentValues[field])) {
+        setValue(field, value);
+      }
+    };
+
+    Object.entries(randomDraft.formData).forEach(([field, value]) => {
+      setIfEmpty(field, value);
+    });
+
+    const nextSections = { ...sections };
+    const nextParts = { ...parts };
+    contextSeeds.forEach((context) => {
+      const existingSection = nextSections[context] || {};
+      const generatedSection = randomDraft.sections[context] || randomSectionPayload(context).section;
+      const mergedSection = { ...existingSection };
+
+      if (isEmptyFormValue(mergedSection.description_rows)) mergedSection.description_rows = generatedSection.description_rows;
+      if (isEmptyFormValue(mergedSection.man_hours)) mergedSection.man_hours = generatedSection.man_hours;
+      if (isEmptyFormValue(mergedSection.mac_hours)) mergedSection.mac_hours = generatedSection.mac_hours;
+      if (isEmptyFormValue(mergedSection.materials_amount)) mergedSection.materials_amount = generatedSection.materials_amount;
+      if (isEmptyFormValue(mergedSection.waste_apply)) mergedSection.waste_apply = generatedSection.waste_apply;
+      if (isEmptyFormValue(mergedSection.waste_percentage)) mergedSection.waste_percentage = generatedSection.waste_percentage;
+      if (isEmptyFormValue(mergedSection.notes)) mergedSection.notes = generatedSection.notes;
+
+      if (!Array.isArray(mergedSection.description_rows) || mergedSection.description_rows.length === 0) {
+        mergedSection.description_rows = generatedSection.description_rows;
+      }
+
+      nextSections[context] = mergedSection;
+
+      const existingParts = nextParts[context];
+      if (!Array.isArray(existingParts) || existingParts.length === 0) {
+        const generatedParts = randomDraft.parts[context] || randomSectionPayload(context).parts;
+        if (generatedParts.length) nextParts[context] = generatedParts;
+      }
+    });
+
+    setSections(nextSections);
+    setParts(nextParts);
+
+    if (isEmptyFormValue(currentValues.appointment_date)) {
+      setValue('appointment_date', randomDraft.formData.appointment_date);
+    }
+    if (isEmptyFormValue(currentValues.appointment_time)) {
+      setValue('appointment_time', randomDraft.formData.appointment_time);
+    }
+
     setCurrentView('form');
     setNavigationStack(['dashboard']);
   };
@@ -2706,7 +2752,7 @@ function App() {
           {!browserPreviewMode && renderYapPreviewPanel(yapPreview, yapPreviewLoading)}
 
           {/* YAP Automation Controls */}
-          {!browserPreviewMode && (
+          {false && !browserPreviewMode && (
             <div className="section">
               <h2>🔧 Automazione YAP</h2>
               <div className="yap-controls-grid">
@@ -2864,7 +2910,7 @@ function App() {
               <div className="success-icon">✅</div>
               <h2>Pratica salvata!</h2>
               <p>La pratica è stata salvata con successo.</p>
-              <button className="button-submit" onClick={() => { setCurrentView('dashboard'); setNavigationStack([]); setSuccessDone(false); }} type="button">
+              <button className="button-submit" onClick={() => { openDashboard(); setSuccessDone(false); }} type="button">
                 📋 Vai alla Dashboard
               </button>
               <button
@@ -2896,7 +2942,7 @@ function App() {
               Casuale
             </button>
           </div>
-          {showDeveloperUi && (
+          {false && showDeveloperUi && (
             <>
               <div className="field-hint" style={{ marginBottom: 12 }}>
                 Auth: <strong>{authMode}</strong>

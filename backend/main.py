@@ -441,11 +441,11 @@ def _contexts_csv(contexts: List[Context]) -> str:
     return ",".join(_context_value(context) for context in contexts)
 
 
-def _validate_slot_time(appointment_time: str):
-    from appointment_time import validate_appointment_time
+def _normalize_slot_time(appointment_time: str) -> str:
+    from appointment_time import normalize_appointment_time
 
     try:
-        validate_appointment_time(appointment_time)
+        return normalize_appointment_time(appointment_time)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -464,7 +464,7 @@ def _validate_full_payload(body: PracticeFullSave):
     selected_contexts = {_context_value(context) for context in body.practice.contexts}
     if not selected_contexts:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Almeno un contesto e obbligatorio")
-    _validate_slot_time(body.practice.appointment_time)
+    body.practice.appointment_time = _normalize_slot_time(body.practice.appointment_time)
 
     sections_by_context: Dict[str, SectionPayload] = {}
     for section in body.sections:
@@ -507,7 +507,7 @@ def _apply_practice_data(practice: Practice, data: PracticeCreate, user_id: int)
         if hasattr(practice, field):
             setattr(practice, field, getattr(data, field, None))
     practice.appointment_date = data.appointment_date
-    practice.appointment_time = data.appointment_time
+    practice.appointment_time = _normalize_slot_time(data.appointment_time)
     practice.practice_type = data.practice_type
     practice.contexts = _contexts_csv(data.contexts)
     practice.internal_notes = data.internal_notes
@@ -1098,7 +1098,7 @@ async def create_practice(
             detail="Almeno un contesto è obbligatorio",
         )
 
-    _validate_slot_time(practice_data.appointment_time)
+    practice_data.appointment_time = _normalize_slot_time(practice_data.appointment_time)
 
     try:
         contexts_csv = ",".join([
@@ -1183,7 +1183,7 @@ async def update_practice(
         practice.updated_by_telegram_id = user_data["id"]
 
         if "appointment_time" in update_data:
-            _validate_slot_time(practice.appointment_time)
+            practice.appointment_time = _normalize_slot_time(practice.appointment_time)
 
         db.commit()
         db.refresh(practice)
@@ -1219,11 +1219,33 @@ async def delete_practice(
     _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     try:
+        date_iso = _practice_date_iso(practice)
+        search = practice.plate_confirmed or practice.customer_name
+        if date_iso and search:
+            result = await _run_yap_script(
+                "yap-delete-appointment.mjs",
+                ["--date", date_iso, "--search", str(search)],
+                db=db,
+            )
+            if result.get("found") and not result.get("deleted"):
+                failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
+                if failure_status == "blocked_by_odl":
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Impossibile cancellare la pratica: l'appuntamento YAP è collegato a un ordine di lavoro",
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Impossibile cancellare l'appuntamento su YAP",
+                )
+
         practice.status = PracticeStatus.DELETED
         practice.updated_by_telegram_id = user_data["id"]
         db.commit()
         logger.info("Practice %d soft-deleted by user %d", practice_id, user_data["id"])
         return APIResponse(success=True, data={"message": "Pratica cancellata con successo"})
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         logger.error("Error deleting practice %d: %s", practice_id, e, exc_info=True)
@@ -1371,7 +1393,7 @@ async def sync_practice_to_yap(
         if body.date:
             mapped.setdefault("agenda", {})["data"] = body.date
         if body.time:
-            mapped.setdefault("agenda", {})["ora"] = body.time
+            mapped.setdefault("agenda", {})["ora"] = _normalize_slot_time(body.time)
         if body.duration:
             mapped.setdefault("agenda", {})["durata_minuti"] = body.duration
 

@@ -87,6 +87,25 @@ class TestPracticesCRUDEndpoints:
         assert data["customer_name"] == "Test Cliente API"
         assert data["synced"] is False
 
+    def test_create_practice_normalizes_appointment_time(self, client):
+        """Test POST /practices canonicalizza l'orario su slot YAP."""
+        practice_data = {
+            "plate_confirmed": "TEST01YY",
+            "phone": "+391234567890",
+            "customer_name": "Test Orario Canonico",
+            "customer_type": "privato",
+            "billing_to_complete": False,
+            "appointment_date": "2026-11-15T00:00:00",
+            "appointment_time": "07:15",
+            "practice_type": "preventivo",
+            "contexts": ["officina"],
+        }
+
+        response = client.post("/practices?user_id=761118078", json=practice_data)
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["appointment_time"] == "07:20"
+
     def test_create_and_get_practice_detail(self, client):
         """Test POST /practices e GET /api/practices/{id}."""
         create_resp = client.post(

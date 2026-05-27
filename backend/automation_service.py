@@ -4,7 +4,7 @@ import re
 from sqlalchemy.orm import Session
 from database_sqlite import Practice, PracticeSection, PracticePart, PracticePhoto
 from telegram_utils import _parse_description_rows
-from appointment_time import validate_appointment_time
+from appointment_time import validate_appointment_time, normalize_appointment_time, get_yap_slot_minutes
 
 
 class AutomationService:
@@ -75,8 +75,8 @@ class AutomationService:
             # Dati appuntamento (per trovare slot agenda)
             "appointment": {
                 "date": practice.appointment_date.strftime("%Y-%m-%d"),
-                "time": practice.appointment_time,  # HH:MM con minuti 00 o 30
-                "slot_duration": 30,  # minuti
+                "time": normalize_appointment_time(practice.appointment_time),  # HH:MM canonical YAP slot
+                "slot_duration": get_yap_slot_minutes(),  # minuti slot YAP
                 "practice_type": AutomationService._enum_value(practice.practice_type)
             },
             
@@ -169,7 +169,7 @@ class AutomationService:
             "agenda": {
                 "data": appointment.get("date"),
                 "ora": appointment.get("time"),
-                "durata_minuti": appointment.get("slot_duration", 30),
+                "durata_minuti": appointment.get("slot_duration", get_yap_slot_minutes()),
                 "tipo_pratica": appointment.get("practice_type"),
             },
             "lavorazioni": management_sections,

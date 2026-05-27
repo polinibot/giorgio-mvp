@@ -6,6 +6,8 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from appointment_time import get_yap_slot_minutes, normalize_appointment_time
+
 GENERIC_REVISIONE = re.compile(r"^(revisione(\s+periodica)?|rev\.?)$", re.I)
 REPARTO_ORDER = ["officina", "carrozzeria", "revisione"]
 
@@ -114,10 +116,15 @@ def to_italian_date(iso_date: Optional[str]) -> str:
 
 
 def to_yap_time(time_str: Optional[str]) -> str:
-    return str(time_str or "").strip().replace(":", ".")
+    raw = str(time_str or "").strip()
+    if not raw:
+        return ""
+    return normalize_appointment_time(raw).replace(":", ".")
 
 
 def add_minutes(time_str: str, minutes: int) -> str:
+    if not str(time_str or "").strip():
+        return ""
     h, m = map(int, str(time_str or "00:00").split(":"))
     dt = datetime(2000, 1, 1, h, m) + timedelta(minutes=minutes)
     return f"{dt.hour:02d}.{dt.minute:02d}"
@@ -125,7 +132,7 @@ def add_minutes(time_str: str, minutes: int) -> str:
 
 def yap_slot_duration(mapping: Dict[str, Any]) -> int:
     agenda = mapping.get("agenda") or {}
-    return _safe_int(agenda.get("durata_minuti") or agenda.get("slot_duration"), 20)
+    return _safe_int(agenda.get("durata_minuti") or agenda.get("slot_duration"), get_yap_slot_minutes())
 
 
 def build_yap_preview(mapping: Dict[str, Any], pre_sync: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -133,7 +140,8 @@ def build_yap_preview(mapping: Dict[str, Any], pre_sync: Optional[Dict[str, Any]
     anag = mapping.get("anagrafica") or {}
     contexts = _contexts_from_mapping(mapping)
     durata = yap_slot_duration(mapping)
-    ora = agenda.get("ora") or agenda.get("time") or ""
+    raw_ora = agenda.get("ora") or agenda.get("time") or ""
+    ora = normalize_appointment_time(raw_ora) if str(raw_ora).strip() else ""
     tags = pick_yap_tags(mapping)
     cosa = pick_cosa(mapping)
     cosa_breve = pick_work_brief(mapping) or None

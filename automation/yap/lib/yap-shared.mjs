@@ -7,6 +7,13 @@ export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 export const YAP_SESSION_STATE = process.env.YAP_SESSION_STATE || path.join(ROOT_DIR, "automation", "artifacts", "yap", "session-state.json");
 export const YAP_APPOINTMENT_DELETE_CONFIRM = "Confermi l'eliminazione dell'appuntamento?";
 export const YAP_ODL_DELETE_CONFIRM = "Confermi di voler eliminare l'ordine di lavoro?";
+export const DEFAULT_YAP_SLOT_MINUTES = 20;
+
+export function getYapSlotMinutes() {
+  const raw = String(process.env.YAP_SLOT_MINUTES || DEFAULT_YAP_SLOT_MINUTES).trim();
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_YAP_SLOT_MINUTES;
+}
 
 export function normalize(value) {
   return String(value || "")
@@ -28,13 +35,53 @@ export function toItalianDate(isoDate) {
 
 export function toYapTime(time) {
   const raw = String(time || "").trim();
+  if (!raw) return "";
   if (!/^\d{2}:\d{2}$/.test(raw)) {
     throw new Error(`Ora non valida: ${raw}. Atteso formato HH:MM`);
   }
   return raw.replace(":", ".");
 }
 
+function parseTimeToMinutes(time) {
+  const raw = String(time || "").trim();
+  if (!/^\d{2}:\d{2}$/.test(raw)) {
+    throw new Error(`Ora non valida: ${raw}. Atteso formato HH:MM`);
+  }
+  const [hours, minutes] = raw.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function formatMinutes(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function roundToSlot(totalMinutes, slotMinutes) {
+  const remainder = totalMinutes % slotMinutes;
+  const lower = totalMinutes - remainder;
+  const upper = lower + slotMinutes;
+  let rounded = totalMinutes;
+
+  if (remainder !== 0) {
+    rounded = remainder * 2 >= slotMinutes ? upper : lower;
+  }
+
+  const maxValid = (24 * 60) - slotMinutes;
+  if (rounded < 0) return 0;
+  if (rounded > maxValid) return maxValid;
+  return rounded;
+}
+
+export function normalizeAppointmentTime(time, slotMinutes = getYapSlotMinutes()) {
+  if (!String(time || "").trim()) return "";
+  const minutes = parseTimeToMinutes(time);
+  const step = Number(slotMinutes) > 0 ? Number(slotMinutes) : getYapSlotMinutes();
+  return formatMinutes(roundToSlot(minutes, step));
+}
+
 export function addMinutes(time, minutes) {
+  if (!String(time || "").trim()) return "";
   const [hours, mins] = time.split(":").map(Number);
   const date = new Date(Date.UTC(2000, 0, 1, hours, mins + minutes, 0));
   return `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;

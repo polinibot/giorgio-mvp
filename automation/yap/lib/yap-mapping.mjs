@@ -4,6 +4,7 @@
  */
 
 import { buildFullFieldMapping } from "./yap-field-map.mjs";
+import { getYapSlotMinutes, normalizeAppointmentTime } from "./yap-shared.mjs";
 
 const GENERIC_REVISIONE = /^(revisione(\s+periodica)?|rev\.?)$/i;
 
@@ -74,8 +75,11 @@ export function jobToMapping(job) {
     },
     agenda: {
       data: job.appointment?.date || job.appointment_date || "",
-      ora: job.appointment?.time || job.appointment_time || "",
-      durata_minuti: job.appointment?.duration || job.slot_duration || 20,
+      ora: (() => {
+        const rawTime = job.appointment?.time || job.appointment_time || "";
+        return rawTime ? normalizeAppointmentTime(rawTime) : "";
+      })(),
+      durata_minuti: job.appointment?.duration || job.slot_duration || getYapSlotMinutes(),
       tipo_pratica: job.appointment?.type || job.appointment_type || job.practice_type || "",
     },
     lavorazioni,
@@ -161,7 +165,7 @@ export function pickYapTagsFromJob(job) {
 }
 
 export function yapSlotDuration(mapping) {
-  return Number(mapping.agenda?.durata_minuti || mapping.agenda?.slot_duration || 20);
+  return Number(mapping.agenda?.durata_minuti || mapping.agenda?.slot_duration || getYapSlotMinutes());
 }
 
 export function shouldFillPopupNotes() {
@@ -187,7 +191,9 @@ function toItalianDate(iso) {
 }
 
 function toYapTime(time) {
-  return String(time || "").trim().replace(":", ".");
+  const raw = String(time || "").trim();
+  if (!raw) return "";
+  return normalizeAppointmentTime(raw).replace(":", ".");
 }
 
 function addMinutes(time, minutes) {
@@ -199,7 +205,8 @@ function addMinutes(time, minutes) {
 export function buildManagementPlan(raw) {
   const mapping = normalizeMappingInput(raw);
   const durata = yapSlotDuration(mapping);
-  const ora = mapping.agenda.ora || mapping.agenda.time || "";
+  const rawTime = mapping.agenda.ora || mapping.agenda.time || "";
+  const ora = rawTime ? normalizeAppointmentTime(rawTime) : "";
 
   const agenda = {
     cosa: pickCosa(mapping),
@@ -289,7 +296,7 @@ export function buildYapPreview(mapping, preSync = null) {
       telefono: mapping.anagrafica?.cliente_telefono,
       targa: mapping.anagrafica?.targa,
       data: mapping.agenda?.data,
-      ora: mapping.agenda?.ora || mapping.agenda?.time,
+      ora: plan.agenda.dalle ? plan.agenda.dalle.replace(".", ":") : (mapping.agenda?.ora || mapping.agenda?.time),
       durata_minuti: durata,
       contesti: mapping.contexts || [],
       tipo_pratica: mapping.agenda?.tipo_pratica,
