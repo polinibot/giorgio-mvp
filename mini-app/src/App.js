@@ -94,6 +94,27 @@ function isLocalDevHost() {
   return ['localhost', '127.0.0.1'].includes(window.location.hostname);
 }
 
+function normalizeYapResult(rawResult, { dryRun = false } = {}) {
+  const result = rawResult || {};
+  const rawStatus = String(result.status || result.mode || '').trim();
+  const isDuplicate = rawStatus === 'dry_run_or_duplicate' && result.yap?.result?.mode === 'commit-blocked-duplicate';
+  const isDryRun = rawStatus === 'dry_run_or_duplicate' && !isDuplicate;
+  const status = isDuplicate ? 'duplicate' : (isDryRun || dryRun ? 'dry_run' : (rawStatus || 'unknown'));
+  const message = result.message
+    || result.yap?.result?.message
+    || result.yap?.message
+    || result.error?.message
+    || '';
+  return {
+    ...result,
+    status,
+    message,
+    retryable: status === 'sync_failed' || status === 'not_ready' ? true : result.retryable,
+    duplicate: isDuplicate || result.duplicate || false,
+    dryRun: dryRun || result.dryRun || false,
+  };
+}
+
 /** Format date to DD/MM/YYYY */
 function formatDate(dateStr) {
   if (!dateStr) return '';
@@ -1573,27 +1594,6 @@ function App() {
   const [yapDeleteLoading, setYapDeleteLoading] = useState(false);
   const [yapLastResult, setYapLastResult] = useState(null);
 
-  const normalizeYapResult = (rawResult, { dryRun = false } = {}) => {
-    const result = rawResult || {};
-    const rawStatus = String(result.status || result.mode || '').trim();
-    const isDuplicate = rawStatus === 'dry_run_or_duplicate' && result.yap?.result?.mode === 'commit-blocked-duplicate';
-    const isDryRun = rawStatus === 'dry_run_or_duplicate' && !isDuplicate;
-    const status = isDuplicate ? 'duplicate' : (isDryRun || dryRun ? 'dry_run' : (rawStatus || 'unknown'));
-    const message = result.message
-      || result.yap?.result?.message
-      || result.yap?.message
-      || result.error?.message
-      || '';
-    return {
-      ...result,
-      status,
-      message,
-      retryable: status === 'sync_failed' || status === 'not_ready' ? true : result.retryable,
-      duplicate: isDuplicate || result.duplicate || false,
-      dryRun: dryRun || result.dryRun || false,
-    };
-  };
-
   const syncToYap = useCallback(async (id, options = {}) => {
     const silent = options.silent || false;
     const apiOptions = { ...options };
@@ -1644,7 +1644,7 @@ function App() {
     } finally {
       setYapSyncLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapResult]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
 
   const deleteYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -1687,7 +1687,7 @@ function App() {
     } finally {
       setYapDeleteLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapResult]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
 
   const renderYapResultBanner = (result, { practiceId = null, showRetry = false, showDelete = false } = {}) => {
     if (!result) return null;
