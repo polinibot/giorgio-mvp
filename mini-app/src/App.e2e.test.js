@@ -843,7 +843,7 @@ describe('Mini App user-simulation suite', () => {
     const submit = getButton('Salva');
     clickElement(submit);
 
-    await waitFor(() => document.body.textContent.includes('Pratica creata con successo!'));
+    await waitFor(() => axios.post.mock.calls.length === 2);
 
     expect(axios.post).toHaveBeenCalledTimes(2);
     const [url, payload, options] = axios.post.mock.calls[0];
@@ -900,8 +900,8 @@ describe('Mini App user-simulation suite', () => {
     setValueWithin(getSection('Officina'), 'input[placeholder="Descrizione lavoro..."]', 'Tagliando completo');
 
     clickElement(getButton('Salva'));
-    await waitFor(() => document.body.textContent.includes('Pratica salvata!'));
-    expect(document.body.textContent).toContain('Pratica salvata!');
+    await waitFor(() => document.body.textContent.includes('Pratica creata e sincronizzata con YAP.'));
+    expect(document.body.textContent).toContain('Pratica creata e sincronizzata con YAP.');
 
     clickElement(getButton('📋 Vai alla Dashboard'));
     await waitFor(() => document.querySelector('.empty-state'));

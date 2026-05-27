@@ -73,7 +73,7 @@ function classifyError(err) {
     return 'Sessione scaduta. Chiudi e riapri la Mini App.';
   }
   if (status === 404) return detail || 'Risorsa non trovata.';
-  if (status >= 500) return detail ? `Errore del server: ${detail}` : 'Errore del server. Riprova tra qualche istante.';
+  if (status >= 500) return detail || 'Errore del server. Riprova tra qualche istante.';
   return detail || 'Errore sconosciuto. Riprova.';
 }
 
@@ -2556,14 +2556,29 @@ function App() {
           await uploadQueuedPhotos(practiceId);
         }
 
-        // Show success toast immediately, before YAP sync attempt
-        addToast(practice ? 'Pratica aggiornata con successo!' : 'Pratica creata con successo!', 'success');
-
         // Keep YAP aligned automatically after a successful save.
         // Wrapped in its own try/catch so a YAP failure doesn't
-        // produce a confusing error toast alongside the success one.
+        // produce a confusing second result alongside the save outcome.
         if (practiceId) {
-          await syncToYap(practiceId, { dry_run: false, silent: true });
+          const syncResult = await syncToYap(practiceId, { dry_run: false, silent: true });
+          if (syncResult) {
+            const actionLabel = practice ? 'aggiornata' : 'creata';
+            const finalMessage = syncResult.status === 'synced' || syncResult.status === 'duplicate'
+              ? `Pratica ${actionLabel} e sincronizzata con YAP.`
+              : syncResult.status === 'dry_run'
+                ? `Pratica ${actionLabel}. Dry-run YAP completato.`
+                : syncResult.status === 'not_ready'
+                  ? `Pratica ${actionLabel}, ma non pronta per YAP.`
+                  : `Pratica ${actionLabel}, ma sync YAP fallita: ${syncResult.message || 'errore sconosciuto'}`;
+            const finalSyncResult = { ...syncResult, message: finalMessage };
+            setYapLastResult(finalSyncResult);
+            if (!startedFromBot && !selectedPracticeId) {
+              const toastTone = syncResult.status === 'sync_failed'
+                ? 'error'
+                : (syncResult.status === 'not_ready' || syncResult.status === 'dry_run' ? 'warning' : 'success');
+              addToast(finalMessage, toastTone);
+            }
+          }
         }
 
         if (startedFromBot && !practice) {
@@ -3166,9 +3181,6 @@ function App() {
         <div className="view-form view-enter">
           <div className="container">
             <div className="success-screen">
-              <div className="success-icon">✅</div>
-              <h2>Pratica salvata!</h2>
-              <p>La pratica è stata salvata con successo.</p>
               {yapLastPracticeId && renderYapResultBanner(yapLastResult, { practiceId: lastSavedPracticeId || yapLastPracticeId, showRetry: true, showDelete: false })}
               <button className="button-submit" onClick={() => { openDashboard(); setSuccessDone(false); }} type="button">
                 📋 Vai alla Dashboard
