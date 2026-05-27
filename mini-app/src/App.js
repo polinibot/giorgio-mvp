@@ -941,13 +941,13 @@ function App() {
   const persistDraft = useCallback(() => {
     try {
       const data = getValues();
-      const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now() };
+      const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now(), practiceId: practice?.id || null };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
       return true;
     } catch (_) {
       return false;
     }
-  }, [getValues, selectedContexts, sections, parts]);
+  }, [getValues, selectedContexts, sections, parts, practice]);
 
   const hasMeaningfulDraft = useCallback(() => {
     const data = getValues();
@@ -978,13 +978,16 @@ function App() {
     try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
   }, []);
 
-  const restoreDraft = useCallback(() => {
+  const restoreDraft = useCallback((targetPracticeId = null) => {
     try {
       const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
       if (!raw) return false;
       const draft = JSON.parse(raw);
       if (Date.now() - draft.timestamp > 24 * 60 * 60 * 1000) {
         localStorage.removeItem(DRAFT_STORAGE_KEY);
+        return false;
+      }
+      if (draft.practiceId !== targetPracticeId) {
         return false;
       }
       if (draft.formData) {
@@ -1009,7 +1012,7 @@ function App() {
   }, [setValue]);
 
   useEffect(() => {
-    if (loading || successDone) return undefined;
+    if (currentView !== 'form' || loading || successDone) return undefined;
 
     const persistDraftOnLeave = () => {
       if (hasMeaningfulDraft()) persistDraft();
@@ -1691,37 +1694,42 @@ function App() {
     if (currentView === 'form' && editingPractice) {
       setPractice(editingPractice);
       const p = editingPractice;
-      setValue('plate_confirmed', p.plate_confirmed || p.plate || '');
-      setValue('phone', p.phone || '');
-      setValue('customer_name', p.customer_name || '');
-      setValue('customer_type', p.customer_type || 'privato');
-      setValue('appointment_time', p.appointment_time || '');
-      setValue('practice_type', p.practice_type || 'preventivo');
-      setValue('internal_notes', p.internal_notes || p.notes || '');
-      setValue('billing_to_complete', p.billing_to_complete || false);
-      setValue('company_name', p.company_name || '');
-      setValue('vat_number', p.vat_number || '');
-      setValue('fiscal_code', p.fiscal_code || '');
-      setValue('billing_address', p.billing_address || '');
-      setValue('billing_city', p.billing_city || '');
-      setValue('billing_zip', p.billing_zip || '');
-      if (p.appointment_date) setValue('appointment_date', new Date(p.appointment_date));
-      setSelectedContexts(normalizeContexts(p.contexts));
+      const restored = restoreDraft(p.id);
+      if (restored) {
+        setShowDraftBanner(true);
+      } else {
+        setValue('plate_confirmed', p.plate_confirmed || p.plate || '');
+        setValue('phone', p.phone || '');
+        setValue('customer_name', p.customer_name || '');
+        setValue('customer_type', p.customer_type || 'privato');
+        setValue('appointment_time', p.appointment_time || '');
+        setValue('practice_type', p.practice_type || 'preventivo');
+        setValue('internal_notes', p.internal_notes || p.notes || '');
+        setValue('billing_to_complete', p.billing_to_complete || false);
+        setValue('company_name', p.company_name || '');
+        setValue('vat_number', p.vat_number || '');
+        setValue('fiscal_code', p.fiscal_code || '');
+        setValue('billing_address', p.billing_address || '');
+        setValue('billing_city', p.billing_city || '');
+        setValue('billing_zip', p.billing_zip || '');
+        if (p.appointment_date) setValue('appointment_date', new Date(p.appointment_date));
+        setSelectedContexts(normalizeContexts(p.contexts));
+        if (p.sections) {
+          setSections(normalizeSections(Array.isArray(p.sections) ? p.sections : []));
+        }
+        if (p.parts) {
+          const pd = {};
+          (Array.isArray(p.parts) ? p.parts : []).forEach(pt => {
+            if (!pd[pt.context]) pd[pt.context] = [];
+            pd[pt.context].push({ name: pt.name || '', quantity: pt.quantity || '', _key: Date.now() + Math.random() });
+          });
+          setParts(pd);
+        }
+      }
       setError('');
-      if (p.sections) {
-        setSections(normalizeSections(Array.isArray(p.sections) ? p.sections : []));
-      }
-      if (p.parts) {
-        const pd = {};
-        (Array.isArray(p.parts) ? p.parts : []).forEach(pt => {
-          if (!pd[pt.context]) pd[pt.context] = [];
-          pd[pt.context].push({ name: pt.name || '', quantity: pt.quantity || '', _key: Date.now() + Math.random() });
-        });
-        setParts(pd);
-      }
       setLoading(false);
     }
-  }, [currentView, editingPractice, setValue]);
+  }, [currentView, editingPractice, setValue, restoreDraft]);
 
   // Telegram WebApp init
   useEffect(() => {
@@ -2440,6 +2448,43 @@ function App() {
     setLoading(false);
   };
 
+  const discardDraft = useCallback(() => {
+    clearDraft();
+    setShowDraftBanner(false);
+    if (practice) {
+      const p = practice;
+      setValue('plate_confirmed', p.plate_confirmed || p.plate || '');
+      setValue('phone', p.phone || '');
+      setValue('customer_name', p.customer_name || '');
+      setValue('customer_type', p.customer_type || 'privato');
+      setValue('appointment_time', p.appointment_time || '');
+      setValue('practice_type', p.practice_type || 'preventivo');
+      setValue('internal_notes', p.internal_notes || p.notes || '');
+      setValue('billing_to_complete', p.billing_to_complete || false);
+      setValue('company_name', p.company_name || '');
+      setValue('vat_number', p.vat_number || '');
+      setValue('fiscal_code', p.fiscal_code || '');
+      setValue('billing_address', p.billing_address || '');
+      setValue('billing_city', p.billing_city || '');
+      setValue('billing_zip', p.billing_zip || '');
+      if (p.appointment_date) setValue('appointment_date', new Date(p.appointment_date));
+      setSelectedContexts(normalizeContexts(p.contexts));
+      if (p.sections) {
+        setSections(normalizeSections(Array.isArray(p.sections) ? p.sections : []));
+      }
+      if (p.parts) {
+        const pd = {};
+        (Array.isArray(p.parts) ? p.parts : []).forEach(pt => {
+          if (!pd[pt.context]) pd[pt.context] = [];
+          pd[pt.context].push({ name: pt.name || '', quantity: pt.quantity || '', _key: Date.now() + Math.random() });
+        });
+        setParts(pd);
+      }
+    } else {
+      resetFormForNew();
+    }
+  }, [clearDraft, resetFormForNew, setValue, practice]);
+
   // --- Filter toggle ---
   const toggleFilter = (key) => {
     setActiveFilters(prev => {
@@ -2981,7 +3026,7 @@ function App() {
           {showDraftBanner && (
             <div className="draft-banner">
               <span>📝 Bozza ripristinata</span>
-              <button type="button" onClick={() => { clearDraft(); setShowDraftBanner(false); resetFormForNew(); }}>
+              <button type="button" onClick={discardDraft}>
                 Scarta
               </button>
             </div>
