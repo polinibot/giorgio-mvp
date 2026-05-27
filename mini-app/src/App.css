@@ -977,10 +977,10 @@ h2 {
 }
 
 .yap-control-button {
-  background: rgba(79, 140, 255, 0.1);
-  color: var(--accent);
-  border: 1px solid rgba(79, 140, 255, 0.3);
-  border-radius: var(--radius-input);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-button);
   padding: 12px 16px;
   font-size: 14px;
   font-weight: 600;
@@ -993,9 +993,8 @@ h2 {
 }
 
 .yap-control-button:hover:not(:disabled) {
-  background: rgba(79, 140, 255, 0.18);
-  border-color: var(--accent);
-  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .yap-control-button:disabled {
@@ -1006,12 +1005,12 @@ h2 {
 .yap-delete-button {
   background: rgba(239, 68, 68, 0.1);
   color: var(--error);
-  border-color: rgba(239, 68, 68, 0.3);
+  border-color: rgba(239, 68, 68, 0.25);
 }
 
 .yap-delete-button:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.18);
-  border-color: var(--error);
+  background: rgba(239, 68, 68, 0.16);
+  border-color: rgba(239, 68, 68, 0.35);
 }
 
 .yap-result-banner {
@@ -1023,21 +1022,128 @@ h2 {
 }
 
 .yap-result-banner.yap-success {
-  background: rgba(52, 211, 153, 0.12);
+  background: var(--success-bg);
   color: #86efac;
-  border: 1px solid rgba(52, 211, 153, 0.3);
+  border: 1px solid rgba(52, 211, 153, 0.28);
 }
 
 .yap-result-banner.yap-warning {
-  background: rgba(251, 191, 36, 0.12);
+  background: var(--warning-bg);
   color: #fcd34d;
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  border: 1px solid rgba(251, 191, 36, 0.28);
 }
 
 .yap-result-banner.yap-info {
   background: rgba(79, 140, 255, 0.12);
   color: #93c5fd;
-  border: 1px solid rgba(79, 140, 255, 0.3);
+  border: 1px solid rgba(79, 140, 255, 0.28);
+}
+
+.yap-result-banner.yap-error {
+  background: var(--error-bg);
+  color: #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.yap-result-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.yap-result-status {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.yap-result-message {
+  font-size: 13px;
+  color: inherit;
+}
+
+.yap-result-meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.yap-result-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.yap-result-action {
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  border-radius: var(--radius-button);
+  padding: 9px 14px;
+  min-height: 38px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--transition), border-color var(--transition);
+}
+
+.yap-result-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.yap-result-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.yap-result-action-danger {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.yap-preview-issues {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.yap-preview-issue {
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.yap-preview-issue.blocking {
+  border-color: rgba(239, 68, 68, 0.26);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.yap-preview-issue.warning {
+  border-color: rgba(251, 191, 36, 0.24);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.yap-preview-issue-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.yap-preview-issue-body {
+  font-size: 13px;
+  color: var(--text-primary);
 }
 
 /* --- Photo grid --- */
@@ -2173,6 +2279,12 @@ label {
   }
   .detail-plate {
     font-size: 24px;
+  }
+  .yap-controls-grid {
+    grid-template-columns: 1fr;
+  }
+  .yap-result-summary {
+    flex-direction: column;
   }
 }
 

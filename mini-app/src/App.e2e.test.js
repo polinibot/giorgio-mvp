@@ -177,11 +177,69 @@ const CONTEXT_MATRIX = [
   ['officina', 'carrozzeria', 'revisione'],
 ];
 
+const DEFAULT_YAP_SYNC_RESPONSE = {
+  data: {
+    success: true,
+    data: {
+      status: 'synced',
+      message: 'Appuntamento salvato su YAP.',
+      preSync: { ready: true, score: 100, issues: [] },
+      yap: {
+        result: {
+          saved: true,
+          mode: 'commit',
+          message: 'Appuntamento salvato su YAP.',
+          telemetry: { saveAttempts: 1 },
+        },
+        message: 'Appuntamento salvato su YAP.',
+      },
+      practice: {
+        synced: true,
+        management_sync_status: 'synced',
+        management_last_sync_at: '2026-11-15T10:05:00.000Z',
+        management_external_id: null,
+      },
+    },
+  },
+};
+
+const DEFAULT_YAP_DELETE_RESPONSE = {
+  data: {
+    success: true,
+    data: {
+      status: 'deleted',
+      message: 'Appuntamento eliminato da YAP.',
+      yap: {
+        result: {
+          deleted: true,
+          mode: 'commit',
+        },
+        message: 'Appuntamento eliminato da YAP.',
+      },
+    },
+  },
+};
+
 beforeEach(() => {
   axios.get.mockReset();
   axios.post.mockReset();
   axios.put.mockReset();
   axios.delete?.mockReset?.();
+  axios.post.mockImplementation((url) => {
+    if (String(url).includes('/yap/sync')) {
+      return Promise.resolve(DEFAULT_YAP_SYNC_RESPONSE);
+    }
+    if (String(url).includes('/yap/notify-error')) {
+      return Promise.resolve({ data: { success: true, data: { notified: true } } });
+    }
+    return Promise.reject(new Error(`Unexpected request: ${url}`));
+  });
+  axios.delete?.mockImplementation?.((url) => {
+    if (String(url).includes('/yap/appointment')) {
+      return Promise.resolve(DEFAULT_YAP_DELETE_RESPONSE);
+    }
+    return Promise.reject(new Error(`Unexpected request: ${url}`));
+  });
   localStorage.clear();
   document.body.innerHTML = '';
 });
@@ -785,12 +843,13 @@ describe('Mini App user-simulation suite', () => {
     const submit = getButton('Salva');
     clickElement(submit);
 
-    await waitFor(() => document.body.textContent.includes('Pratica salvata!'));
+    await waitFor(() => document.body.textContent.includes('Pratica creata con successo!'));
 
-    expect(axios.post).toHaveBeenCalledTimes(1);
+    expect(axios.post).toHaveBeenCalledTimes(2);
     const [url, payload, options] = axios.post.mock.calls[0];
     expect(url).toContain('/practices/full');
     expect(options.headers['X-Telegram-Init-Data']).toBe('mock-init-data');
+    expect(axios.post.mock.calls[1][0]).toContain('/yap/sync');
     expect(payload.practice).toEqual(expect.objectContaining({
       plate_confirmed: 'AB123CD',
       phone: '+393331234567',

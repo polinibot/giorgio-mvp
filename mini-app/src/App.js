@@ -34,6 +34,24 @@ async function fetchWithRetry(fn, { maxRetries = 2, baseDelay = 300 } = {}) {
 }
 
 /** Classify error for user-friendly messages */
+function extractErrorDetail(detail) {
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => extractErrorDetail(item)).filter(Boolean).join(' | ');
+  }
+  if (typeof detail === 'object') {
+    return (
+      detail.message
+      || detail.error
+      || detail.detail
+      || [detail.stdout, detail.stderr].filter(Boolean).join(' | ')
+      || JSON.stringify(detail)
+    );
+  }
+  return String(detail);
+}
+
 function classifyError(err) {
   if (!err.response) {
     if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
@@ -42,7 +60,7 @@ function classifyError(err) {
     return 'Errore di rete. Controlla la connessione internet e riprova.';
   }
   const status = err.response.status;
-  const detail = err.response.data?.detail;
+  const detail = extractErrorDetail(err.response.data?.detail || err.response.data?.message || err.response.data?.error);
   if (status === 422 || status === 400) return detail || 'Dati non validi. Controlla i campi e riprova.';
   if (status === 403) return detail || 'Utente non autorizzato. Contatta l\'amministratore.';
   if (status === 401) {
@@ -55,7 +73,7 @@ function classifyError(err) {
     return 'Sessione scaduta. Chiudi e riapri la Mini App.';
   }
   if (status === 404) return detail || 'Risorsa non trovata.';
-  if (status >= 500) return 'Errore del server. Riprova tra qualche istante.';
+  if (status >= 500) return detail ? `Errore del server: ${detail}` : 'Errore del server. Riprova tra qualche istante.';
   return detail || 'Errore sconosciuto. Riprova.';
 }
 
@@ -82,6 +100,19 @@ function formatDate(dateStr) {
   const d = new Date(dateStr);
   if (isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('it-IT', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function formatDateForBackend(value) {
@@ -904,6 +935,7 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [yapPreview, setYapPreview] = useState(null);
   const [yapPreviewLoading, setYapPreviewLoading] = useState(false);
+  const [yapLastPracticeId, setYapLastPracticeId] = useState(null);
   const [formYapPreview, setFormYapPreview] = useState(null);
   const [formYapPreviewLoading, setFormYapPreviewLoading] = useState(false);
   const formYapPreviewTimerRef = useRef(null);
@@ -915,6 +947,7 @@ function App() {
   const [practice, setPractice] = useState(null);
   const [error, setError] = useState('');
   const [successDone, setSuccessDone] = useState(false);
+  const [lastSavedPracticeId, setLastSavedPracticeId] = useState(null);
 
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [slowRequest, setSlowRequest] = useState(false);
@@ -1122,7 +1155,11 @@ function App() {
     setNavigationStack(prev => [...prev, currentView]);
     setCurrentView(view);
     if (opts.practiceId) setSelectedPracticeId(opts.practiceId);
-    if (opts.editingPractice) setEditingPractice(opts.editingPractice);
+    if (view === 'form') setLoading(false);
+    if (opts.editingPractice) {
+      setEditingPractice(opts.editingPractice);
+      setPractice(opts.editingPractice);
+    }
     if (opts.existingPhotos) setExistingPhotos(opts.existingPhotos);
   }, [currentView]);
 
@@ -1205,6 +1242,9 @@ function App() {
     setEditingPractice(null);
     setStartedFromBot(false);
     setSuccessDone(false);
+    setLastSavedPracticeId(null);
+    setYapLastPracticeId(null);
+    setYapLastResult(null);
     setError('');
     setShowDraftBanner(false);
     setFieldErrors({});
@@ -1533,57 +1573,95 @@ function App() {
   const [yapDeleteLoading, setYapDeleteLoading] = useState(false);
   const [yapLastResult, setYapLastResult] = useState(null);
 
+  const normalizeYapResult = (rawResult, { dryRun = false } = {}) => {
+    const result = rawResult || {};
+    const rawStatus = String(result.status || result.mode || '').trim();
+    const isDuplicate = rawStatus === 'dry_run_or_duplicate' && result.yap?.result?.mode === 'commit-blocked-duplicate';
+    const isDryRun = rawStatus === 'dry_run_or_duplicate' && !isDuplicate;
+    const status = isDuplicate ? 'duplicate' : (isDryRun || dryRun ? 'dry_run' : (rawStatus || 'unknown'));
+    const message = result.message
+      || result.yap?.result?.message
+      || result.yap?.message
+      || result.error?.message
+      || '';
+    return {
+      ...result,
+      status,
+      message,
+      retryable: status === 'sync_failed' || status === 'not_ready' ? true : result.retryable,
+      duplicate: isDuplicate || result.duplicate || false,
+      dryRun: dryRun || result.dryRun || false,
+    };
+  };
+
   const syncToYap = useCallback(async (id, options = {}) => {
     const silent = options.silent || false;
     const apiOptions = { ...options };
     delete apiOptions.silent;
     if (browserPreviewMode) {
       if (!silent) addToast('Anteprima: sync YAP simulato', 'success');
-      setYapLastResult({ status: 'synced', simulated: true });
-      return;
+      setYapLastPracticeId(id);
+      setYapLastResult({ status: 'synced', simulated: true, message: 'Sync simulata in anteprima browser.' });
+      return { status: 'synced', simulated: true };
     }
     setYapSyncLoading(true);
     setYapLastResult(null);
+    setYapLastPracticeId(id);
     try {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
       const res = await fetchWithRetry(() =>
         axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
       );
-      const data = res.data?.data || {};
+      const data = normalizeYapResult(res.data?.data || {}, { dryRun: Boolean(apiOptions.dry_run) });
       setYapLastResult(data);
       rememberResponse('yap.sync');
-      if (data.status === 'synced') {
-        if (!silent) addToast('Appuntamento sincronizzato con YAP', 'success');
+      if (data.status === 'synced' || data.status === 'duplicate') {
+        if (!silent) {
+          addToast(data.status === 'duplicate'
+            ? 'Appuntamento già presente in YAP: nessuna modifica necessaria'
+            : 'Appuntamento sincronizzato con YAP', 'success');
+        }
         loadDetail(id);
-      } else if (data.status === 'dry_run_or_duplicate') {
-        if (!silent) addToast('Dry-run o duplicato: nessuna modifica YAP', 'info');
+      } else if (data.status === 'dry_run') {
+        if (!silent) addToast('Dry-run YAP completato: nessuna modifica eseguita', 'info');
       } else if (data.status === 'not_ready') {
         if (!silent) addToast('Pratica non pronta per sync YAP', 'warning');
       } else {
-        if (!silent) addToast(`Sync YAP: ${data.status}`, 'info');
+        if (!silent) addToast(data.message || `Sync YAP: ${data.status}`, 'info');
       }
+      return data;
     } catch (err) {
       rememberError('yap.sync', err);
-      if (!silent) addToast(classifyError(err), 'error');
+      const errorResult = {
+        status: 'sync_failed',
+        message: classifyError(err),
+        retryable: true,
+        error: err?.response?.data?.detail || err?.response?.data || err?.message || 'sync_failed',
+      };
+      setYapLastResult(errorResult);
+      if (!silent) addToast(errorResult.message, 'error');
+      return errorResult;
     } finally {
       setYapSyncLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapResult]);
 
   const deleteYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
       addToast('Anteprima: delete YAP simulato', 'success');
-      setYapLastResult({ status: 'deleted', simulated: true });
-      return;
+      setYapLastPracticeId(id);
+      setYapLastResult({ status: 'deleted', simulated: true, message: 'Eliminazione simulata in anteprima browser.' });
+      return { status: 'deleted', simulated: true };
     }
     setYapDeleteLoading(true);
     setYapLastResult(null);
+    setYapLastPracticeId(id);
     try {
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders() });
       const res = await fetchWithRetry(() =>
         axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: options, params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
       );
-      const data = res.data?.data || {};
+      const data = normalizeYapResult(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
       if (data.status === 'deleted') {
@@ -1592,15 +1670,93 @@ function App() {
       } else if (data.status === 'blocked_by_odl') {
         addToast('Impossibile eliminare: associato a ordine di lavoro', 'warning');
       } else {
-        addToast(`Delete YAP: ${data.status}`, 'info');
+        addToast(data.message || `Delete YAP: ${data.status}`, 'info');
       }
+      return data;
     } catch (err) {
       rememberError('yap.delete', err);
-      addToast(classifyError(err), 'error');
+      const errorResult = {
+        status: 'delete_failed',
+        message: classifyError(err),
+        retryable: true,
+        error: err?.response?.data?.detail || err?.response?.data || err?.message || 'delete_failed',
+      };
+      setYapLastResult(errorResult);
+      addToast(errorResult.message, 'error');
+      return errorResult;
     } finally {
       setYapDeleteLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapResult]);
+
+  const renderYapResultBanner = (result, { practiceId = null, showRetry = false, showDelete = false } = {}) => {
+    if (!result) return null;
+    const status = String(result.status || 'unknown');
+    const isSuccess = status === 'synced' || status === 'deleted' || status === 'duplicate';
+    const isWarning = status === 'not_ready' || status === 'blocked_by_odl' || status === 'dry_run';
+    const toneClass = isSuccess ? 'yap-success' : (isWarning ? 'yap-warning' : 'yap-error');
+    const titleMap = {
+      synced: 'Sync YAP completata',
+      duplicate: 'Duplicato rilevato',
+      dry_run: 'Dry-run YAP completato',
+      not_ready: 'Pratica non pronta',
+      blocked_by_odl: 'Eliminazione bloccata da ODL',
+      deleted: 'Appuntamento eliminato',
+      sync_failed: 'Sync YAP fallita',
+      delete_failed: 'Eliminazione YAP fallita',
+      unknown: 'Stato YAP sconosciuto',
+    };
+    const message = result.message
+      || result.yap?.result?.message
+      || result.yap?.message
+      || (status === 'synced' ? 'Appuntamento salvato su YAP.' : '')
+      || (status === 'deleted' ? 'Appuntamento eliminato da YAP.' : '')
+      || '';
+    const meta = [];
+    if (Number.isFinite(result.preSync?.score)) meta.push(`Pre-sync ${result.preSync.score}/100`);
+    if (result.yap?.result?.telemetry?.saveAttempts) meta.push(`${result.yap.result.telemetry.saveAttempts} tentativi`);
+    if (result.screenshot) meta.push('Screenshot salvato');
+    if (result.duplicate) meta.push('Dedup attivo');
+    const resolvedPracticeId = practiceId || yapLastPracticeId;
+    const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate'].includes(status);
+    const canDelete = showDelete && resolvedPracticeId && ['synced', 'duplicate', 'dry_run', 'not_ready'].includes(status);
+
+    return (
+      <div className={`yap-result-banner ${toneClass}`}>
+        <div className="yap-result-summary">
+          <div>
+            <div className="yap-result-status">{titleMap[status] || titleMap.unknown}</div>
+            {message && <div className="yap-result-message">{message}</div>}
+            {meta.length > 0 && <div className="yap-result-meta">{meta.join(' • ')}</div>}
+          </div>
+        </div>
+        {(canRetry || canDelete) && (
+          <div className="yap-result-actions">
+            {canRetry && (
+              <button
+                type="button"
+                className="yap-result-action"
+                onClick={() => syncToYap(resolvedPracticeId, { dry_run: false })}
+                disabled={yapSyncLoading}
+              >
+                Riprova sync
+              </button>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                className="yap-result-action yap-result-action-danger"
+                onClick={() => deleteYapAppointment(resolvedPracticeId, { dry_run: false })}
+                disabled={yapDeleteLoading}
+              >
+                Elimina YAP
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // --- Form: Load practice for editing ---
   const loadPractice = useCallback(async (practiceId, currentInitData, plateFromUrl = '', currentTelegramUserId = '', currentPracticeAccessToken = '') => {
@@ -2058,6 +2214,22 @@ function App() {
                 : `Non ancora pronta • score ${preview.preSync.score}/100`}
             </div>
           )}
+          {preview.preSync?.issues?.length > 0 && (
+            <div className="yap-preview-issues">
+              {preview.preSync.issues.map((issue, index) => (
+                <div
+                  key={`${issue.type}-${index}`}
+                  className={`yap-preview-issue ${issue.blocking ? 'blocking' : 'warning'}`}
+                >
+                  <div className="yap-preview-issue-head">
+                    <span>{issue.blocking ? 'Bloccante' : 'Attenzione'}</span>
+                    <span>{issue.type}</span>
+                  </div>
+                  <div className="yap-preview-issue-body">{issue.message}</div>
+                </div>
+              ))}
+            </div>
+          )}
           {showOdl && preview.proposedYap?.odl && (
             <div className="yap-odl-preview">
               <h3 className="yap-odl-title">Gestione pratica / ODL</h3>
@@ -2377,6 +2549,7 @@ function App() {
         const practiceId = responseData.id || (practice && practice.id);
 
         clearDraft();
+        setLastSavedPracticeId(practiceId || null);
 
         // Upload queued photos after practice creation
         if (formPhotos.length > 0 && practiceId) {
@@ -2426,6 +2599,9 @@ function App() {
     setEditingPractice(null);
     setStartedFromBot(false);
     setShowDraftBanner(false);
+    setLastSavedPracticeId(null);
+    setYapLastPracticeId(null);
+    setYapLastResult(null);
     setSelectedContexts([]);
     setSections({});
     setParts({});
@@ -2809,23 +2985,39 @@ function App() {
                 <span className="detail-meta-label">Tipo cliente</span>
                 <span className="detail-meta-value">{practice.customer_type || '—'}</span>
               </div>
-              {showDeveloperUi && (
-                <div className="detail-meta-item">
-                  <span className="detail-meta-label">Stato pratica</span>
-                  <span className="detail-meta-value">{practice.status || '—'}</span>
-                </div>
-              )}
+            {showDeveloperUi && (
               <div className="detail-meta-item">
-                <span className="detail-meta-label">Contesti</span>
-                <span className="detail-meta-value">{contexts.length ? contexts.join(', ') : '—'}</span>
+                <span className="detail-meta-label">Stato pratica</span>
+                <span className="detail-meta-value">{practice.status || '—'}</span>
               </div>
+            )}
+            <div className="detail-meta-item">
+              <span className="detail-meta-label">Stato YAP</span>
+              <span className="detail-meta-value">
+                {practice.management_sync_status || (practice.synced ? 'synced' : 'non sincronizzata')}
+              </span>
+            </div>
+            {practice.management_last_sync_at && (
+              <div className="detail-meta-item">
+                <span className="detail-meta-label">Ultimo sync YAP</span>
+                <span className="detail-meta-value">
+                  {formatDateTime(practice.management_last_sync_at)}
+                </span>
+              </div>
+            )}
+            <div className="detail-meta-item">
+              <span className="detail-meta-label">Contesti</span>
+              <span className="detail-meta-value">{contexts.length ? contexts.join(', ') : '—'}</span>
             </div>
           </div>
+        </div>
+
+          {yapLastPracticeId === practice.id && renderYapResultBanner(yapLastResult, { practiceId: practice.id, showRetry: true, showDelete: true })}
 
           {!browserPreviewMode && renderYapPreviewPanel(yapPreview, yapPreviewLoading)}
 
           {/* YAP Automation Controls */}
-          {false && !browserPreviewMode && (
+          {!browserPreviewMode && (
             <div className="section">
               <h2>🔧 Automazione YAP</h2>
               <div className="yap-controls-grid">
@@ -2846,25 +3038,17 @@ function App() {
                   {yapDeleteLoading ? 'Eliminazione...' : 'Elimina appuntamento YAP'}
                 </button>
               </div>
-              {yapLastResult && (
-                <div className={`yap-result-banner ${yapLastResult.status === 'synced' || yapLastResult.status === 'deleted' ? 'yap-success' : yapLastResult.status === 'blocked_by_odl' ? 'yap-warning' : 'yap-info'}`}>
-                  <strong>Stato YAP:</strong> {yapLastResult.status}
-                  {yapLastResult.yap?.yapMessage && <span> — {yapLastResult.yap.yapMessage}</span>}
-                </div>
-              )}
             </div>
           )}
 
           {/* Sync status */}
-          {showDeveloperUi && (
-            <div className="section detail-sync-section" onClick={() => toggleSync(practice.id, practice.synced)}>
-              <div className="detail-sync-label">Stato sincronizzazione</div>
-              <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
-                <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
-                {practice.synced ? 'Sincronizzata' : 'Non sincronizzata'}
-              </div>
+          <div className="section detail-sync-section" onClick={() => toggleSync(practice.id, practice.synced)}>
+            <div className="detail-sync-label">Stato sincronizzazione</div>
+            <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
+              <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
+              {practice.synced ? 'Sincronizzata' : 'Non sincronizzata'}
             </div>
-          )}
+          </div>
 
           {/* Sections */}
           {dSections.length > 0 && (
@@ -2946,14 +3130,16 @@ function App() {
             <button
               className="button-submit"
               type="button"
-              onClick={() => navigateTo('form', {
-                editingPractice: {
-                  ...practice,
-                  sections: dSections,
-                  parts: dParts,
-                },
-                existingPhotos: photos
-              })}
+              onClick={() => {
+                navigateTo('form', {
+                  editingPractice: {
+                    ...practice,
+                    sections: dSections,
+                    parts: dParts,
+                  },
+                  existingPhotos: photos,
+                });
+              }}
             >
               ✏️ Modifica
             </button>
@@ -2983,6 +3169,7 @@ function App() {
               <div className="success-icon">✅</div>
               <h2>Pratica salvata!</h2>
               <p>La pratica è stata salvata con successo.</p>
+              {yapLastPracticeId && renderYapResultBanner(yapLastResult, { practiceId: lastSavedPracticeId || yapLastPracticeId, showRetry: true, showDelete: false })}
               <button className="button-submit" onClick={() => { openDashboard(); setSuccessDone(false); }} type="button">
                 📋 Vai alla Dashboard
               </button>

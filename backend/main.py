@@ -738,6 +738,23 @@ def _practice_date_iso(practice: Practice) -> str:
     return str(value or "")[:10]
 
 
+def _ensure_yap_credentials(action: str) -> None:
+    missing = [
+        name
+        for name in ("YAP_USERNAME", "YAP_PASSWORD")
+        if not os.getenv(name, "").strip()
+    ]
+    if missing:
+        missing_label = " e ".join(missing)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "message": f"Configurazione YAP mancante: imposta {missing_label} prima di {action}.",
+                "missing": missing,
+            },
+        )
+
+
 async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180, db: Optional[Session] = None) -> Dict[str, Any]:
     root = _project_root()
     script_path = os.path.join(root, "automation", "yap", script_name)
@@ -1219,6 +1236,7 @@ async def delete_practice(
     _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
     try:
+        _ensure_yap_credentials("eliminare l'appuntamento su YAP")
         date_iso = _practice_date_iso(practice)
         search = practice.plate_confirmed or practice.customer_name
         if date_iso and search:
@@ -1379,6 +1397,7 @@ async def sync_practice_to_yap(
     ).first()
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+    _ensure_yap_credentials("sincronizzare con YAP")
 
     tmp_path = None
     try:
@@ -1412,19 +1431,61 @@ async def sync_practice_to_yap(
             args.append("--fresh-login")
 
         result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=420, db=db)
-        saved = bool((result.get("result") or {}).get("saved"))
-        duplicate = (result.get("result") or {}).get("mode") == "commit-blocked-duplicate"
+        result_data = result.get("result") or {}
+        saved = bool(result_data.get("saved"))
+        duplicate = result_data.get("mode") == "commit-blocked-duplicate"
+        response_status = "synced" if saved else ("duplicate" if duplicate else "dry_run")
+
         if not body.dry_run and (saved or duplicate):
             practice.synced = True
+            practice.management_sync_status = "synced"
+            practice.management_last_sync_at = datetime.now(timezone.utc)
             practice.updated_by_telegram_id = user_data["id"]
+            external_id = result_data.get("externalId") or result_data.get("external_id")
+            if external_id:
+                practice.management_external_id = str(external_id)
             db.commit()
-        return APIResponse(success=True, data={"status": "synced" if saved else "dry_run_or_duplicate", "preSync": check, "yap": result})
+
+        return APIResponse(
+            success=True,
+            data={
+                "status": response_status,
+                "preSync": check,
+                "yap": result,
+                "practice": {
+                    "id": practice.id,
+                    "synced": practice.synced,
+                    "management_sync_status": practice.management_sync_status,
+                    "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
+                    "management_external_id": practice.management_external_id,
+                },
+            },
+        )
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
+        try:
+            failed_practice = db.query(Practice).filter(
+                Practice.id == practice_id,
+                Practice.created_by_telegram_id == user_data["id"],
+                Practice.status != PracticeStatus.DELETED,
+            ).first()
+            if failed_practice:
+                failed_practice.management_sync_status = "sync_failed"
+                failed_practice.management_last_sync_at = datetime.now(timezone.utc)
+                failed_practice.updated_by_telegram_id = user_data["id"]
+                db.commit()
+        except Exception:
+            db.rollback()
         logger.error("Error syncing practice %d to YAP: %s", practice_id, e, exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore sync YAP")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "message": "Errore sync YAP",
+                "error": str(e),
+            },
+        )
     finally:
         if tmp_path:
             try:
@@ -1449,6 +1510,7 @@ async def delete_practice_yap_appointment(
     ).first()
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+    _ensure_yap_credentials("eliminare l'appuntamento su YAP")
 
     date_iso = body.date or _practice_date_iso(practice)
     search = body.search or practice.plate_confirmed or practice.customer_name
@@ -1466,9 +1528,17 @@ async def delete_practice_yap_appointment(
     result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
     if not body.dry_run and result.get("deleted"):
         practice.synced = False
+        practice.management_sync_status = "deleted"
+        practice.management_last_sync_at = datetime.now(timezone.utc)
         practice.updated_by_telegram_id = user_data["id"]
         db.commit()
-    return APIResponse(success=True, data={"status": result.get("status") or ("deleted" if result.get("deleted") else "not_deleted"), "yap": result})
+    return APIResponse(
+        success=True,
+        data={
+            "status": result.get("status") or ("deleted" if result.get("deleted") else "not_deleted"),
+            "yap": result,
+        },
+    )
 
 
 @app.get("/practices/{practice_id}/yap-mapping-preview")

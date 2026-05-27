@@ -72,11 +72,81 @@ class TestYapNotifyError:
 
 class TestYapSyncEndpoints:
     """Test endpoint YAP sync (/practices/{id}/yap/*)."""
-    
-    # TODO: Richiedono database setup avanzato con pratiche reali
-    # def test_yap_sync_endpoint_structure(self, client): ...
-    # def test_yap_delete_appointment_endpoint_structure(self, client): ...
-    pass
+
+    def test_yap_sync_rejects_missing_credentials(self, client, sample_practice, monkeypatch):
+        monkeypatch.delenv("YAP_USERNAME", raising=False)
+        monkeypatch.delenv("YAP_PASSWORD", raising=False)
+
+        import main
+
+        called = {"value": False}
+
+        def fail_if_called(*args, **kwargs):
+            called["value"] = True
+            raise AssertionError("_run_yap_script non dovrebbe essere chiamato senza credenziali")
+
+        monkeypatch.setattr(main, "_run_yap_script", fail_if_called)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/sync?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["detail"]["missing"] == ["YAP_USERNAME", "YAP_PASSWORD"]
+        assert "Configurazione YAP mancante" in data["detail"]["message"]
+        assert called["value"] is False
+
+    def test_practice_delete_rejects_missing_credentials(self, client, sample_practice, monkeypatch):
+        monkeypatch.delenv("YAP_USERNAME", raising=False)
+        monkeypatch.delenv("YAP_PASSWORD", raising=False)
+
+        import main
+
+        called = {"value": False}
+
+        def fail_if_called(*args, **kwargs):
+            called["value"] = True
+            raise AssertionError("_run_yap_script non dovrebbe essere chiamato senza credenziali")
+
+        monkeypatch.setattr(main, "_run_yap_script", fail_if_called)
+
+        response = client.delete(
+            f"/practices/{sample_practice['id']}?user_id=761118078",
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["detail"]["missing"] == ["YAP_USERNAME", "YAP_PASSWORD"]
+        assert "Configurazione YAP mancante" in data["detail"]["message"]
+        assert called["value"] is False
+
+    def test_yap_delete_rejects_missing_credentials(self, client, sample_practice, monkeypatch):
+        monkeypatch.delenv("YAP_USERNAME", raising=False)
+        monkeypatch.delenv("YAP_PASSWORD", raising=False)
+
+        import main
+
+        called = {"value": False}
+
+        def fail_if_called(*args, **kwargs):
+            called["value"] = True
+            raise AssertionError("_run_yap_script non dovrebbe essere chiamato senza credenziali")
+
+        monkeypatch.setattr(main, "_run_yap_script", fail_if_called)
+
+        response = client.request(
+            "DELETE",
+            f"/practices/{sample_practice['id']}/yap/appointment?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["detail"]["missing"] == ["YAP_USERNAME", "YAP_PASSWORD"]
+        assert "Configurazione YAP mancante" in data["detail"]["message"]
+        assert called["value"] is False
 
 
 class TestYapTestErrorChannel:
