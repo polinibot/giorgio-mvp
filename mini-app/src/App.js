@@ -949,11 +949,6 @@ function App() {
     }
   }, [getValues, selectedContexts, sections, parts]);
 
-  const saveDraft = useCallback(() => {
-    if (currentView !== 'form') return false;
-    return persistDraft();
-  }, [persistDraft, currentView]);
-
   const watchedValues = watch();
 
   const clearDraft = useCallback(() => {
