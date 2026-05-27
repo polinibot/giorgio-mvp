@@ -13,6 +13,7 @@ import {
   normalizeAppointmentTime,
   getYapSlotMinutes,
   yapContextOptions,
+  waitForAgendaReady,
   waitForYapAction,
 } from "./lib/yap-shared.mjs";
 import {
@@ -293,6 +294,7 @@ function minutesOf(time) {
 
 async function clickApproximateSlot(page, targetTime) {
   const normalizedTarget = normalizeAppointmentTime(targetTime);
+  await waitForAgendaReady(page, 12000).catch(() => {});
   const candidate = await page.evaluate((requestedTime) => {
     const toMinutes = (time) => {
       const raw = String(time || "").replace(".", ":");
@@ -338,9 +340,20 @@ async function clickApproximateSlot(page, targetTime) {
 
   let slot = candidate;
   if (!slot) {
+    await page.waitForFunction(() => {
+      const rows = document.querySelectorAll(".fc-slats tr[data-time]");
+      if (rows.length > 0) return true;
+      const labels = [...document.querySelectorAll("td.fc-axis.fc-time, .fc-time")];
+      return labels.some((node) => {
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        return /^\d{2}:\d{2}$/.test((node.textContent || "").trim()) && rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      });
+    }, null, { timeout: 10000 }).catch(() => {});
+
     const labels = await visibleTimeLabels(page);
     if (!labels.length) {
-      throw new Error("Non trovo la griglia oraria YAP");
+      throw new Error("Non trovo la griglia oraria YAP o non è ancora pronta");
     }
 
     const targetMinutes = minutesOf(normalizedTarget);

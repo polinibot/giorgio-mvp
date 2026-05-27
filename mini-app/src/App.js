@@ -2558,29 +2558,41 @@ function App() {
           await uploadQueuedPhotos(practiceId);
         }
 
-        addToast(practice ? 'Pratica aggiornata con successo!' : 'Pratica creata con successo!', 'success');
+        addToast('Salvataggio completato. Sincronizzazione YAP in corso...', 'info');
 
-        // Keep YAP aligned automatically after a successful save, but don't block the user.
+        // Keep YAP aligned automatically after a successful save, without showing a final result early.
         if (practiceId) {
-          void syncToYap(practiceId, { dry_run: false, silent: true });
+          void (async () => {
+            const syncResult = await syncToYap(practiceId, { dry_run: false, silent: true });
+            const actionLabel = practice ? 'aggiornata' : 'creata';
+            const finalMessage = syncResult.status === 'synced' || syncResult.status === 'duplicate'
+              ? `Pratica ${actionLabel} e sincronizzata con YAP.`
+              : syncResult.status === 'dry_run'
+                ? `Pratica ${actionLabel}. Dry-run YAP completato.`
+                : syncResult.status === 'not_ready'
+                  ? `Pratica ${actionLabel}, ma non pronta per YAP.`
+                  : `Pratica ${actionLabel}, ma sync YAP fallita: ${syncResult.message || 'errore sconosciuto'}`;
+            const finalSyncResult = { ...syncResult, message: finalMessage };
+            setYapLastResult(finalSyncResult);
+            if (startedFromBot && !practice) {
+              setSuccessDone(true);
+            } else if (selectedPracticeId) {
+              setSelectedPracticeId(practiceId);
+              setCurrentView('detail');
+              setNavigationStack(['dashboard']);
+            } else {
+              setCurrentView('dashboard');
+              setNavigationStack([]);
+            }
+            const toastTone = syncResult.status === 'sync_failed'
+              ? 'error'
+              : (syncResult.status === 'not_ready' || syncResult.status === 'dry_run' ? 'warning' : 'success');
+            addToast(finalMessage, toastTone);
+          })();
         }
 
-        if (startedFromBot && !practice) {
-          // Created from bot startapp
-          setSuccessDone(true);
-        } else {
-          // Navigate back: if editing, go to detail; otherwise dashboard
-          if (selectedPracticeId) {
-            setSelectedPracticeId(practiceId);
-            setCurrentView('detail');
-            setNavigationStack(['dashboard']);
-          } else {
-            setCurrentView('dashboard');
-            setNavigationStack([]);
-          }
-          setEditingPractice(null);
-          setPractice(null);
-        }
+        setEditingPractice(null);
+        setPractice(null);
       }
     } catch (err) {
       rememberError(practice ? 'practice.update' : 'practice.create', err);
