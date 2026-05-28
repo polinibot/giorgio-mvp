@@ -7,6 +7,7 @@ import {
   loginYap,
   openAgendaInApp,
   gotoAgendaDate,
+  clickAgendaEvent,
   toItalianDate,
   toYapTime,
   addMinutes,
@@ -976,6 +977,56 @@ async function scanAgendaEvents(page) {
   });
 }
 
+async function saveAppointmentPopup(page, { maxSaveAttempts = 2 } = {}) {
+  let putResponse = null;
+  let saveAttemptsUsed = 0;
+  let lastSaveError = null;
+  for (let attempt = 1; attempt <= maxSaveAttempts; attempt += 1) {
+    saveAttemptsUsed = attempt;
+    try {
+      putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
+        const saved = await safeEvaluate(page, () => {
+          const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+            .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
+          if (!popup) return false;
+          const isVisible = (el) => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+          };
+          const btns = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button']")]
+            .filter(isVisible)
+            .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
+          const saveBtn = btns.find((el) => {
+            const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
+            return text.includes("salva") || text.includes("save") || text.includes("floppy") || text.includes("done") || text.includes("check");
+          }) || btns[0];
+          if (saveBtn) { saveBtn.click(); return true; }
+          return false;
+        });
+        if (!saved) {
+          throw new Error("Bottone salva non trovato nel popup YAP");
+        }
+      }, 7000 + (attempt - 1) * 2500);
+      if (putResponse) break;
+      const stillOpenAttempt = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1200 }).catch(() => false);
+      if (!stillOpenAttempt) break;
+    } catch (error) {
+      lastSaveError = error;
+    }
+    await page.waitForTimeout(500 * attempt);
+  }
+  const saved = Boolean(putResponse);
+  if (!saved) {
+    const stillOpen = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1000 }).catch(() => false);
+    if (stillOpen) {
+      const detail = lastSaveError?.message ? ` (${lastSaveError.message})` : "";
+      throw new Error(`Salvataggio YAP non confermato dopo ${maxSaveAttempts} tentativi${detail}`);
+    }
+  }
+  return { putResponse, saveAttemptsUsed };
+}
+
 async function runYapAutomation(job, args) {
   const username = ensureEnv("YAP_USERNAME");
   const password = ensureEnv("YAP_PASSWORD");
@@ -1067,11 +1118,42 @@ async function runYapAutomation(job, args) {
     }
 
     if (dedup.hit) {
+      // Upsert su duplicato: apriamo l'evento esistente, riallineiamo popup/tag e continuiamo con ODL.
+      const openExisting = await clickAgendaEvent(page, [job.customer.plate, pickCosaFromJob(job), job.customer.name].filter(Boolean));
+      if (!openExisting?.success) {
+        return {
+          saved: false,
+          mode: "commit-blocked-duplicate",
+          dedup,
+          message: "Commit bloccato: appuntamento duplicato rilevato in agenda.",
+        };
+      }
+      await page.waitForTimeout(900);
+      await fillAppointmentPopup(page, job);
+      const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
+      await page.waitForTimeout(220);
+      let managementWrite = null;
+      if (shouldWriteOdlFromWorker()) {
+        managementWrite = await writePracticeAndOdl(page, job, args).catch((error) => ({
+          attempted: true,
+          ok: false,
+          error: error.message,
+        }));
+      }
+      await updatePracticeSynced(args, job).catch(() => {});
       return {
-        saved: false,
-        mode: "commit-blocked-duplicate",
+        saved: true,
+        mode: "commit-upsert-duplicate",
         dedup,
-        message: "Commit bloccato: appuntamento duplicato rilevato in agenda.",
+        putAction: {
+          detected: Boolean(putResponse),
+          status: putResponse?.status(),
+        },
+        telemetry: {
+          saveAttempts: saveAttemptsUsed,
+        },
+        managementWrite,
+        message: "Appuntamento duplicato aggiornato su YAP.",
       };
     }
 
@@ -1096,54 +1178,7 @@ async function runYapAutomation(job, args) {
       await page.screenshot({ path: beforeSavePath, fullPage: true });
     }
 
-    let putResponse = null;
-    let saveAttemptsUsed = 0;
-    let lastSaveError = null;
-    const maxSaveAttempts = 2;
-    for (let attempt = 1; attempt <= maxSaveAttempts; attempt += 1) {
-      saveAttemptsUsed = attempt;
-      try {
-        putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
-          const saved = await safeEvaluate(page, () => {
-            const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
-              .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
-            if (!popup) return false;
-            const isVisible = (el) => {
-              const rect = el.getBoundingClientRect();
-              const style = window.getComputedStyle(el);
-              return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
-            };
-            const btns = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button']")]
-              .filter(isVisible)
-              .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
-            const saveBtn = btns.find((el) => {
-              const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
-              return text.includes("salva") || text.includes("save") || text.includes("floppy") || text.includes("done") || text.includes("check");
-            }) || btns[0];
-            if (saveBtn) { saveBtn.click(); return true; }
-            return false;
-          });
-          if (!saved) {
-            throw new Error("Bottone salva non trovato nel popup YAP");
-          }
-        }, 7000 + (attempt - 1) * 2500);
-        if (putResponse) break;
-        const stillOpenAttempt = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1200 }).catch(() => false);
-        if (!stillOpenAttempt) break;
-      } catch (error) {
-        lastSaveError = error;
-      }
-      await page.waitForTimeout(500 * attempt);
-    }
-
-    const saved = Boolean(putResponse);
-    if (!saved) {
-      const stillOpen = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1000 }).catch(() => false);
-      if (stillOpen) {
-        const detail = lastSaveError?.message ? ` (${lastSaveError.message})` : "";
-        throw new Error(`Salvataggio YAP non confermato dopo ${maxSaveAttempts} tentativi${detail}`);
-      }
-    }
+    const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
     await page.waitForTimeout(240);
     let afterSavePath = null;
     if (args.debug) {
