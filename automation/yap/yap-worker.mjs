@@ -798,14 +798,16 @@ async function writePracticeAndOdl(page, job, args) {
     attempted: true,
     openedPractice: false,
     openedOdl: false,
-    written: {
-      notes: false,
-      sections: [],
-      man: false,
-      mac: false,
-      materials: false,
-      waste: false,
-      parts: false,
+    agenda: { attempted: false, success: false, error: null },
+    tags: { attempted: false, success: false, error: null },
+    notes: { attempted: Boolean(job.internalNotes), success: false, error: null },
+    odl: { attempted: Boolean((job.sections || []).length), success: false, error: null, sections: [] },
+    materials: { attempted: false, success: false, error: null },
+    parts: { attempted: false, success: false, error: null },
+    waste: { attempted: false, success: false, error: null },
+    hours: {
+      man: { attempted: false, success: false, error: null },
+      mac: { attempted: false, success: false, error: null },
     },
     verify: {
       matched: 0,
@@ -826,15 +828,22 @@ async function writePracticeAndOdl(page, job, args) {
   if (odlTab?.clicked) {
     writeReport.openedOdl = true;
     await page.waitForTimeout(1600);
+  } else if (writeReport.odl.attempted) {
+    writeReport.odl.error = "odl_tab_not_found";
   }
 
   if (job.internalNotes) {
-    writeReport.written.notes = await fillBestEditableByKeywords(
-      page,
-      ["note", "note interne", "pratica", "annotazioni"],
-      String(job.internalNotes).trim(),
-      { append: true },
-    );
+    try {
+      writeReport.notes.success = await fillBestEditableByKeywords(
+        page,
+        ["note", "note interne", "pratica", "annotazioni"],
+        String(job.internalNotes).trim(),
+        { append: true },
+      );
+      if (!writeReport.notes.success) writeReport.notes.error = "notes_field_not_found";
+    } catch (error) {
+      writeReport.notes.error = error?.message || "notes_write_failed";
+    }
   }
 
   for (const section of job.sections || []) {
@@ -850,25 +859,37 @@ async function writePracticeAndOdl(page, job, args) {
       sectionSummary,
       { append: true },
     );
-    writeReport.written.sections.push({ reparto, written: sectionWritten });
+    writeReport.odl.sections.push({ reparto, written: sectionWritten });
+    writeReport.odl.success = writeReport.odl.success || sectionWritten;
 
     if (section.ore_man != null) {
+      writeReport.hours.man.attempted = true;
       const manOk = await fillBestEditableByKeywords(page, [reparto, "man", "ore uomo", "manodopera"], String(section.ore_man));
-      writeReport.written.man = writeReport.written.man || manOk;
+      writeReport.hours.man.success = writeReport.hours.man.success || manOk;
+      if (!manOk && !writeReport.hours.man.error) writeReport.hours.man.error = "man_field_not_found";
+      writeReport.odl.success = writeReport.odl.success || manOk;
     }
     if (section.ore_mac != null) {
+      writeReport.hours.mac.attempted = true;
       const macOk = await fillBestEditableByKeywords(page, [reparto, "mac", "ore macchina", "manodopera"], String(section.ore_mac));
-      writeReport.written.mac = writeReport.written.mac || macOk;
+      writeReport.hours.mac.success = writeReport.hours.mac.success || macOk;
+      if (!macOk && !writeReport.hours.mac.error) writeReport.hours.mac.error = "mac_field_not_found";
+      writeReport.odl.success = writeReport.odl.success || macOk;
     }
     if (section.materiali_euro != null) {
+      writeReport.materials.attempted = true;
       const matOk = await fillBestEditableByKeywords(page, [reparto, "materiali", "consumo", "euro"], String(section.materiali_euro));
-      writeReport.written.materials = writeReport.written.materials || matOk;
+      writeReport.materials.success = writeReport.materials.success || matOk;
+      if (!matOk && !writeReport.materials.error) writeReport.materials.error = "materials_field_not_found";
     }
     if (section.smaltimento_applica) {
+      writeReport.waste.attempted = true;
       const smaltOk = await fillBestEditableByKeywords(page, [reparto, "smaltimento", "rifiuti", "%"], String(section.smaltimento_percentuale ?? 2));
-      writeReport.written.waste = writeReport.written.waste || smaltOk;
+      writeReport.waste.success = writeReport.waste.success || smaltOk;
+      if (!smaltOk && !writeReport.waste.error) writeReport.waste.error = "waste_field_not_found";
     }
     if ((section.ricambi || []).length) {
+      writeReport.parts.attempted = true;
       const partsText = (section.ricambi || [])
         .map((part) => {
           const name = part?.name || part?.nome || "";
@@ -884,29 +905,62 @@ async function writePracticeAndOdl(page, job, args) {
           partsText,
           { append: true },
         );
-        writeReport.written.parts = writeReport.written.parts || partsOk;
+        writeReport.parts.success = writeReport.parts.success || partsOk;
+        if (!partsOk && !writeReport.parts.error) writeReport.parts.error = "parts_field_not_found";
       }
     }
   }
 
   // Fallback unico: se non troviamo campi specifici, mettiamo il blocco completo in una textarea visibile.
-  if (!writeReport.written.notes && !writeReport.written.man && !writeReport.written.mac && !writeReport.written.materials && !writeReport.written.parts) {
-    writeReport.written.notes = await appendStructuredBlockToAnyTextarea(page, summary);
+  if (
+    !writeReport.notes.success
+    && !writeReport.hours.man.success
+    && !writeReport.hours.mac.success
+    && !writeReport.materials.success
+    && !writeReport.parts.success
+  ) {
+    const fallbackOk = await appendStructuredBlockToAnyTextarea(page, summary);
+    writeReport.notes.success = writeReport.notes.success || fallbackOk;
+    if (fallbackOk && writeReport.notes.error === "notes_field_not_found") writeReport.notes.error = null;
   }
 
   await clickGenericSaveInPractice(page).catch(() => false);
   await page.waitForTimeout(500);
 
   const needles = buildOdlNeedles(job);
-  const bodyText = await safeEvaluate(page, () => (document.body?.innerText || "").replace(/\s+/g, " ").trim()).catch(() => "");
-  const normalizedBody = normalizeLoose(bodyText);
-  const matched = needles.filter((needle) => normalizedBody.includes(normalizeLoose(needle))).length;
+  const scopedText = await safeEvaluate(page, () => {
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 2 && rect.height > 2 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const values = [];
+    for (const el of document.querySelectorAll("textarea,input[type='text'],input[type='number'],[contenteditable='true'],td,th,label,span,div")) {
+      if (!isVisible(el)) continue;
+      const text = (el.value || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 300) continue;
+      values.push(text);
+    }
+    return values.join(" | ").slice(0, 30000);
+  }).catch(() => "");
+  const normalizedScoped = normalizeLoose(scopedText);
+  const matched = needles.filter((needle) => normalizedScoped.includes(normalizeLoose(needle))).length;
   writeReport.verify = {
     matched,
     total: needles.length,
     ratio: needles.length ? Number((matched / needles.length).toFixed(3)) : 1,
   };
-  writeReport.ok = Boolean(writeReport.openedPractice && writeReport.verify.matched > 0);
+  writeReport.odl.success = writeReport.odl.success || writeReport.verify.matched > 0;
+  writeReport.ok = Boolean(
+    writeReport.openedPractice
+    && (
+      writeReport.odl.success
+      || writeReport.notes.success
+      || writeReport.materials.success
+      || writeReport.parts.success
+      || writeReport.waste.success
+    )
+  );
   if (args.debug) {
     writeReport.summary = summary;
   }
@@ -1189,6 +1243,7 @@ async function runYapAutomation(job, args) {
         },
         warning: popupSaveError || undefined,
         managementWrite,
+        write_report: managementWrite,
         message: popupSaveError
           ? "Duplicato gestito: popup agenda non confermato, verifica tramite audit."
           : "Appuntamento duplicato aggiornato su YAP.",
@@ -1245,6 +1300,7 @@ async function runYapAutomation(job, args) {
         saveAttempts: saveAttemptsUsed,
       },
       managementWrite,
+      write_report: managementWrite,
       message: "Appuntamento salvato su YAP.",
     };
   } catch (error) {

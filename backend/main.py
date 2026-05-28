@@ -5,6 +5,7 @@ import shutil
 import shutil as _shutil
 import json as _json
 import asyncio
+import time
 import traceback
 from datetime import datetime, timezone, date
 from enum import Enum
@@ -1645,13 +1646,39 @@ async def sync_practice_to_yap(
     _ensure_yap_credentials("sincronizzare con YAP")
 
     tmp_path = None
+    phase_timeline: List[Dict[str, Any]] = []
+    phase_started_at = time.perf_counter()
+
+    def close_phase(name: str, status_value: str, message: Optional[str] = None) -> None:
+        nonlocal phase_started_at
+        now = time.perf_counter()
+        phase: Dict[str, Any] = {
+            "name": name,
+            "status": status_value,
+            "duration_ms": int((now - phase_started_at) * 1000),
+        }
+        if message:
+            phase["message"] = message
+        phase_timeline.append(phase)
+        phase_started_at = now
+
     try:
         from automation_service import AutomationService
 
         payload = AutomationService.prepare_automation_payload(practice_id, db)
         check = AutomationService.pre_sync_check(payload)
         if check.get("ready") is False:
-            return APIResponse(success=False, data={"status": "not_ready", "preSync": check})
+            close_phase("precheck", "failed", "Precheck non superato.")
+            return APIResponse(
+                success=False,
+                data={
+                    "status": "not_ready",
+                    "preSync": check,
+                    "phase_timeline": phase_timeline,
+                    "write_report": None,
+                },
+            )
+        close_phase("precheck", "completed", "Precheck completato.")
 
         mapped = AutomationService.map_payload_to_management(payload)
         if body.date:
@@ -1679,12 +1706,14 @@ async def sync_practice_to_yap(
         try:
             result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=150, db=db)
         except HTTPException as worker_exc:
+            close_phase("write", "failed", "Scrittura YAP non riuscita.")
             detail = worker_exc.detail if isinstance(worker_exc.detail, dict) else {"message": str(worker_exc.detail)}
             practice.synced = False
             practice.management_sync_status = "sync_failed"
             practice.management_last_sync_at = datetime.now(timezone.utc)
             practice.updated_by_telegram_id = user_data["id"]
             db.commit()
+            close_phase("finalize", "completed", "Stato finale persistito.")
             return APIResponse(
                 success=True,
                 data={
@@ -1692,6 +1721,8 @@ async def sync_practice_to_yap(
                     "message": str(detail.get("message") or "Sync YAP non riuscita."),
                     "audit": None,
                     "preSync": check,
+                    "phase_timeline": phase_timeline,
+                    "write_report": None,
                     "yap": {
                         "ok": False,
                         "error": detail,
@@ -1706,7 +1737,14 @@ async def sync_practice_to_yap(
                     },
                 },
             )
+        close_phase("write", "completed", "Scrittura YAP completata.")
         result_data = result.get("result") or {}
+        write_report = (
+            result_data.get("write_report")
+            or result_data.get("managementWrite")
+            or result.get("write_report")
+            or result.get("managementWrite")
+        )
         saved = bool(result_data.get("saved"))
         duplicate = result_data.get("mode") == "commit-blocked-duplicate"
         response_status = "dry_run"
@@ -1733,6 +1771,7 @@ async def sync_practice_to_yap(
                 audit_args.append("--fresh-login")
             try:
                 audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=150, db=db)
+                close_phase("audit", "completed", "Audit YAP completato.")
             except HTTPException as audit_exc:
                 logger.warning("Audit post-sync non riuscito per pratica %d: %s", practice_id, audit_exc.detail)
                 audit_result = {
@@ -1741,8 +1780,10 @@ async def sync_practice_to_yap(
                     "message": "Audit YAP non completato.",
                     "error": audit_exc.detail,
                 }
+                close_phase("audit", "failed", "Audit YAP non riuscito.")
             response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
             response_message = _audit_message_for_status(response_status, audit_result)
+            close_phase("finalize", "completed", "Stato finale persistito.")
         else:
             practice.synced = False
             practice.management_sync_status = "sync_failed"
@@ -1751,6 +1792,8 @@ async def sync_practice_to_yap(
             db.commit()
             response_status = "sync_failed"
             response_message = result_data.get("message") or result.get("message") or "Sync YAP non riuscita."
+            close_phase("audit", "skipped", "Audit saltato: scrittura non confermata.")
+            close_phase("finalize", "completed", "Stato finale persistito.")
 
         return APIResponse(
             success=True,
@@ -1759,6 +1802,8 @@ async def sync_practice_to_yap(
                 "message": response_message,
                 "audit": audit_result,
                 "preSync": check,
+                "phase_timeline": phase_timeline,
+                "write_report": write_report,
                 "yap": result,
                 "practice": {
                     "id": practice.id,
@@ -1774,6 +1819,7 @@ async def sync_practice_to_yap(
         raise
     except Exception as e:
         db.rollback()
+        close_phase("finalize", "failed", "Errore tecnico durante sync.")
         try:
             failed_practice = db.query(Practice).filter(
                 Practice.id == practice_id,
@@ -1793,6 +1839,7 @@ async def sync_practice_to_yap(
             detail={
                 "message": "Errore sync YAP",
                 "error": str(e),
+                "phase_timeline": phase_timeline,
             },
         )
     finally:
@@ -1906,10 +1953,27 @@ async def delete_practice_yap_appointment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
     _ensure_yap_credentials("eliminare l'appuntamento su YAP")
 
+    phase_timeline: List[Dict[str, Any]] = []
+    phase_started_at = time.perf_counter()
+
+    def close_phase(name: str, status_value: str, message: Optional[str] = None) -> None:
+        nonlocal phase_started_at
+        now = time.perf_counter()
+        phase: Dict[str, Any] = {
+            "name": name,
+            "status": status_value,
+            "duration_ms": int((now - phase_started_at) * 1000),
+        }
+        if message:
+            phase["message"] = message
+        phase_timeline.append(phase)
+        phase_started_at = now
+
     date_iso = body.date or _practice_date_iso(practice)
     search = body.search or practice.plate_confirmed or practice.customer_name
     if not date_iso or not search:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data o testo ricerca YAP mancante")
+    close_phase("precheck", "completed", "Parametri eliminazione validati.")
 
     args = ["--date", date_iso, "--search", str(search)]
     if body.dry_run:
@@ -1920,6 +1984,7 @@ async def delete_practice_yap_appointment(
         args.append("--fresh-login")
 
     result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
+    close_phase("delete", "completed" if result.get("deleted") else "failed", "Delete YAP eseguita.")
     if not body.dry_run and result.get("deleted"):
         practice.synced = False
         practice.management_sync_status = "deleted"
@@ -1927,10 +1992,12 @@ async def delete_practice_yap_appointment(
         practice.management_audit_result = None
         practice.updated_by_telegram_id = user_data["id"]
         db.commit()
+    close_phase("finalize", "completed", "Stato pratica aggiornato.")
     return APIResponse(
         success=True,
         data={
             "status": result.get("status") or ("deleted" if result.get("deleted") else "not_deleted"),
+            "phase_timeline": phase_timeline,
             "yap": result,
         },
     )

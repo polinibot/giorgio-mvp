@@ -183,6 +183,12 @@ class TestYapSyncEndpoints:
                     "mode": "commit",
                     "message": "Appuntamento salvato su YAP.",
                     "telemetry": {"saveAttempts": 1},
+                    "write_report": {
+                        "attempted": True,
+                        "ok": True,
+                        "notes": {"attempted": True, "success": True},
+                        "odl": {"attempted": True, "success": True},
+                    },
                 },
                 "stdout": "",
                 "stderr": "",
@@ -202,6 +208,11 @@ class TestYapSyncEndpoints:
         assert data["practice"]["management_sync_status"] == "complete_synced"
         assert data["practice"]["synced"] is True
         assert data["audit"]["status"] == "complete_synced"
+        assert isinstance(data.get("phase_timeline"), list)
+        assert any(item.get("name") == "precheck" for item in data["phase_timeline"])
+        assert any(item.get("name") == "write" for item in data["phase_timeline"])
+        assert any(item.get("name") == "audit" for item in data["phase_timeline"])
+        assert isinstance(data.get("write_report"), dict)
 
     @pytest.mark.parametrize(
         "audit_status,expected_synced",

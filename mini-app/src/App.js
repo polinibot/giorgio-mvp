@@ -131,6 +131,18 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
   };
 }
 
+function summarizePhaseTimeline(phaseTimeline, fallback = '') {
+  const phases = Array.isArray(phaseTimeline) ? phaseTimeline : [];
+  if (!phases.length) return fallback;
+  const done = phases.filter((phase) => phase?.status === 'completed').length;
+  const totalMs = phases.reduce((sum, phase) => sum + (Number(phase?.duration_ms) || 0), 0);
+  const failed = phases.find((phase) => phase?.status === 'failed');
+  if (failed) {
+    return `${failed.name || 'fase'} fallita (${Math.round(totalMs / 1000)}s)`;
+  }
+  return `${done}/${phases.length} fasi completate (${Math.round(totalMs / 1000)}s)`;
+}
+
 function getYapSyncScope(result) {
   return result?.syncScope || result?.practice?.management_sync_scope || null;
 }
@@ -1151,6 +1163,7 @@ function App() {
   // --- Draft persistence ---
   const persistDraft = useCallback(() => {
     try {
+      if (saving || successDone) return false;
       const data = getValues();
       const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now(), practiceId: practice?.id || null };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
@@ -1158,9 +1171,10 @@ function App() {
     } catch (_) {
       return false;
     }
-  }, [getValues, selectedContexts, sections, parts, practice]);
+  }, [getValues, selectedContexts, sections, parts, practice, saving, successDone]);
 
   const hasMeaningfulDraft = useCallback(() => {
+    if (saving || successDone) return false;
     const data = getValues();
     const formHasValue = Object.values(data || {}).some((value) => !isEmptyFormValue(value));
     const contextsHasValue = (selectedContexts || []).length > 0;
@@ -1181,7 +1195,7 @@ function App() {
       return !isEmptyFormValue(item.name) || !isEmptyFormValue(item.quantity);
     })); 
     return formHasValue || contextsHasValue || sectionsHasValue || partsHasValue;
-  }, [getValues, selectedContexts, sections, parts]);
+  }, [getValues, selectedContexts, sections, parts, saving, successDone]);
 
   const stopSaveProgressTimers = useCallback(() => {
     if (saveProgressTimerRef.current) {
@@ -1969,7 +1983,8 @@ function App() {
       setYapLastResult(data);
       rememberResponse('yap.sync');
       if (!silent) {
-        updateYapActionProgress({ percent: 86, label: 'Verifica finale YAP completata, chiusura...' });
+        const phaseLabel = summarizePhaseTimeline(data.phase_timeline, 'Verifica finale YAP completata, chiusura...');
+        updateYapActionProgress({ percent: 90, label: phaseLabel });
       }
       if (['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(data.status)) {
         if (!silent) {
@@ -2030,6 +2045,7 @@ function App() {
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
+      const phaseLabel = summarizePhaseTimeline(data.phase_timeline, data.message || 'Eliminazione YAP completata.');
       if (data.status === 'deleted') {
         addToast('Appuntamento eliminato da YAP', 'success');
         loadDetail(id);
@@ -2039,7 +2055,7 @@ function App() {
         addToast(data.message || `Delete YAP: ${data.status}`, 'info');
       }
       finishYapActionProgress(
-        data.message || (data.status === 'deleted' ? 'Appuntamento eliminato da YAP.' : 'Eliminazione YAP completata.'),
+        phaseLabel,
         ['delete_failed', 'blocked_by_odl'].includes(data.status) ? 'error' : 'success',
         ['delete_failed', 'blocked_by_odl'].includes(data.status) ? 0 : 1200,
       );
@@ -2105,15 +2121,23 @@ function App() {
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapOutcome]);
 
   const renderYapResultBanner = (result, { practiceId = null, showRetry = false, showDelete = false } = {}) => {
-    if (!result) return null;
+    const resolvedPracticeId = practiceId || yapLastPracticeId;
+    const showActionProgress = Boolean(
+      yapActionProgress &&
+      resolvedPracticeId &&
+      String(yapActionProgress.practiceId) === String(resolvedPracticeId)
+    );
+    if (!result && !showActionProgress) return null;
+    const safeResult = result || {};
     const statusCandidate = [
-      result.status,
-      result.practice?.management_sync_status,
-      result.yap?.status,
+      safeResult.status,
+      safeResult.practice?.management_sync_status,
+      safeResult.yap?.status,
     ].find((value) => String(value || '').trim().length > 0);
     let status = String(statusCandidate || 'unknown').trim();
-    const agendaOnly = isAgendaOnlyYapSync(result);
-    const audit = getYapAuditResult(result);
+    if (!result && showActionProgress) status = 'running';
+    const agendaOnly = isAgendaOnlyYapSync(safeResult);
+    const audit = getYapAuditResult(safeResult);
     const titleMap = {
       complete_synced: 'YAP completo',
       partial_synced: 'YAP parziale',
@@ -2126,11 +2150,12 @@ function App() {
       deleted: 'Appuntamento eliminato',
       sync_failed: 'Sync YAP fallita',
       delete_failed: 'Eliminazione YAP fallita',
+      running: 'Operazione YAP in corso',
       unknown: 'Stato YAP sconosciuto',
     };
-    const message = result.message
-      || result.yap?.result?.message
-      || result.yap?.message
+    const message = safeResult.message
+      || safeResult.yap?.result?.message
+      || safeResult.yap?.message
       || (status === 'deleted' ? 'Appuntamento eliminato da YAP.' : '')
       || '';
     if (status === 'unknown') {
@@ -2143,20 +2168,20 @@ function App() {
     const isWarning = ['partial_synced', 'agenda_synced', 'synced', 'not_ready', 'blocked_by_odl', 'dry_run'].includes(status);
     const toneClass = isSuccess ? 'yap-success' : (isWarning ? 'yap-warning' : 'yap-error');
     const meta = [];
-    if (Number.isFinite(result.preSync?.score)) meta.push(`Pre-sync ${result.preSync.score}/100`);
-    if (result.yap?.result?.telemetry?.saveAttempts) meta.push(`${result.yap.result.telemetry.saveAttempts} tentativi`);
-    if (result.screenshot) meta.push('Screenshot salvato');
-    if (result.duplicate) meta.push('Dedup attivo');
+    if (Number.isFinite(safeResult.preSync?.score)) meta.push(`Pre-sync ${safeResult.preSync.score}/100`);
+    if (safeResult.yap?.result?.telemetry?.saveAttempts) meta.push(`${safeResult.yap.result.telemetry.saveAttempts} tentativi`);
+    if (safeResult.screenshot) meta.push('Screenshot salvato');
+    if (safeResult.duplicate) meta.push('Dedup attivo');
     if (audit) meta.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
-    const resolvedPracticeId = practiceId || yapLastPracticeId;
+    if (Array.isArray(safeResult.phase_timeline) && safeResult.phase_timeline.length) {
+      meta.push(summarizePhaseTimeline(safeResult.phase_timeline));
+    }
+    if (safeResult.write_report?.ok === false) {
+      meta.push('Write report: incompleto');
+    }
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
-    const showActionProgress = Boolean(
-      yapActionProgress &&
-      resolvedPracticeId &&
-      String(yapActionProgress.practiceId) === String(resolvedPracticeId)
-    );
 
     return (
       <div className={`yap-result-banner ${toneClass}`}>

@@ -240,8 +240,11 @@ async function extractPopup(page) {
       .map((item) => item.value);
 
     const text = (popup.innerText || popup.textContent || "").replace(/\s+/g, " ").trim();
-    const lower = text.toLowerCase();
-    const tags = knownTags.filter((tag) => lower.includes(tag.toLowerCase()));
+    const tagNodes = [...popup.querySelectorAll("span,div,a,button,label")]
+      .filter(isVisible)
+      .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase())
+      .filter((value) => value && value.length <= 24);
+    const tags = [...new Set(knownTags.filter((tag) => tagNodes.includes(tag.toLowerCase())))];
 
     return {
       found: true,
@@ -362,7 +365,7 @@ function resolveFoundValue(field, found) {
   if (field.field === "agenda.quando") return found.popup?.agenda?.quando || "";
   if (field.field === "agenda.dalle") return found.popup?.agenda?.dalle || found.event?.time || "";
   if (field.field === "agenda.alle") return found.popup?.agenda?.alle || "";
-  if (field.group === "tags") return [...(found.popup?.tags || []), found.popup?.text || ""].join(" ");
+  if (field.group === "tags") return [...(found.popup?.tags || [])].join(" ");
   if (field.group === "notes") return [found.popup?.notesText, found.practice?.notesText].filter(Boolean).join(" ");
   if (field.group === "odl") return found.practice?.odlText || "";
   if (field.group === "materials") return found.practice?.materialsText || "";
@@ -382,7 +385,7 @@ function classifyAudit(fields, found) {
       present.push({ ...field, found: actual });
       continue;
     }
-    if (actual && field.group === "agenda") {
+    if (actual) {
       mismatch.push({ ...field, found: actual });
     } else {
       missing.push({ ...field, found: actual || null });
@@ -398,10 +401,8 @@ function classifyAudit(fields, found) {
     status = "complete_synced";
     message = "YAP completo: agenda, note, ODL, materiali e ricambi verificati.";
   } else if (agendaPresent) {
-    status = missing.some((item) => item.group !== "agenda") || mismatch.length ? "partial_synced" : "agenda_synced";
-    message = status === "partial_synced"
-      ? "Agenda presente, mancano ODL/materiali/ricambi/note."
-      : "Agenda verificata.";
+    status = "partial_synced";
+    message = "Agenda presente, ma verifica incompleta su note/ODL/materiali/ricambi/smaltimento.";
   }
 
   return { status, message, present, missing, mismatch };
