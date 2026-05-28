@@ -275,8 +275,24 @@ async function openAgenda(page, isoDate) {
   }
 }
 
+async function safeEvaluate(page, evaluator, arg, { retries = 2, delayMs = 250 } = {}) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await page.evaluate(evaluator, arg);
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.message || "");
+      const recoverable = /Target crashed|Target closed|Execution context was destroyed|Page closed|Browser has been closed|Cannot find context with specified id/i.test(message);
+      if (!recoverable || attempt === retries) break;
+      await page.waitForTimeout(delayMs * (attempt + 1)).catch(() => {});
+    }
+  }
+  throw lastError;
+}
+
 async function visibleTimeLabels(page) {
-  return page.evaluate(() => {
+  return safeEvaluate(page, () => {
     return [...document.querySelectorAll("td.fc-axis.fc-time, .fc-time")]
       .map((node) => {
         const text = (node.textContent || "").trim();
@@ -312,7 +328,7 @@ function minutesOf(time) {
 async function clickApproximateSlot(page, targetTime) {
   const normalizedTarget = normalizeAppointmentTime(targetTime);
   await waitForAgendaReady(page, 12000).catch(() => {});
-  const candidate = await page.evaluate((requestedTime) => {
+  const candidate = await safeEvaluate(page, (requestedTime) => {
     const toMinutes = (time) => {
       const raw = String(time || "").replace(".", ":");
       const match = raw.match(/^(\d{2}):(\d{2})$/);
@@ -416,7 +432,7 @@ async function clickApproximateSlot(page, targetTime) {
 }
 
 async function inputSnapshot(page) {
-  return page.evaluate(() => {
+  return safeEvaluate(page, () => {
     const isVisible = (node) => {
       const rect = node.getBoundingClientRect();
       const style = window.getComputedStyle(node);
@@ -439,7 +455,7 @@ async function inputSnapshot(page) {
 }
 
 async function appointmentPopupRect(page) {
-  return page.evaluate(() => {
+  return safeEvaluate(page, () => {
     const isVisible = (node) => {
       const rect = node.getBoundingClientRect();
       const style = window.getComputedStyle(node);
@@ -460,7 +476,7 @@ async function appointmentPopupRect(page) {
 }
 
 async function fillVisibleInput(page, index, value) {
-  await page.evaluate(({ index: targetIndex, value: nextValue }) => {
+  await safeEvaluate(page, ({ index: targetIndex, value: nextValue }) => {
     const isVisible = (node) => {
       const rect = node.getBoundingClientRect();
       const style = window.getComputedStyle(node);
@@ -482,7 +498,7 @@ async function fillVisibleInput(page, index, value) {
 async function addYapTagChips(page, tags) {
   if (!tags.length) return;
 
-  await page.evaluate((desiredTags) => {
+  await safeEvaluate(page, (desiredTags) => {
     const popups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")];
     const popup = popups.find((p) => (p.textContent || "").includes("Dettagli"));
     if (!popup) return;
@@ -562,7 +578,7 @@ async function fillAppointmentPopup(page, job) {
 }
 
 async function scanAgendaEvents(page) {
-  return page.evaluate(() => {
+  return safeEvaluate(page, () => {
     const rows = [];
     const seen = new Set();
     for (const el of document.querySelectorAll(".fc-time-grid-event, .fc-event")) {
@@ -693,7 +709,7 @@ async function runYapAutomation(job, args) {
       saveAttemptsUsed = attempt;
       try {
         putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
-          const saved = await page.evaluate(() => {
+          const saved = await safeEvaluate(page, () => {
             const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
               .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
             if (!popup) return false;

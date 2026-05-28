@@ -2209,6 +2209,50 @@ label {
   transition: width 0.3s ease;
 }
 
+.save-progress {
+  margin: 14px 0 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.save-progress-running {
+  border-color: rgba(79, 140, 255, 0.28);
+  background: linear-gradient(180deg, rgba(79, 140, 255, 0.08), rgba(255, 255, 255, 0.03));
+}
+
+.save-progress-success {
+  border-color: rgba(52, 211, 153, 0.28);
+  background: linear-gradient(180deg, rgba(52, 211, 153, 0.08), rgba(255, 255, 255, 0.03));
+}
+
+.save-progress-error {
+  border-color: rgba(248, 113, 113, 0.28);
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.08), rgba(255, 255, 255, 0.03));
+}
+
+.save-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.save-progress-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.save-progress-percent {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Photo empty state --- */
 .photo-empty-state {
   text-align: center;

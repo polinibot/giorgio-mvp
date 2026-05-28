@@ -973,6 +973,7 @@ function App() {
   const [practice, setPractice] = useState(null);
   const [error, setError] = useState('');
   const [successDone, setSuccessDone] = useState(false);
+  const [saveProgress, setSaveProgress] = useState(null);
 
   const [showDraftBanner, setShowDraftBanner] = useState(false);
   const [slowRequest, setSlowRequest] = useState(false);
@@ -986,6 +987,8 @@ function App() {
   const formFileInputRef = useRef(null);
 
   const slowTimerRef = useRef(null);
+  const saveProgressTimerRef = useRef(null);
+  const saveProgressClearTimerRef = useRef(null);
   const toastIdRef = useRef(0);
   const formRef = useRef(null);
   const searchTimerRef = useRef(null);
@@ -1026,9 +1029,71 @@ function App() {
     const partsHasValue = Object.values(parts || {}).some((items) => Array.isArray(items) && items.some((item) => {
       if (!item) return false;
       return !isEmptyFormValue(item.name) || !isEmptyFormValue(item.quantity);
-    }));
+    })); 
     return formHasValue || contextsHasValue || sectionsHasValue || partsHasValue;
   }, [getValues, selectedContexts, sections, parts]);
+
+  const stopSaveProgressTimers = useCallback(() => {
+    if (saveProgressTimerRef.current) {
+      clearInterval(saveProgressTimerRef.current);
+      saveProgressTimerRef.current = null;
+    }
+    if (saveProgressClearTimerRef.current) {
+      clearTimeout(saveProgressClearTimerRef.current);
+      saveProgressClearTimerRef.current = null;
+    }
+  }, []);
+
+  const startSaveProgress = useCallback((label, stage = 'save') => {
+    stopSaveProgressTimers();
+    setSaveProgress({
+      label,
+      stage,
+      status: 'running',
+      percent: 8,
+    });
+    saveProgressTimerRef.current = setInterval(() => {
+      setSaveProgress((current) => {
+        if (!current || current.status !== 'running') return current;
+        const caps = {
+          validate: 18,
+          save: 45,
+          photos: 72,
+          sync: 92,
+        };
+        const cap = caps[current.stage] ?? 92;
+        const increment = current.percent < 20 ? 3.5 : current.percent < 60 ? 1.6 : 0.6;
+        const nextPercent = Math.min(cap, Number((current.percent + increment).toFixed(1)));
+        if (nextPercent === current.percent) return current;
+        return { ...current, percent: nextPercent };
+      });
+    }, 340);
+  }, [stopSaveProgressTimers]);
+
+  const updateSaveProgress = useCallback((patch) => {
+    setSaveProgress((current) => (current ? { ...current, ...patch } : current));
+  }, []);
+
+  const finishSaveProgress = useCallback((label, status = 'success', clearDelay = 1400) => {
+    stopSaveProgressTimers();
+    setSaveProgress((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        label: label || current.label,
+        status,
+        percent: 100,
+      };
+    });
+    if (clearDelay > 0) {
+      saveProgressClearTimerRef.current = setTimeout(() => {
+        setSaveProgress((current) => {
+          if (!current || current.status !== status) return current;
+          return null;
+        });
+      }, clearDelay);
+    }
+  }, [stopSaveProgressTimers]);
 
   const watchedValues = watch();
 
@@ -1092,7 +1157,11 @@ function App() {
       window.removeEventListener('pagehide', persistDraftOnLeave);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [watchedValues, currentView, loading, successDone, selectedContexts, sections, parts, persistDraft, hasMeaningfulDraft]);
+  }, [watchedValues, currentView, loading, successDone, selectedContexts, sections, parts, persistDraft, hasMeaningfulDraft, stopSaveProgressTimers]);
+
+  useEffect(() => () => {
+    stopSaveProgressTimers();
+  }, [stopSaveProgressTimers]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1513,13 +1582,24 @@ function App() {
     });
   }, []);
 
-  const uploadQueuedPhotos = useCallback(async (practiceId) => {
+  const uploadQueuedPhotos = useCallback(async (practiceId, onProgress) => {
     if (formPhotos.length === 0) return;
     const currentTelegramUserId = telegramUserId;
     let successCount = 0;
     let failCount = 0;
     for (let i = 0; i < formPhotos.length; i++) {
       setFormPhotoUploadProgress(`Caricamento foto ${i + 1}/${formPhotos.length}...`);
+      if (onProgress) {
+        const base = 30;
+        const span = 28;
+        const overall = base + (i / Math.max(1, formPhotos.length)) * span;
+        onProgress({
+          stage: 'photos',
+          status: 'running',
+          percent: Number(overall.toFixed(1)),
+          label: `Caricamento foto ${i + 1}/${formPhotos.length}...`,
+        });
+      }
       try {
         const fd = new FormData();
         fd.append('file', formPhotos[i].file);
@@ -1548,12 +1628,38 @@ function App() {
           failCount++;
           rememberError('photo.upload', { message: `HTTP ${res.status}`, response: { status: res.status, data: { detail: `upload_failed_${res.status}` } } });
         }
+        if (onProgress) {
+          const progress = 30 + (((i + 1) / Math.max(1, formPhotos.length)) * 28);
+          onProgress({
+            stage: 'photos',
+            status: 'running',
+            percent: Number(progress.toFixed(1)),
+            label: `Foto ${i + 1}/${formPhotos.length} inviata...`,
+          });
+        }
       } catch (err) {
         failCount++;
         rememberError('photo.upload', err);
+        if (onProgress) {
+          const progress = 30 + (((i + 1) / Math.max(1, formPhotos.length)) * 28);
+          onProgress({
+            stage: 'photos',
+            status: 'running',
+            percent: Number(progress.toFixed(1)),
+            label: `Foto ${i + 1}/${formPhotos.length} processata...`,
+          });
+        }
       }
     }
     setFormPhotoUploadProgress('');
+    if (onProgress) {
+      onProgress({
+        stage: 'photos',
+        status: 'running',
+        percent: 60,
+        label: 'Caricamento foto completato',
+      });
+    }
     if (successCount > 0) addToast(`${successCount} foto caricate con successo!`, 'success');
     if (failCount > 0) addToast(`${failCount} foto non caricate.`, 'error');
     // Cleanup previews
@@ -2447,6 +2553,7 @@ function App() {
     setSaving(true);
     setError('');
     startSlowTimer();
+    startSaveProgress('Verifica dati e salvataggio in corso...', 'validate');
 
     try {
       const practicePayload = {
@@ -2552,12 +2659,24 @@ function App() {
         const practiceId = responseData.id || (practice && practice.id);
 
         clearDraft();
+        updateSaveProgress({
+          label: formPhotos.length > 0 ? `Caricamento ${formPhotos.length} foto...` : 'Preparazione sincronizzazione YAP...',
+          stage: formPhotos.length > 0 ? 'photos' : 'sync',
+          percent: formPhotos.length > 0 ? 30 : 58,
+          status: 'running',
+        });
 
         // Upload queued photos after practice creation
         if (formPhotos.length > 0 && practiceId) {
-          await uploadQueuedPhotos(practiceId);
+          await uploadQueuedPhotos(practiceId, (patch) => updateSaveProgress(patch));
         }
 
+        updateSaveProgress({
+          label: 'Sincronizzazione YAP in corso...',
+          stage: 'sync',
+          percent: 72,
+          status: 'running',
+        });
         addToast('Salvataggio completato. Sincronizzazione YAP in corso...', 'info');
 
         // Keep YAP aligned automatically after a successful save, without showing a final result early.
@@ -2574,6 +2693,7 @@ function App() {
                   : `Pratica ${actionLabel}, ma sync YAP fallita: ${syncResult.message || 'errore sconosciuto'}`;
             const finalSyncResult = { ...syncResult, message: finalMessage };
             setYapLastResult(finalSyncResult);
+            finishSaveProgress(finalMessage, syncResult.status === 'sync_failed' ? 'error' : 'success', syncResult.status === 'sync_failed' ? 0 : 1400);
             if (startedFromBot && !practice) {
               setSuccessDone(true);
             } else if (selectedPracticeId) {
@@ -2593,10 +2713,16 @@ function App() {
 
         setEditingPractice(null);
         setPractice(null);
+      } else {
+        const apiMessage = response.data?.message || 'Salvataggio non confermato dal server';
+        finishSaveProgress(apiMessage, 'error', 0);
+        setError(apiMessage);
+        addToast(apiMessage, 'error');
       }
     } catch (err) {
       rememberError(practice ? 'practice.update' : 'practice.create', err);
       setError(classifyError(err));
+      finishSaveProgress(classifyError(err), 'error', 0);
       addToast(classifyError(err), 'error');
     } finally {
       clearSlowTimer();
@@ -2606,6 +2732,8 @@ function App() {
 
   // --- Reset form for new practice ---
   const resetFormForNew = useCallback(() => {
+    stopSaveProgressTimers();
+    setSaveProgress(null);
     setPractice(null);
     setEditingPractice(null);
     setStartedFromBot(false);
@@ -2638,7 +2766,7 @@ function App() {
     setExistingPhotos([]);
     setFormPhotoUploadProgress('');
     setLoading(false);
-  }, [setValue]);
+  }, [setValue, stopSaveProgressTimers]);
 
   const discardDraft = useCallback(() => {
     clearDraft();
@@ -3646,6 +3774,22 @@ function App() {
             {!browserPreviewMode && renderYapPreviewPanel(formYapPreview, formYapPreviewLoading, {
               title: '📅 Anteprima YAP (live)',
             })}
+
+            {saveProgress && (
+              <div className={`save-progress ${saveProgress.status === 'error' ? 'save-progress-error' : saveProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
+                <div className="save-progress-header">
+                  {saveProgress.status === 'running' && <span className="loading-spinner sm"></span>}
+                  <span className="save-progress-label">{saveProgress.label}</span>
+                  <span className="save-progress-percent">{Math.round(saveProgress.percent)}%</span>
+                </div>
+                <div className="upload-progress-bar" aria-hidden="true">
+                  <div
+                    className="upload-progress-bar-fill"
+                    style={{ width: `${Math.min(100, Math.max(0, saveProgress.percent))}%` }}
+                  />
+                </div>
+              </div>
+            )}
 
             <button
               type="submit"
