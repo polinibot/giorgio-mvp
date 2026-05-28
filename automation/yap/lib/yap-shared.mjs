@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 export const YAP_BASE_URL = process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it";
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -8,6 +9,13 @@ export const YAP_SESSION_STATE = process.env.YAP_SESSION_STATE || path.join(ROOT
 export const YAP_APPOINTMENT_DELETE_CONFIRM = "Confermi l'eliminazione dell'appuntamento?";
 export const YAP_ODL_DELETE_CONFIRM = "Confermi di voler eliminare l'ordine di lavoro?";
 export const DEFAULT_YAP_SLOT_MINUTES = 20;
+const DEFAULT_CHROMIUM_PATHS = [
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chrome",
+];
 
 export function getYapSlotMinutes() {
   const raw = String(process.env.YAP_SLOT_MINUTES || DEFAULT_YAP_SLOT_MINUTES).trim();
@@ -85,6 +93,84 @@ export function addMinutes(time, minutes) {
   const [hours, mins] = time.split(":").map(Number);
   const date = new Date(Date.UTC(2000, 0, 1, hours, mins + minutes, 0));
   return `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+async function pathExists(filePath) {
+  if (!filePath) return false;
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function pickChromiumExecutablePath() {
+  const envCandidates = [
+    process.env.YAP_CHROMIUM_EXECUTABLE,
+    process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+    process.env.CHROMIUM_PATH,
+    process.env.CHROME_PATH,
+  ].filter(Boolean);
+  for (const candidate of [...envCandidates, ...DEFAULT_CHROMIUM_PATHS]) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  return null;
+}
+
+function isMissingPlaywrightBrowserError(error) {
+  const message = String(error?.message || "");
+  return message.includes("Executable doesn't exist")
+    || message.includes("download new browsers")
+    || message.includes("Please run the following command");
+}
+
+async function runNodeCli(args, { cwd }) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { cwd, stdio: "pipe", env: process.env });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => { stderr += String(chunk || ""); });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(stderr.trim() || `Node CLI failed (${code})`));
+    });
+  });
+}
+
+export async function installPlaywrightChromium(resolveModule, cwd = ROOT_DIR) {
+  const candidates = ["playwright/cli.js", "playwright/cli"];
+  let cliPath = null;
+  for (const name of candidates) {
+    try {
+      cliPath = resolveModule(name);
+      if (cliPath) break;
+    } catch {
+      // Try next
+    }
+  }
+  if (!cliPath) {
+    throw new Error("Impossibile trovare Playwright CLI per installare Chromium");
+  }
+  await runNodeCli([cliPath, "install", "chromium"], { cwd });
+}
+
+export async function launchChromiumWithFallback(chromium, baseLaunchOptions, { resolveModule, cwd = ROOT_DIR } = {}) {
+  const preferredPath = await pickChromiumExecutablePath();
+  const launchOptions = preferredPath
+    ? { ...baseLaunchOptions, executablePath: preferredPath }
+    : { ...baseLaunchOptions };
+
+  try {
+    return await chromium.launch(launchOptions);
+  } catch (error) {
+    if (!resolveModule || !isMissingPlaywrightBrowserError(error)) throw error;
+    await installPlaywrightChromium(resolveModule, cwd);
+    return chromium.launch({ ...baseLaunchOptions });
+  }
 }
 
 async function exists(filePath) {

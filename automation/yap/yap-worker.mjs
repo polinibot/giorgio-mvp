@@ -15,6 +15,7 @@ import {
   yapContextOptions,
   waitForAgendaReady,
   waitForYapAction,
+  launchChromiumWithFallback,
 } from "./lib/yap-shared.mjs";
 import {
   pickCosaFromJob,
@@ -600,11 +601,14 @@ async function runYapAutomation(job, args) {
   const password = ensureEnv("YAP_PASSWORD");
   await fs.mkdir(args.artifactDir, { recursive: true });
 
-  const browser = await chromium.launch({
-    headless: !args.headed,
-    executablePath: process.env.YAP_CHROMIUM_EXECUTABLE || process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || "/usr/bin/chromium",
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
-  });
+  const browser = await launchChromiumWithFallback(
+    chromium,
+    {
+      headless: !args.headed,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    },
+    { resolveModule: requireFromMiniApp.resolve.bind(requireFromMiniApp), cwd: ROOT_DIR },
+  );
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
 

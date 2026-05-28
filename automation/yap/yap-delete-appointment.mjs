@@ -18,6 +18,7 @@ import {
   gotoAgendaDate,
   ROOT_DIR,
   yapContextOptions,
+  launchChromiumWithFallback,
 } from "./lib/yap-shared.mjs";
 
 const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
@@ -314,7 +315,14 @@ async function main() {
     process.exit(1);
   }
 
-  const browser = await chromium.launch({ headless: !args.headed });
+  const browser = await launchChromiumWithFallback(
+    chromium,
+    {
+      headless: !args.headed,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    },
+    { resolveModule: requireFromMiniApp.resolve.bind(requireFromMiniApp), cwd: ROOT_DIR },
+  );
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
 
