@@ -263,7 +263,11 @@ async function tryOpenPracticeAndOdl(page) {
   const result = {
     openedPractice: false,
     openedOdl: false,
-    text: "",
+    notesText: "",
+    odlText: "",
+    materialsText: "",
+    partsText: "",
+    wasteText: "",
     clickLabels: [],
   };
 
@@ -306,7 +310,50 @@ async function tryOpenPracticeAndOdl(page) {
     await page.waitForTimeout(2500);
   }
 
-  result.text = await page.evaluate(() => (document.body.innerText || "").replace(/\s+/g, " ").trim()).catch(() => "");
+  const scoped = await page.evaluate(() => {
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const sectionTextFromKeyword = (keywordRegex) => {
+      const anchors = [...document.querySelectorAll("h1,h2,h3,h4,label,span,div,td,th,a,button")]
+        .filter(isVisible)
+        .filter((el) => keywordRegex.test(clean(el.textContent || "").toLowerCase()));
+      const sections = anchors
+        .map((el) => el.closest(".gwt-DecoratorPanel, .gwt-DialogBox, .gwt-PopupPanel, .gwt-TabLayoutPanel, .gwt-TabPanel, .gwt-StackPanel, table, form, section, article, .panel, .content, .container"))
+        .filter(Boolean);
+      const uniqueSections = [...new Set(sections)];
+      const text = uniqueSections
+        .map((section) => clean(section.innerText || section.textContent || ""))
+        .filter(Boolean)
+        .join(" | ");
+      return text.slice(0, 12000);
+    };
+    const readValues = (selector) =>
+      [...document.querySelectorAll(selector)]
+        .filter(isVisible)
+        .map((el) => clean(el.value || el.textContent || ""))
+        .filter(Boolean)
+        .join(" | ")
+        .slice(0, 12000);
+
+    return {
+      notesText: [sectionTextFromKeyword(/\bnote\b/i), readValues("textarea,input[type='text']")].filter(Boolean).join(" | "),
+      odlText: sectionTextFromKeyword(/\bordini?\s+di\s+lavoro\b|\bodl\b|\bman\b|\bmac\b/i),
+      materialsText: sectionTextFromKeyword(/\bmateriali\b|\bconsumo\b/i),
+      partsText: sectionTextFromKeyword(/\bricambi\b|\barticoli\b|\bmagazzino\b/i),
+      wasteText: sectionTextFromKeyword(/\bsmaltimento\b|\brifiuti\b|%/i),
+    };
+  }).catch(() => null);
+  if (scoped && typeof scoped === "object") {
+    result.notesText = scoped.notesText || "";
+    result.odlText = scoped.odlText || "";
+    result.materialsText = scoped.materialsText || "";
+    result.partsText = scoped.partsText || "";
+    result.wasteText = scoped.wasteText || "";
+  }
   return result;
 }
 
@@ -316,8 +363,12 @@ function resolveFoundValue(field, found) {
   if (field.field === "agenda.dalle") return found.popup?.agenda?.dalle || found.event?.time || "";
   if (field.field === "agenda.alle") return found.popup?.agenda?.alle || "";
   if (field.group === "tags") return [...(found.popup?.tags || []), found.popup?.text || ""].join(" ");
-  if (field.group === "notes") return [found.popup?.notesText, found.popup?.text, found.practice?.text].filter(Boolean).join(" ");
-  return [found.practice?.text, found.popup?.text].filter(Boolean).join(" ");
+  if (field.group === "notes") return [found.popup?.notesText, found.practice?.notesText].filter(Boolean).join(" ");
+  if (field.group === "odl") return found.practice?.odlText || "";
+  if (field.group === "materials") return found.practice?.materialsText || "";
+  if (field.group === "parts") return found.practice?.partsText || "";
+  if (field.group === "waste") return found.practice?.wasteText || "";
+  return "";
 }
 
 function classifyAudit(fields, found) {

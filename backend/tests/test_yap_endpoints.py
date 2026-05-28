@@ -154,10 +154,9 @@ class TestYapSyncEndpoints:
         assert "Configurazione YAP mancante" in data["detail"]["message"]
         assert called["value"] is False
 
-    def test_yap_sync_returns_agenda_scope_summary(self, client, sample_practice, monkeypatch):
+    def test_yap_sync_returns_single_final_status_after_audit(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
-        monkeypatch.delenv("YAP_AUTO_AUDIT_ON_SYNC", raising=False)
 
         import main
         from automation_service import AutomationService
@@ -169,6 +168,15 @@ class TestYapSyncEndpoints:
         )
 
         async def fake_run_yap_script(script_name, *args, **kwargs):
+            if script_name == "yap-audit-appointment.mjs":
+                return {
+                    "ok": True,
+                    "status": "complete_synced",
+                    "message": "YAP completo: agenda, note, ODL, materiali e ricambi verificati.",
+                    "present": [{"field": "agenda.cosa", "label": "Cosa", "expected": "YAPTEST01", "found": "YAPTEST01"}],
+                    "missing": [],
+                    "mismatch": [],
+                }
             return {
                 "result": {
                     "saved": True,
@@ -189,18 +197,18 @@ class TestYapSyncEndpoints:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["status"] == "agenda_synced"
-        assert data["message"] == "Agenda sincronizzata. ODL/materiali/ricambi pianificati."
-        assert data["syncScope"]["mode"] == "agenda_only"
-        assert data["practice"]["management_sync_status"] == "agenda_synced"
-        assert data["audit"] is None
+        assert data["status"] == "complete_synced"
+        assert "completo" in data["message"].lower()
+        assert data["practice"]["management_sync_status"] == "complete_synced"
+        assert data["practice"]["synced"] is True
+        assert data["audit"]["status"] == "complete_synced"
 
     @pytest.mark.parametrize(
         "audit_status,expected_synced",
         [
             ("complete_synced", True),
-            ("partial_synced", True),
-            ("agenda_synced", True),
+            ("partial_synced", False),
+            ("agenda_synced", False),
             ("sync_failed", False),
         ],
     )

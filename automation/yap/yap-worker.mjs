@@ -328,7 +328,7 @@ function minutesOf(time) {
 
 async function clickApproximateSlot(page, targetTime) {
   const normalizedTarget = normalizeAppointmentTime(targetTime);
-  await waitForAgendaReady(page, 12000).catch(() => {});
+  await waitForAgendaReady(page, 8000).catch(() => {});
   const candidate = await safeEvaluate(page, (requestedTime) => {
     const toMinutes = (time) => {
       const raw = String(time || "").replace(".", ":");
@@ -383,7 +383,7 @@ async function clickApproximateSlot(page, targetTime) {
         const style = window.getComputedStyle(node);
         return /^\d{2}:\d{2}$/.test((node.textContent || "").trim()) && rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
       });
-    }, null, { timeout: 10000 }).catch(() => {});
+    }, null, { timeout: 5000 }).catch(() => {});
 
     const labels = await visibleTimeLabels(page);
     if (!labels.length) {
@@ -715,7 +715,18 @@ async function runYapAutomation(job, args) {
     }
 
     await clickApproximateSlot(page, job.appointment.time);
-    await fillAppointmentPopup(page, job);
+    try {
+      await fillAppointmentPopup(page, job);
+    } catch (firstError) {
+      // Fallback rapido: in alcune sessioni il primo popup si apre incompleto.
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.waitForTimeout(180);
+      await clickApproximateSlot(page, job.appointment.time);
+      await fillAppointmentPopup(page, job);
+      if (args.debug) {
+        console.warn(`Popup refill retry riuscito: ${firstError.message}`);
+      }
+    }
 
     const suffix = `${job.practiceId || "payload"}-${Date.now()}`;
     let beforeSavePath = null;
@@ -727,7 +738,7 @@ async function runYapAutomation(job, args) {
     let putResponse = null;
     let saveAttemptsUsed = 0;
     let lastSaveError = null;
-    const maxSaveAttempts = 3;
+    const maxSaveAttempts = 2;
     for (let attempt = 1; attempt <= maxSaveAttempts; attempt += 1) {
       saveAttemptsUsed = attempt;
       try {
@@ -754,7 +765,7 @@ async function runYapAutomation(job, args) {
           if (!saved) {
             throw new Error("Bottone salva non trovato nel popup YAP");
           }
-        }, 12000 + (attempt - 1) * 4000);
+        }, 7000 + (attempt - 1) * 2500);
         if (putResponse) break;
         const stillOpenAttempt = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1200 }).catch(() => false);
         if (!stillOpenAttempt) break;
@@ -772,7 +783,7 @@ async function runYapAutomation(job, args) {
         throw new Error(`Salvataggio YAP non confermato dopo ${maxSaveAttempts} tentativi${detail}`);
       }
     }
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(240);
     let afterSavePath = null;
     if (args.debug) {
       afterSavePath = path.join(args.artifactDir, `after-save-${suffix}.png`);

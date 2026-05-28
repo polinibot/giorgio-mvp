@@ -115,8 +115,8 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
     const inferred = String(result.practice?.management_sync_status || result.yap?.status || '').trim();
     const normalizedMessage = String(message || '').toLowerCase();
     if (inferred) status = inferred;
-    else if (result.yap?.result?.saved || result.yap?.result?.mode === 'commit') status = 'agenda_synced';
-    else if (normalizedMessage.includes('agenda sincronizzata')) status = 'agenda_synced';
+    else if (result.yap?.result?.saved || result.yap?.result?.mode === 'commit') status = 'partial_synced';
+    else if (normalizedMessage.includes('agenda sincronizzata')) status = 'partial_synced';
     else if (normalizedMessage.includes('appuntamento eliminato')) status = 'deleted';
     else if (normalizedMessage.includes('fallita') || normalizedMessage.includes('errore')) status = 'sync_failed';
   }
@@ -145,28 +145,11 @@ function isAgendaOnlyYapSync(result) {
   return scope.mode === 'agenda_only' || scope.complete === false || scope.partial === true || scope.full === false;
 }
 
-function formatYapSyncScopeSummary(result) {
-  const scope = getYapSyncScope(result);
-  if (!scope) return '';
-  if (scope.summary) return scope.summary;
-
-  const agenda = scope.agenda?.written || scope.written?.agenda || [];
-  const contexts = scope.agenda?.used_contexts || scope.usedContexts || scope.contexts || [];
-  const odl = scope.odl?.planned || scope.planned?.odl || [];
-  const parts = [];
-
-  if (agenda.length) parts.push(`Agenda: ${agenda.join(', ')}`);
-  if (contexts.length) parts.push(`Contesti: ${contexts.join(', ')}`);
-  if (odl.length) parts.push(`ODL pianificati: ${odl.join(', ')}`);
-
-  return parts.join(' | ');
-}
-
 function formatYapPracticeStatus(practice) {
   const status = String(practice?.management_sync_status || '').trim();
   if (status === 'complete_synced') return 'Completa';
   if (status === 'partial_synced') return 'Parziale';
-  if (status === 'agenda_synced') return 'Agenda verificata';
+  if (status === 'agenda_synced') return 'Parziale (solo agenda)';
   if (status === 'sync_failed') return 'Sync YAP fallita';
   if (status === 'deleted') return 'Appuntamento eliminato da YAP';
   if (status === 'blocked_by_odl') return 'Eliminazione bloccata da ODL';
@@ -1316,6 +1299,14 @@ function App() {
     }
   }, [stopYapActionProgressTimers]);
 
+  const updateYapActionProgress = useCallback((patch) => {
+    setYapActionProgress((current) => (current ? { ...current, ...patch } : current));
+  }, []);
+
+  const normalizeYapOutcome = useCallback((rawResult, options = {}) => (
+    normalizeYapResult(rawResult, options)
+  ), []);
+
   const watchedValues = watch();
 
   const clearDraft = useCallback(() => {
@@ -1961,24 +1952,30 @@ function App() {
     }
     if (!silent) {
       startYapActionProgress('sync', id, 'Sincronizzazione YAP in corso...');
+      updateYapActionProgress({ percent: 12, label: 'Precheck e avvio sincronizzazione YAP...' });
     }
     setYapSyncLoading(true);
     setYapLastResult(null);
     setYapLastPracticeId(id);
     try {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
+      if (!silent) {
+        updateYapActionProgress({ percent: 30, label: 'Scrittura agenda/pratica su YAP...' });
+      }
       const res = await fetchWithRetry(() =>
         axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
       );
-      const data = normalizeYapResult(res.data?.data || {}, { dryRun: Boolean(apiOptions.dry_run) });
+      const data = normalizeYapOutcome(res.data?.data || {}, { dryRun: Boolean(apiOptions.dry_run) });
       setYapLastResult(data);
       rememberResponse('yap.sync');
+      if (!silent) {
+        updateYapActionProgress({ percent: 86, label: 'Verifica finale YAP completata, chiusura...' });
+      }
       if (['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(data.status)) {
-        const scopeSummary = formatYapSyncScopeSummary(data);
         if (!silent) {
           addToast(data.status === 'duplicate'
-            ? (scopeSummary || 'Agenda già presente in YAP: nessuna modifica necessaria')
-            : (data.message || scopeSummary || 'Verifica YAP completata'),
+            ? (data.message || 'Agenda già presente in YAP: nessuna modifica necessaria')
+            : (data.message || 'Verifica YAP completata'),
             data.status === 'complete_synced' ? 'success' : 'warning');
         }
         loadDetail(id);
@@ -1990,9 +1987,8 @@ function App() {
         if (!silent) addToast(data.message || `Sync YAP: ${data.status}`, 'info');
       }
       if (!silent) {
-        const progressLabel = data.message
-          || (data.status === 'agenda_synced' ? 'Agenda sincronizzata.' : 'Sync YAP completata.');
-        const progressStatus = ['sync_failed', 'not_ready'].includes(data.status) ? 'error' : 'success';
+        const progressLabel = data.message || 'Sync YAP completata.';
+        const progressStatus = data.status === 'sync_failed' ? 'error' : 'success';
         finishYapActionProgress(progressLabel, progressStatus, progressStatus === 'error' ? 0 : 1200);
       }
       return data;
@@ -2011,7 +2007,7 @@ function App() {
     } finally {
       setYapSyncLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome]);
 
   const deleteYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -2021,15 +2017,17 @@ function App() {
       return { status: 'deleted', simulated: true };
     }
     startYapActionProgress('delete', id, 'Eliminazione appuntamento YAP in corso...');
+    updateYapActionProgress({ percent: 14, label: 'Ricerca appuntamento su YAP...' });
     setYapDeleteLoading(true);
     setYapLastResult(null);
     setYapLastPracticeId(id);
     try {
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders() });
+      updateYapActionProgress({ percent: 42, label: 'Eliminazione in corso su YAP...' });
       const res = await fetchWithRetry(() =>
         axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: options, params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
       );
-      const data = normalizeYapResult(res.data?.data || {});
+      const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
       if (data.status === 'deleted') {
@@ -2061,7 +2059,7 @@ function App() {
     } finally {
       setYapDeleteLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome]);
 
   const auditYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -2083,7 +2081,7 @@ function App() {
       const res = await fetchWithRetry(() =>
         axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
       );
-      const data = normalizeYapResult(res.data?.data || {});
+      const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.audit');
       const tone = data.status === 'complete_synced' ? 'success' : (data.status === 'sync_failed' ? 'error' : 'warning');
@@ -2104,7 +2102,7 @@ function App() {
     } finally {
       setYapAuditLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapOutcome]);
 
   const renderYapResultBanner = (result, { practiceId = null, showRetry = false, showDelete = false } = {}) => {
     if (!result) return null;
@@ -2114,14 +2112,13 @@ function App() {
       result.yap?.status,
     ].find((value) => String(value || '').trim().length > 0);
     let status = String(statusCandidate || 'unknown').trim();
-    const scopeSummary = formatYapSyncScopeSummary(result);
     const agendaOnly = isAgendaOnlyYapSync(result);
     const audit = getYapAuditResult(result);
     const titleMap = {
       complete_synced: 'YAP completo',
       partial_synced: 'YAP parziale',
-      agenda_synced: 'Agenda verificata',
-      synced: agendaOnly ? 'Agenda sincronizzata' : 'Sync YAP completata',
+      agenda_synced: 'YAP parziale',
+      synced: agendaOnly ? 'YAP parziale' : 'Sync YAP completata',
       duplicate: 'Duplicato rilevato',
       dry_run: 'Dry-run YAP completato',
       not_ready: 'Pratica non pronta',
@@ -2134,7 +2131,6 @@ function App() {
     const message = result.message
       || result.yap?.result?.message
       || result.yap?.message
-      || ((status === 'synced' || status === 'duplicate') && scopeSummary ? scopeSummary : '')
       || (status === 'deleted' ? 'Appuntamento eliminato da YAP.' : '')
       || '';
     if (status === 'unknown') {
@@ -2143,7 +2139,7 @@ function App() {
       if (normalizedMessage.includes('appuntamento eliminato')) status = 'deleted';
       if (normalizedMessage.includes('fallita') || normalizedMessage.includes('errore')) status = 'sync_failed';
     }
-    const isSuccess = status === 'complete_synced' || status === 'deleted' || status === 'duplicate';
+    const isSuccess = status === 'complete_synced' || status === 'deleted';
     const isWarning = ['partial_synced', 'agenda_synced', 'synced', 'not_ready', 'blocked_by_odl', 'dry_run'].includes(status);
     const toneClass = isSuccess ? 'yap-success' : (isWarning ? 'yap-warning' : 'yap-error');
     const meta = [];
@@ -2152,13 +2148,10 @@ function App() {
     if (result.screenshot) meta.push('Screenshot salvato');
     if (result.duplicate) meta.push('Dedup attivo');
     if (audit) meta.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
-    const normalizedMessage = String(message || '').toLowerCase();
-    const normalizedScopeSummary = String(scopeSummary || '').toLowerCase();
-    if (scopeSummary && normalizedScopeSummary && !normalizedMessage.includes(normalizedScopeSummary)) meta.push(scopeSummary);
     const resolvedPracticeId = practiceId || yapLastPracticeId;
-    const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate'].includes(status);
+    const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
-    const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready'].includes(status);
+    const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
 
     return (
       <div className={`yap-result-banner ${toneClass}`}>
@@ -3040,6 +3033,8 @@ function App() {
         const responseData = response.data.data || {};
         const practiceId = responseData.id || (practice && practice.id);
 
+        // Evita la ricreazione automatica della bozza mentre la sync è ancora in corso.
+        setSuccessDone(true);
         clearDraft();
         updateSaveProgress({
           label: formPhotos.length > 0 ? `Caricamento ${formPhotos.length} foto...` : 'Preparazione sincronizzazione YAP...',
@@ -3066,11 +3061,10 @@ function App() {
           void (async () => {
             const syncResult = await syncToYap(practiceId, { dry_run: false, silent: true });
             const actionLabel = practice ? 'aggiornata' : 'creata';
-            const scopeSummary = formatYapSyncScopeSummary(syncResult);
             const finalMessage = syncResult.status === 'complete_synced'
               ? `Pratica ${actionLabel}. YAP completo verificato.`
               : ['partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(syncResult.status)
-                ? `Pratica ${actionLabel}. ${syncResult.message || scopeSummary || 'YAP verificato parzialmente.'}`
+                ? `Pratica ${actionLabel}. ${syncResult.message || 'YAP verificato parzialmente.'}`
               : syncResult.status === 'dry_run'
                 ? `Pratica ${actionLabel}. Dry-run YAP completato.`
                 : syncResult.status === 'not_ready'

@@ -850,7 +850,8 @@ def _persist_yap_audit_result(
     practice.management_sync_status = status_value
     practice.management_last_sync_at = datetime.now(timezone.utc)
     practice.management_audit_result = _json.dumps(audit_result, ensure_ascii=False)
-    practice.synced = status_value in {"complete_synced", "partial_synced", "agenda_synced"}
+    # Solo complete_synced è considerato successo pieno.
+    practice.synced = status_value == "complete_synced"
     practice.updated_by_telegram_id = user_id
     db.commit()
     return status_value
@@ -1395,6 +1396,8 @@ async def delete_practice(
 
     management_status = str(getattr(practice, "management_sync_status", "") or "").strip()
     needs_yap_delete = bool(
+        getattr(practice, "management_external_id", None)
+        or
         getattr(practice, "synced", False)
         or management_status in {"synced", "duplicate", "agenda_synced", "partial_synced", "complete_synced"}
     )
@@ -1590,7 +1593,6 @@ async def sync_practice_to_yap(
             mapped.setdefault("agenda", {})["ora"] = _normalize_slot_time(body.time)
         if body.duration:
             mapped.setdefault("agenda", {})["durata_minuti"] = body.duration
-        sync_scope = _build_yap_sync_scope(mapped)
 
         artifacts = os.path.join(_project_root(), "automation", "artifacts", "yap", "payloads")
         os.makedirs(artifacts, exist_ok=True)
@@ -1606,58 +1608,59 @@ async def sync_practice_to_yap(
         if body.fresh_login:
             args.append("--fresh-login")
 
-        result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=420, db=db)
+        # Budget hardening: timeout contenuto per evitare attese eccessive lato UI.
+        result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=150, db=db)
         result_data = result.get("result") or {}
         saved = bool(result_data.get("saved"))
         duplicate = result_data.get("mode") == "commit-blocked-duplicate"
-        response_status = "agenda_synced" if saved else ("duplicate" if duplicate else "dry_run")
-        response_message = sync_scope["summary"] if (saved or duplicate) else (result_data.get("message") or result.get("message") or "Dry-run YAP completato: nessuna modifica eseguita.")
+        response_status = "dry_run"
+        response_message = result_data.get("message") or result.get("message") or "Dry-run YAP completato: nessuna modifica eseguita."
         audit_result = None
 
-        if not body.dry_run and (saved or duplicate):
+        if body.dry_run:
+            response_status = "dry_run"
+        elif saved or duplicate:
             external_id = result_data.get("externalId") or result_data.get("external_id")
             if external_id:
                 practice.management_external_id = str(external_id)
-            practice.synced = True
-            practice.management_sync_status = "agenda_synced"
-            practice.management_last_sync_at = datetime.now(timezone.utc)
-            practice.updated_by_telegram_id = user_data["id"]
-            db.commit()
-
-            should_auto_audit = str(os.getenv("YAP_AUTO_AUDIT_ON_SYNC", "")).strip().lower() in {"1", "true", "yes", "on"}
-            if should_auto_audit:
-                audit_args = ["--payload-file", tmp_path, "--quick"]
-                if body.debug:
-                    audit_args.append("--debug")
-                if body.fresh_login:
-                    audit_args.append("--fresh-login")
-                try:
-                    audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=120, db=db)
-                    response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
-                    response_message = _audit_message_for_status(response_status, audit_result)
-                except HTTPException as audit_exc:
-                    logger.warning("Audit auto-sync non riuscito per pratica %d: %s", practice_id, audit_exc.detail)
-                    audit_result = {
-                        "ok": False,
-                        "status": "agenda_synced",
-                        "message": "Agenda salvata, verifica completa non disponibile ora.",
-                        "error": audit_exc.detail,
-                    }
-                    response_status = "agenda_synced"
-                    response_message = "Agenda sincronizzata. Verifica completa disponibile dal pulsante Verifica YAP."
-        elif not body.dry_run:
+            # Stato finale deciso solo dall'audit.
             practice.synced = False
             practice.management_sync_status = "sync_failed"
             practice.management_last_sync_at = datetime.now(timezone.utc)
             practice.updated_by_telegram_id = user_data["id"]
             db.commit()
 
+            audit_args = ["--payload-file", tmp_path]
+            if body.debug:
+                audit_args.append("--debug")
+            if body.fresh_login:
+                audit_args.append("--fresh-login")
+            try:
+                audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=150, db=db)
+            except HTTPException as audit_exc:
+                logger.warning("Audit post-sync non riuscito per pratica %d: %s", practice_id, audit_exc.detail)
+                audit_result = {
+                    "ok": False,
+                    "status": "sync_failed",
+                    "message": "Audit YAP non completato.",
+                    "error": audit_exc.detail,
+                }
+            response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
+            response_message = _audit_message_for_status(response_status, audit_result)
+        else:
+            practice.synced = False
+            practice.management_sync_status = "sync_failed"
+            practice.management_last_sync_at = datetime.now(timezone.utc)
+            practice.updated_by_telegram_id = user_data["id"]
+            db.commit()
+            response_status = "sync_failed"
+            response_message = result_data.get("message") or result.get("message") or "Sync YAP non riuscita."
+
         return APIResponse(
             success=True,
             data={
                 "status": response_status,
                 "message": response_message,
-                "syncScope": sync_scope,
                 "audit": audit_result,
                 "preSync": check,
                 "yap": result,
@@ -1667,7 +1670,6 @@ async def sync_practice_to_yap(
                     "management_sync_status": practice.management_sync_status,
                     "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
                     "management_external_id": practice.management_external_id,
-                    "management_sync_scope": sync_scope,
                     "management_audit_result": audit_result,
                 },
             },
