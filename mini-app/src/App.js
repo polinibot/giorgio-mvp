@@ -124,6 +124,10 @@ function getYapSyncScope(result) {
   return result?.syncScope || result?.practice?.management_sync_scope || null;
 }
 
+function getYapAuditResult(resultOrPractice) {
+  return resultOrPractice?.audit || resultOrPractice?.management_audit_result || resultOrPractice?.practice?.management_audit_result || null;
+}
+
 function isAgendaOnlyYapSync(result) {
   const scope = getYapSyncScope(result);
   if (!scope) return false;
@@ -149,7 +153,9 @@ function formatYapSyncScopeSummary(result) {
 
 function formatYapPracticeStatus(practice) {
   const status = String(practice?.management_sync_status || '').trim();
-  if (status === 'agenda_synced') return 'Agenda sincronizzata';
+  if (status === 'complete_synced') return 'Completa';
+  if (status === 'partial_synced') return 'Parziale';
+  if (status === 'agenda_synced') return 'Agenda verificata';
   if (status === 'sync_failed') return 'Sync YAP fallita';
   if (status === 'deleted') return 'Appuntamento eliminato da YAP';
   if (status === 'blocked_by_odl') return 'Eliminazione bloccata da ODL';
@@ -1740,6 +1746,7 @@ function App() {
   // --- YAP Automation ---
   const [yapSyncLoading, setYapSyncLoading] = useState(false);
   const [yapDeleteLoading, setYapDeleteLoading] = useState(false);
+  const [yapAuditLoading, setYapAuditLoading] = useState(false);
   const [yapLastResult, setYapLastResult] = useState(null);
 
   const syncToYap = useCallback(async (id, options = {}) => {
@@ -1763,12 +1770,13 @@ function App() {
       const data = normalizeYapResult(res.data?.data || {}, { dryRun: Boolean(apiOptions.dry_run) });
       setYapLastResult(data);
       rememberResponse('yap.sync');
-      if (data.status === 'synced' || data.status === 'duplicate') {
+      if (['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(data.status)) {
         const scopeSummary = formatYapSyncScopeSummary(data);
         if (!silent) {
           addToast(data.status === 'duplicate'
             ? (scopeSummary || 'Agenda già presente in YAP: nessuna modifica necessaria')
-            : (scopeSummary || 'Agenda sincronizzata con YAP'), 'success');
+            : (data.message || scopeSummary || 'Verifica YAP completata'),
+            data.status === 'complete_synced' ? 'success' : 'warning');
         }
         loadDetail(id);
       } else if (data.status === 'dry_run') {
@@ -1838,15 +1846,62 @@ function App() {
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
 
+  const auditYapAppointment = useCallback(async (id, options = {}) => {
+    if (browserPreviewMode) {
+      const simulated = {
+        status: 'partial_synced',
+        message: 'Anteprima: agenda verificata, ODL/materiali/ricambi non controllati.',
+        audit: { present: [], missing: [], mismatch: [] },
+      };
+      addToast(simulated.message, 'warning');
+      setYapLastPracticeId(id);
+      setYapLastResult(simulated);
+      return simulated;
+    }
+    setYapAuditLoading(true);
+    setYapLastResult(null);
+    setYapLastPracticeId(id);
+    try {
+      rememberRequest('yap.audit', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/audit`, params: getAuthParams(), headers: getHeaders() });
+      const res = await fetchWithRetry(() =>
+        axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
+      );
+      const data = normalizeYapResult(res.data?.data || {});
+      setYapLastResult(data);
+      rememberResponse('yap.audit');
+      const tone = data.status === 'complete_synced' ? 'success' : (data.status === 'sync_failed' ? 'error' : 'warning');
+      addToast(data.message || 'Controllo YAP completato', tone);
+      loadDetail(id);
+      return data;
+    } catch (err) {
+      rememberError('yap.audit', err);
+      const errorResult = {
+        status: 'sync_failed',
+        message: classifyError(err),
+        retryable: true,
+        error: err?.response?.data?.detail || err?.response?.data || err?.message || 'audit_failed',
+      };
+      setYapLastResult(errorResult);
+      addToast(errorResult.message, 'error');
+      return errorResult;
+    } finally {
+      setYapAuditLoading(false);
+    }
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail]);
+
   const renderYapResultBanner = (result, { practiceId = null, showRetry = false, showDelete = false } = {}) => {
     if (!result) return null;
     const status = String(result.status || 'unknown');
-    const isSuccess = status === 'synced' || status === 'deleted' || status === 'duplicate';
-    const isWarning = status === 'not_ready' || status === 'blocked_by_odl' || status === 'dry_run';
+    const isSuccess = status === 'complete_synced' || status === 'deleted' || status === 'duplicate';
+    const isWarning = ['partial_synced', 'agenda_synced', 'synced', 'not_ready', 'blocked_by_odl', 'dry_run'].includes(status);
     const toneClass = isSuccess ? 'yap-success' : (isWarning ? 'yap-warning' : 'yap-error');
     const scopeSummary = formatYapSyncScopeSummary(result);
     const agendaOnly = isAgendaOnlyYapSync(result);
+    const audit = getYapAuditResult(result);
     const titleMap = {
+      complete_synced: 'YAP completo',
+      partial_synced: 'YAP parziale',
+      agenda_synced: 'Agenda verificata',
       synced: agendaOnly ? 'Agenda sincronizzata' : 'Sync YAP completata',
       duplicate: 'Duplicato rilevato',
       dry_run: 'Dry-run YAP completato',
@@ -1868,10 +1923,12 @@ function App() {
     if (result.yap?.result?.telemetry?.saveAttempts) meta.push(`${result.yap.result.telemetry.saveAttempts} tentativi`);
     if (result.screenshot) meta.push('Screenshot salvato');
     if (result.duplicate) meta.push('Dedup attivo');
+    if (audit) meta.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
     if (scopeSummary && message !== scopeSummary) meta.push(scopeSummary);
     const resolvedPracticeId = practiceId || yapLastPracticeId;
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate'].includes(status);
-    const canDelete = showDelete && resolvedPracticeId && ['synced', 'duplicate', 'dry_run', 'not_ready'].includes(status);
+    const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
+    const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready'].includes(status);
 
     return (
       <div className={`yap-result-banner ${toneClass}`}>
@@ -1882,7 +1939,7 @@ function App() {
             {meta.length > 0 && <div className="yap-result-meta">{meta.join(' • ')}</div>}
           </div>
         </div>
-        {(canRetry || canDelete) && (
+        {(canRetry || canAudit || canDelete) && (
           <div className="yap-result-actions">
             {canRetry && (
               <button
@@ -1892,6 +1949,16 @@ function App() {
                 disabled={yapSyncLoading}
               >
                 Riprova sync
+              </button>
+            )}
+            {canAudit && (
+              <button
+                type="button"
+                className="yap-result-action"
+                onClick={() => auditYapAppointment(resolvedPracticeId, { debug: false })}
+                disabled={yapAuditLoading}
+              >
+                {yapAuditLoading ? 'Verifica...' : 'Verifica YAP'}
               </button>
             )}
             {canDelete && (
@@ -1906,6 +1973,48 @@ function App() {
             )}
           </div>
         )}
+      </div>
+    );
+  };
+
+  const renderYapAuditReport = (audit) => {
+    if (!audit) return null;
+    const groups = [
+      { key: 'present', title: 'Presenti', items: audit.present || [] },
+      { key: 'missing', title: 'Mancanti', items: audit.missing || [] },
+      { key: 'mismatch', title: 'Diversi', items: audit.mismatch || [] },
+    ];
+
+    return (
+      <div className="section yap-audit-section">
+        <div className="section-title-row">
+          <h2>Controllo YAP</h2>
+          <span className={`yap-audit-status yap-audit-status-${audit.status || 'unknown'}`}>
+            {formatYapPracticeStatus({ management_sync_status: audit.status })}
+          </span>
+        </div>
+        {audit.message && <div className="yap-audit-message">{audit.message}</div>}
+        <div className="yap-audit-grid">
+          {groups.map(group => (
+            <div key={group.key} className={`yap-audit-card yap-audit-${group.key}`}>
+              <div className="yap-audit-card-title">{group.title} ({group.items.length})</div>
+              {group.items.length > 0 ? (
+                <ul className="yap-audit-list">
+                  {group.items.slice(0, 8).map((item, index) => (
+                    <li key={`${group.key}-${item.field || index}`}>
+                      <span>{item.label || item.field}</span>
+                      {item.expected != null && <small>atteso: {String(item.expected)}</small>}
+                      {item.found && group.key === 'mismatch' && <small>trovato: {String(item.found).slice(0, 120)}</small>}
+                    </li>
+                  ))}
+                  {group.items.length > 8 && <li className="yap-audit-more">+{group.items.length - 8} altri campi</li>}
+                </ul>
+              ) : (
+                <div className="yap-audit-empty">Nessun campo</div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
     );
   };
@@ -2728,8 +2837,10 @@ function App() {
             const syncResult = await syncToYap(practiceId, { dry_run: false, silent: true });
             const actionLabel = practice ? 'aggiornata' : 'creata';
             const scopeSummary = formatYapSyncScopeSummary(syncResult);
-            const finalMessage = syncResult.status === 'synced' || syncResult.status === 'duplicate'
-              ? `Pratica ${actionLabel}. ${scopeSummary || 'Agenda sincronizzata con YAP.'}`
+            const finalMessage = syncResult.status === 'complete_synced'
+              ? `Pratica ${actionLabel}. YAP completo verificato.`
+              : ['partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(syncResult.status)
+                ? `Pratica ${actionLabel}. ${syncResult.message || scopeSummary || 'YAP verificato parzialmente.'}`
               : syncResult.status === 'dry_run'
                 ? `Pratica ${actionLabel}. Dry-run YAP completato.`
                 : syncResult.status === 'not_ready'
@@ -2750,7 +2861,7 @@ function App() {
             }
             const toastTone = syncResult.status === 'sync_failed'
               ? 'error'
-              : (syncResult.status === 'not_ready' || syncResult.status === 'dry_run' ? 'warning' : 'success');
+              : (['partial_synced', 'agenda_synced', 'not_ready', 'dry_run'].includes(syncResult.status) ? 'warning' : 'success');
             addToast(finalMessage, toastTone);
           })();
         }
@@ -3067,9 +3178,7 @@ function App() {
                   <span className="practice-plate">{p.plate || '—'}</span>
                   <span className={`sync-pill ${p.synced ? 'sync-pill-green' : 'sync-pill-red'}`}>
                     <span className={`sync-dot ${p.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
-                    {p.management_sync_status === 'agenda_synced'
-                      ? 'Agenda sincronizzata'
-                      : (p.synced ? 'Sincronizzata' : 'Da sincronizzare')}
+                    {formatYapPracticeStatus(p) === 'Non sincronizzata' ? 'Da sincronizzare' : formatYapPracticeStatus(p)}
                   </span>
                 </div>
                 <div className="practice-card-customer-row">
@@ -3198,6 +3307,8 @@ function App() {
 
           {yapLastPracticeId === practice.id && renderYapResultBanner(yapLastResult, { practiceId: practice.id, showRetry: true, showDelete: true })}
 
+          {renderYapAuditReport(getYapAuditResult(yapLastPracticeId === practice.id ? yapLastResult : null) || practice.management_audit_result)}
+
           {!browserPreviewMode && renderYapPreviewPanel(yapPreview, yapPreviewLoading)}
 
           {/* YAP Automation Controls */}
@@ -3212,6 +3323,14 @@ function App() {
                   disabled={yapSyncLoading}
                 >
                   {yapSyncLoading ? 'Sincronizzazione...' : 'Sincronizza con YAP'}
+                </button>
+                <button
+                  type="button"
+                  className="yap-control-button"
+                  onClick={() => auditYapAppointment(practice.id, { debug: false })}
+                  disabled={yapAuditLoading}
+                >
+                  {yapAuditLoading ? 'Verifica...' : 'Verifica YAP'}
                 </button>
                 <button
                   type="button"

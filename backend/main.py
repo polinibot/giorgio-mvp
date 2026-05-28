@@ -156,6 +156,11 @@ def serialize(obj) -> dict:
                 result[k] = [v]
         elif k == "contexts" and isinstance(v, str):
             result[k] = [c.strip() for c in v.split(",") if c.strip()]
+        elif k == "management_audit_result" and isinstance(v, str):
+            try:
+                result[k] = _json.loads(v)
+            except Exception:
+                result[k] = v
         elif isinstance(v, bool):
             result[k] = v
         else:
@@ -399,6 +404,15 @@ class YapDeleteAppointmentRequest(BaseModel):
     dry_run: bool = False
     debug: bool = False
     fresh_login: bool = False
+
+
+class YapAuditRequest(BaseModel):
+    date: Optional[str] = None
+    time: Optional[str] = None
+    duration: Optional[int] = None
+    debug: bool = False
+    fresh_login: bool = False
+    persist: bool = True
 
 
 class YapErrorNotificationRequest(BaseModel):
@@ -790,6 +804,48 @@ def _build_yap_sync_scope(mapped: Dict[str, Any]) -> Dict[str, Any]:
             "odlWorkerPlanned": odl_planned,
         },
     }
+
+
+def _audit_status_from_result(audit_result: Dict[str, Any]) -> str:
+    status_value = str(audit_result.get("status") or "").strip()
+    if status_value in {"complete_synced", "partial_synced", "agenda_synced", "sync_failed"}:
+        return status_value
+    missing = audit_result.get("missing") or []
+    mismatch = audit_result.get("mismatch") or []
+    present = audit_result.get("present") or []
+    if mismatch or not present:
+        return "sync_failed"
+    if missing:
+        return "partial_synced"
+    return "complete_synced"
+
+
+def _audit_message_for_status(status_value: str, audit_result: Dict[str, Any]) -> str:
+    if audit_result.get("message"):
+        return str(audit_result["message"])
+    if status_value == "complete_synced":
+        return "YAP completo: agenda, note, ODL, materiali e ricambi verificati."
+    if status_value == "partial_synced":
+        return "Agenda presente, mancano ODL/materiali/ricambi/note."
+    if status_value == "agenda_synced":
+        return "Agenda verificata."
+    return "Appuntamento YAP non verificato."
+
+
+def _persist_yap_audit_result(
+    db: Session,
+    practice: Practice,
+    audit_result: Dict[str, Any],
+    user_id: int,
+) -> str:
+    status_value = _audit_status_from_result(audit_result)
+    practice.management_sync_status = status_value
+    practice.management_last_sync_at = datetime.now(timezone.utc)
+    practice.management_audit_result = _json.dumps(audit_result, ensure_ascii=False)
+    practice.synced = status_value in {"complete_synced", "partial_synced", "agenda_synced"}
+    practice.updated_by_telegram_id = user_id
+    db.commit()
+    return status_value
 
 
 def _extract_json_blob(text: str) -> Optional[dict]:
@@ -1531,15 +1587,35 @@ async def sync_practice_to_yap(
         duplicate = result_data.get("mode") == "commit-blocked-duplicate"
         response_status = "synced" if saved else ("duplicate" if duplicate else "dry_run")
         response_message = sync_scope["summary"] if (saved or duplicate) else (result_data.get("message") or result.get("message") or "Dry-run YAP completato: nessuna modifica eseguita.")
+        audit_result = None
 
         if not body.dry_run and (saved or duplicate):
-            practice.synced = True
-            practice.management_sync_status = "agenda_synced"
-            practice.management_last_sync_at = datetime.now(timezone.utc)
-            practice.updated_by_telegram_id = user_data["id"]
             external_id = result_data.get("externalId") or result_data.get("external_id")
             if external_id:
                 practice.management_external_id = str(external_id)
+            audit_args = ["--payload-file", tmp_path]
+            if body.debug:
+                audit_args.append("--debug")
+            if body.fresh_login:
+                audit_args.append("--fresh-login")
+            try:
+                audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=240, db=db)
+            except HTTPException as audit_exc:
+                failed_audit = {
+                    "ok": False,
+                    "status": "sync_failed",
+                    "message": "Salvataggio YAP non verificato.",
+                    "error": audit_exc.detail,
+                }
+                _persist_yap_audit_result(db, practice, failed_audit, user_data["id"])
+                raise
+            response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
+            response_message = _audit_message_for_status(response_status, audit_result)
+        elif not body.dry_run:
+            practice.synced = False
+            practice.management_sync_status = "sync_failed"
+            practice.management_last_sync_at = datetime.now(timezone.utc)
+            practice.updated_by_telegram_id = user_data["id"]
             db.commit()
 
         return APIResponse(
@@ -1548,6 +1624,7 @@ async def sync_practice_to_yap(
                 "status": response_status,
                 "message": response_message,
                 "syncScope": sync_scope,
+                "audit": audit_result,
                 "preSync": check,
                 "yap": result,
                 "practice": {
@@ -1557,6 +1634,7 @@ async def sync_practice_to_yap(
                     "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
                     "management_external_id": practice.management_external_id,
                     "management_sync_scope": sync_scope,
+                    "management_audit_result": audit_result,
                 },
             },
         )
@@ -1585,6 +1663,91 @@ async def sync_practice_to_yap(
                 "error": str(e),
             },
         )
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
+@app.post("/practices/{practice_id}/yap/audit")
+@limiter.limit("20/minute")
+async def audit_practice_yap(
+    request: Request,
+    practice_id: int,
+    body: YapAuditRequest,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    practice = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_data["id"],
+        Practice.status != PracticeStatus.DELETED,
+    ).first()
+    if not practice:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
+    _ensure_yap_credentials("verificare l'appuntamento su YAP")
+
+    tmp_path = None
+    try:
+        from automation_service import AutomationService
+
+        payload = AutomationService.prepare_automation_payload(practice_id, db)
+        mapped = AutomationService.map_payload_to_management(payload)
+        if body.date:
+            mapped.setdefault("agenda", {})["data"] = body.date
+        if body.time:
+            mapped.setdefault("agenda", {})["ora"] = _normalize_slot_time(body.time)
+        if body.duration:
+            mapped.setdefault("agenda", {})["durata_minuti"] = body.duration
+
+        artifacts = os.path.join(_project_root(), "automation", "artifacts", "yap", "payloads")
+        os.makedirs(artifacts, exist_ok=True)
+        tmp_path = os.path.join(artifacts, f"practice-{practice_id}-audit-{uuid.uuid4().hex}.json")
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            _json.dump({"mapping": mapped}, fh, ensure_ascii=False)
+
+        args = ["--payload-file", tmp_path]
+        if body.debug:
+            args.append("--debug")
+        if body.fresh_login:
+            args.append("--fresh-login")
+
+        audit_result = await _run_yap_script("yap-audit-appointment.mjs", args, timeout_seconds=240, db=db)
+        audit_status = _audit_status_from_result(audit_result)
+        if body.persist:
+            audit_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
+
+        return APIResponse(
+            success=True,
+            data={
+                "status": audit_status,
+                "message": _audit_message_for_status(audit_status, audit_result),
+                "audit": audit_result,
+                "practice": {
+                    "id": practice.id,
+                    "synced": practice.synced,
+                    "management_sync_status": practice.management_sync_status,
+                    "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
+                    "management_external_id": practice.management_external_id,
+                    "management_audit_result": audit_result if body.persist else serialize(practice).get("management_audit_result"),
+                },
+            },
+        )
+    except HTTPException as exc:
+        if body.persist:
+            try:
+                failed_audit = {
+                    "ok": False,
+                    "status": "sync_failed",
+                    "message": "Audit YAP non completato.",
+                    "error": exc.detail,
+                }
+                _persist_yap_audit_result(db, practice, failed_audit, user_data["id"])
+            except Exception:
+                db.rollback()
+        raise
     finally:
         if tmp_path:
             try:
@@ -1629,6 +1792,7 @@ async def delete_practice_yap_appointment(
         practice.synced = False
         practice.management_sync_status = "deleted"
         practice.management_last_sync_at = datetime.now(timezone.utc)
+        practice.management_audit_result = None
         practice.updated_by_telegram_id = user_data["id"]
         db.commit()
     return APIResponse(

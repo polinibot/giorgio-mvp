@@ -185,6 +185,7 @@ class Practice(BaseModel):
     management_external_id: Optional[str] = None
     management_sync_status: Optional[str] = None
     management_last_sync_at: Optional[datetime] = None
+    management_audit_result: Optional[Dict[str, Any]] = None
     photos: List[PracticePhoto] = []
     sections: List[PracticeSection] = []
     parts: List[PracticePart] = []

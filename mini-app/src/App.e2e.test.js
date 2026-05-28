@@ -181,8 +181,8 @@ const DEFAULT_YAP_SYNC_RESPONSE = {
   data: {
     success: true,
     data: {
-      status: 'synced',
-      message: 'Agenda sincronizzata. ODL/materiali/ricambi pianificati.',
+      status: 'partial_synced',
+      message: 'Agenda presente, mancano ODL/materiali/ricambi/note.',
       syncScope: {
         mode: 'agenda_only',
         complete: false,
@@ -196,6 +196,13 @@ const DEFAULT_YAP_SYNC_RESPONSE = {
           planned: ['MAN', 'MAC', 'Materiali', 'Ricambi', 'Smaltimento'],
         },
       },
+      audit: {
+        status: 'partial_synced',
+        message: 'Agenda presente, mancano ODL/materiali/ricambi/note.',
+        present: [{ field: 'agenda.cosa', label: 'Cosa', expected: 'TEST123', found: 'TEST123' }],
+        missing: [{ field: 'odl.officina.man', label: 'MAN officina', expected: 'MAN 1', found: null }],
+        mismatch: [],
+      },
       preSync: { ready: true, score: 100, issues: [] },
       yap: {
         result: {
@@ -208,7 +215,7 @@ const DEFAULT_YAP_SYNC_RESPONSE = {
       },
       practice: {
         synced: true,
-        management_sync_status: 'agenda_synced',
+        management_sync_status: 'partial_synced',
         management_last_sync_at: '2026-11-15T10:05:00.000Z',
         management_external_id: null,
         management_sync_scope: {
@@ -216,6 +223,30 @@ const DEFAULT_YAP_SYNC_RESPONSE = {
           complete: false,
           summary: 'Agenda sincronizzata. ODL/materiali/ricambi pianificati.',
         },
+        management_audit_result: {
+          status: 'partial_synced',
+          message: 'Agenda presente, mancano ODL/materiali/ricambi/note.',
+          present: [{ field: 'agenda.cosa', label: 'Cosa', expected: 'TEST123', found: 'TEST123' }],
+          missing: [{ field: 'odl.officina.man', label: 'MAN officina', expected: 'MAN 1', found: null }],
+          mismatch: [],
+        },
+      },
+    },
+  },
+};
+
+const DEFAULT_YAP_AUDIT_RESPONSE = {
+  data: {
+    success: true,
+    data: {
+      status: 'partial_synced',
+      message: 'Agenda presente, mancano ODL/materiali/ricambi/note.',
+      audit: {
+        status: 'partial_synced',
+        message: 'Agenda presente, mancano ODL/materiali/ricambi/note.',
+        present: [{ field: 'agenda.cosa', label: 'Cosa', expected: 'TEST123', found: 'TEST123' }],
+        missing: [{ field: 'odl.officina.man', label: 'MAN officina', expected: 'MAN 1', found: null }],
+        mismatch: [],
       },
     },
   },
@@ -246,6 +277,9 @@ beforeEach(() => {
   axios.post.mockImplementation((url) => {
     if (String(url).includes('/yap/sync')) {
       return Promise.resolve(DEFAULT_YAP_SYNC_RESPONSE);
+    }
+    if (String(url).includes('/yap/audit')) {
+      return Promise.resolve(DEFAULT_YAP_AUDIT_RESPONSE);
     }
     if (String(url).includes('/yap/notify-error')) {
       return Promise.resolve({ data: { success: true, data: { notified: true } } });

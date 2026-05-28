@@ -1101,6 +1101,118 @@ h2 {
   cursor: not-allowed;
 }
 
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.section-title-row h2 {
+  margin: 0;
+}
+
+.yap-audit-section {
+  border-color: rgba(251, 191, 36, 0.24);
+}
+
+.yap-audit-status {
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.yap-audit-status-complete_synced {
+  color: #86efac;
+  background: var(--success-bg);
+  border-color: rgba(52, 211, 153, 0.28);
+}
+
+.yap-audit-status-partial_synced,
+.yap-audit-status-agenda_synced {
+  color: #fcd34d;
+  background: var(--warning-bg);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+.yap-audit-status-sync_failed {
+  color: #fecaca;
+  background: var(--error-bg);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.yap-audit-message {
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.yap-audit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.yap-audit-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  min-width: 0;
+}
+
+.yap-audit-card-title {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.yap-audit-present .yap-audit-card-title {
+  color: #86efac;
+}
+
+.yap-audit-missing .yap-audit-card-title,
+.yap-audit-mismatch .yap-audit-card-title {
+  color: #fcd34d;
+}
+
+.yap-audit-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.yap-audit-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.yap-audit-list small,
+.yap-audit-empty,
+.yap-audit-more {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+@media (max-width: 700px) {
+  .yap-audit-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .yap-result-action-danger {
   border-color: rgba(239, 68, 68, 0.3);
   background: rgba(239, 68, 68, 0.12);

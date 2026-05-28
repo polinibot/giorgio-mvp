@@ -54,6 +54,7 @@ class Practice(Base):
     management_external_id = Column(String(100), nullable=True)
     management_sync_status = Column(String(50), nullable=True)
     management_last_sync_at = Column(DateTime, nullable=True)
+    management_audit_result = Column(Text, nullable=True)
     synced = Column(Boolean, default=False, nullable=False)
 
     @property
@@ -179,6 +180,24 @@ def create_tables():
             conn.execute(text("ALTER TABLE practice_sections ADD COLUMN notes TEXT"))
             conn.commit()
         logger.info("Migrated: added notes column to practice_sections")
+    # Migrate: add YAP audit result column if missing
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT management_audit_result FROM practices LIMIT 1"))
+    except Exception:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE practices ADD COLUMN management_audit_result TEXT"))
+            conn.commit()
+        logger.info("Migrated: added management_audit_result column to practices")
+
+    if "postgresql" in DATABASE_URL:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE practices ADD COLUMN IF NOT EXISTS management_audit_result TEXT"))
+                conn.commit()
+        except Exception as e:
+            logger.warning("Postgres audit-result migration failed (may already exist): %s", e)
+
     # Migrate: make plate_confirmed, phone, customer_name nullable
     try:
         if DATABASE_URL.startswith("sqlite"):
@@ -214,6 +233,7 @@ def create_tables():
                             management_external_id VARCHAR(100),
                             management_sync_status VARCHAR(50),
                             management_last_sync_at DATETIME,
+                            management_audit_result TEXT,
                             synced BOOLEAN DEFAULT 0 NOT NULL
                         )
                     """))
@@ -239,6 +259,7 @@ def create_tables():
                             management_external_id,
                             management_sync_status,
                             management_last_sync_at,
+                            management_audit_result,
                             synced
                         )
                         SELECT
@@ -262,6 +283,7 @@ def create_tables():
                             management_external_id,
                             management_sync_status,
                             management_last_sync_at,
+                            management_audit_result,
                             synced
                         FROM practices
                     """))

@@ -161,7 +161,16 @@ class TestYapSyncEndpoints:
             staticmethod(lambda payload: {"ready": True, "score": 92, "issues": [], "warnings": []}),
         )
 
-        async def fake_run_yap_script(*args, **kwargs):
+        async def fake_run_yap_script(script_name, *args, **kwargs):
+            if script_name == "yap-audit-appointment.mjs":
+                return {
+                    "ok": True,
+                    "status": "partial_synced",
+                    "message": "Agenda presente, mancano ODL/materiali/ricambi/note.",
+                    "present": [{"field": "agenda.cosa", "label": "Cosa", "expected": "YAPTEST01", "found": "YAPTEST01"}],
+                    "missing": [{"field": "odl.officina.man", "label": "MAN officina", "expected": "MAN 1", "found": None}],
+                    "mismatch": [],
+                }
             return {
                 "result": {
                     "saved": True,
@@ -182,10 +191,49 @@ class TestYapSyncEndpoints:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["status"] == "synced"
-        assert data["message"] == "Agenda sincronizzata. ODL/materiali/ricambi pianificati."
+        assert data["status"] == "partial_synced"
+        assert data["message"] == "Agenda presente, mancano ODL/materiali/ricambi/note."
         assert data["syncScope"]["mode"] == "agenda_only"
-        assert data["practice"]["management_sync_status"] == "agenda_synced"
+        assert data["practice"]["management_sync_status"] == "partial_synced"
+        assert data["audit"]["missing"][0]["field"] == "odl.officina.man"
+
+    @pytest.mark.parametrize(
+        "audit_status,expected_synced",
+        [
+            ("complete_synced", True),
+            ("partial_synced", True),
+            ("agenda_synced", True),
+            ("sync_failed", False),
+        ],
+    )
+    def test_yap_audit_persists_status(self, client, sample_practice, monkeypatch, audit_status, expected_synced):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+
+        async def fake_run_yap_script(*args, **kwargs):
+            return {
+                "ok": audit_status != "sync_failed",
+                "status": audit_status,
+                "message": f"Audit {audit_status}",
+                "present": [{"field": "agenda.cosa", "label": "Cosa", "expected": "YAPTEST01", "found": "YAPTEST01"}] if audit_status != "sync_failed" else [],
+                "missing": [{"field": "odl.officina.man", "label": "MAN officina", "expected": "MAN 1", "found": None}] if audit_status == "partial_synced" else [],
+                "mismatch": [{"field": "agenda.dalle", "label": "Dalle", "expected": "10.00", "found": "11.00"}] if audit_status == "sync_failed" else [],
+            }
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/audit?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == audit_status
+        assert data["practice"]["management_sync_status"] == audit_status
+        assert data["practice"]["synced"] is expected_synced
 
 
 class TestYapTestErrorChannel:
@@ -234,6 +282,22 @@ class TestYapPayloadStructure:
         assert request.date == "2026-11-15"
         assert request.search == "TEST01ZZ"
         assert request.dry_run is True
+
+    def test_yap_audit_request_model(self):
+        """Test che il modello YapAuditRequest sia valido."""
+        from main import YapAuditRequest
+
+        request = YapAuditRequest(
+            date="2026-11-15",
+            time="10:00",
+            duration=20,
+            debug=True,
+            persist=False,
+        )
+        assert request.date == "2026-11-15"
+        assert request.time == "10:00"
+        assert request.duration == 20
+        assert request.persist is False
 
     def test_yap_error_notification_model(self):
         """Test che il modello YapErrorNotificationRequest sia valido."""
