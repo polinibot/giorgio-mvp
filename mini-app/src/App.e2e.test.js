@@ -473,7 +473,8 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
 
     clickElement(getButton('← Indietro'));
-    await waitFor(() => document.querySelectorAll('.practice-card').length === 2);
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 3);
+    expect(document.body.textContent).toContain('Bozza locale');
   });
 
   test('editing an existing practice preserves section rows when updating notes only', async () => {

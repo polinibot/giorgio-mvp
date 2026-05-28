@@ -323,6 +323,11 @@ h2 {
   transform: translateY(0);
 }
 
+.practice-card-draft {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.08), rgba(255, 255, 255, 0.02));
+}
+
 .practice-card-header {
   display: flex;
   align-items: center;
@@ -352,6 +357,11 @@ h2 {
 .sync-dot-red {
   background: #f87171;
   box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
+.sync-dot-draft {
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.4);
 }
 
 .practice-card-customer {
@@ -423,6 +433,12 @@ h2 {
   color: #f87171;
   background: rgba(248, 113, 113, 0.12);
   border-color: rgba(248, 113, 113, 0.35);
+}
+
+.sync-pill-draft {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.35);
 }
 
 .pre-sync-pill {

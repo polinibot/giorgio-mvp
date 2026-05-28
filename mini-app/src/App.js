@@ -864,6 +864,92 @@ const filterPreviewPractices = (items, search = '', filters = {}) => {
   });
 };
 
+const getDashboardDraftCard = (search = '', filters = {}) => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const draft = JSON.parse(raw);
+    if (!draft || typeof draft !== 'object') return null;
+
+    const timestamp = Number(draft.timestamp || 0);
+    if (!timestamp || Date.now() - timestamp > 24 * 60 * 60 * 1000) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      return null;
+    }
+
+    const formData = draft.formData || {};
+    const contexts = normalizeContexts(draft.selectedContexts || formData.contexts);
+    const sections = draft.sections || {};
+    const parts = draft.parts || {};
+
+    const hasFormValue = Object.values(formData).some((value) => !isEmptyFormValue(value));
+    const hasSectionValue = Object.values(sections).some((section) => {
+      if (!section) return false;
+      return [
+        section.description_rows,
+        section.man_hours,
+        section.mac_hours,
+        section.materials_amount,
+        section.waste_apply,
+        section.waste_percentage,
+        section.notes,
+      ].some((value) => !isEmptyFormValue(value));
+    });
+    const hasPartValue = Object.values(parts).some((items) =>
+      Array.isArray(items) && items.some((item) => !isEmptyFormValue(item?.name) || !isEmptyFormValue(item?.quantity))
+    );
+
+    if (!hasFormValue && contexts.length === 0 && !hasSectionValue && !hasPartValue) return null;
+
+    const draftCard = {
+      id: 'local-draft',
+      _localDraft: true,
+      synced: false,
+      status: 'local_draft',
+      plate: formData.plate_confirmed || '',
+      plate_confirmed: formData.plate_confirmed || '',
+      customer_name: formData.customer_name || '',
+      phone: formData.phone || '',
+      practice_type: formData.practice_type || '',
+      internal_notes: formData.internal_notes || '',
+      appointment_date: formData.appointment_date || null,
+      appointment_time: formData.appointment_time || '',
+      contexts,
+      created_at: new Date(timestamp).toISOString(),
+      _sectionsForSearch: Object.values(sections || {}),
+      _partsForSearch: Object.values(parts || {}).flatMap((items) => (Array.isArray(items) ? items : [])),
+    };
+
+    if (filters.synced === true) return null;
+    if (filters.synced === false && draftCard.synced) return null;
+
+    const contextFilters = Object.entries(filters)
+      .filter(([k, v]) => v === true && k !== 'synced')
+      .map(([k]) => k);
+    if (contextFilters.length && !contextFilters.some((ctx) => draftCard.contexts.includes(ctx))) return null;
+
+    const query = (search || '').trim().toLowerCase();
+    if (!query) return draftCard;
+
+    const haystack = [
+      draftCard.plate,
+      draftCard.plate_confirmed,
+      draftCard.customer_name,
+      draftCard.phone,
+      draftCard.practice_type,
+      draftCard.internal_notes,
+      ...draftCard.contexts,
+      ...draftCard._sectionsForSearch.flatMap((s) => [s?.context, s?.notes, ...(s?.description_rows || [])]),
+      ...draftCard._partsForSearch.flatMap((part) => [part?.name, part?.quantity]),
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    return haystack.includes(query) ? draftCard : null;
+  } catch (_) {
+    return null;
+  }
+};
+
 const buildPreviewDetail = (p) => {
   const { sections = [], parts = [], photos = [], ...practice } = p;
   return { practice, sections, parts, photos };
@@ -1006,6 +1092,7 @@ function App() {
   const [practices, setPractices] = useState([]);
   const [stats, setStats] = useState({ total: 0, this_month: 0, pending_sync: 0 });
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardDraftCard, setDashboardDraftCard] = useState(null);
   const [preSyncByPractice, setPreSyncByPractice] = useState({});
   const [seedingDemoPractices, setSeedingDemoPractices] = useState(false);
   const [previewPractices, setPreviewPractices] = useState(BROWSER_PREVIEW_PRACTICES);
@@ -1211,6 +1298,7 @@ function App() {
 
   const clearDraft = useCallback(() => {
     try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+    setDashboardDraftCard(null);
   }, []);
 
   const restoreDraft = useCallback((targetPracticeId = null) => {
@@ -1391,14 +1479,16 @@ function App() {
   }, [navigationStack, currentView, persistDraft]);
 
   const openDashboard = useCallback(() => {
-    persistDraft();
+    if (currentView === 'form' && !successDone && hasMeaningfulDraft()) {
+      persistDraft();
+    }
     setCurrentView('dashboard');
     setNavigationStack([]);
     setSelectedPracticeId(null);
     setEditingPractice(null);
     setDetailData(null);
     setLoading(false);
-  }, [persistDraft]);
+  }, [persistDraft, currentView, successDone, hasMeaningfulDraft]);
 
   // --- Telegram BackButton ---
   useEffect(() => {
@@ -1488,6 +1578,10 @@ function App() {
     return params;
   }, [telegramUserId, practiceAccessToken]);
 
+  const refreshDashboardDraftCard = useCallback((search = '', filters = {}) => {
+    setDashboardDraftCard(getDashboardDraftCard(search, filters));
+  }, []);
+
   const loadPreSyncChecks = useCallback(async (practiceItems) => {
     const list = Array.isArray(practiceItems) ? practiceItems : [];
     if (!list.length) {
@@ -1521,6 +1615,7 @@ function App() {
     if (browserPreviewMode) {
       const previewItems = filterPreviewPractices(previewPractices, search, filters);
       setPractices(previewItems);
+      refreshDashboardDraftCard(search, filters);
       setStats(buildPreviewStats(previewPractices));
       setPreSyncByPractice(buildPreviewPreSyncMap(previewItems));
       rememberResponse('dashboard.preview', {
@@ -1550,16 +1645,18 @@ function App() {
 
       const practiceItems = practicesRes.data?.data || practicesRes.data || [];
       setPractices(practiceItems);
+      refreshDashboardDraftCard(search, filters);
       setStats(statsRes.data?.data || statsRes.data || { total: 0, this_month: 0, pending_sync: 0 });
       loadPreSyncChecks(practiceItems);
       rememberResponse('dashboard.list');
     } catch (err) {
       rememberError('dashboard.list', err);
       addToast(classifyError(err), 'error');
+      refreshDashboardDraftCard(search, filters);
     } finally {
       setDashboardLoading(false);
     }
-  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, loadPreSyncChecks]);
+  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, loadPreSyncChecks, refreshDashboardDraftCard]);
 
   const seedDemoPractices = useCallback(async () => {
     if (seedingDemoPractices) return;
@@ -3160,7 +3257,9 @@ function App() {
   };
 
   // --- Dashboard View ---
-  const renderDashboard = () => (
+  const renderDashboard = () => {
+    const dashboardItems = dashboardDraftCard ? [dashboardDraftCard, ...practices] : practices;
+    return (
     <div className="view-dashboard view-enter">
       <div className="container">
         <h1>🔧 Giorgio</h1>
@@ -3253,7 +3352,7 @@ function App() {
         {/* Practice list */}
         {dashboardLoading ? (
           <DashboardSkeleton />
-        ) : practices.length === 0 ? (
+        ) : dashboardItems.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📋</div>
             <h3>Nessuna pratica trovata</h3>
@@ -3261,25 +3360,26 @@ function App() {
           </div>
         ) : (
           <div className="practice-list">
-            {practices.map(p => {
+            {dashboardItems.map(p => {
+              const isLocalDraft = p._localDraft === true;
               const preSync = preSyncByPractice[p.id];
               const preSyncReady = preSync?.ready === true;
               const preSyncScore = Number.isFinite(preSync?.score) ? preSync.score : null;
               return (
               <div
                 key={p.id}
-                className="practice-card"
-                onClick={() => navigateTo('detail', { practiceId: p.id })}
+                className={`practice-card ${isLocalDraft ? 'practice-card-draft' : ''}`}
+                onClick={() => (isLocalDraft ? openNewPracticeForm() : navigateTo('detail', { practiceId: p.id }))}
               >
                 <div className="practice-card-header">
-                  <span className="practice-plate">{p.plate || '—'}</span>
-                  <span className={`sync-pill ${p.synced ? 'sync-pill-green' : 'sync-pill-red'}`}>
-                    <span className={`sync-dot ${p.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
-                    {formatYapPracticeStatus(p) === 'Non sincronizzata' ? 'Da sincronizzare' : formatYapPracticeStatus(p)}
+                  <span className="practice-plate">{p.plate || (isLocalDraft ? 'BOZZA' : '—')}</span>
+                  <span className={`sync-pill ${isLocalDraft ? 'sync-pill-draft' : (p.synced ? 'sync-pill-green' : 'sync-pill-red')}`}>
+                    <span className={`sync-dot ${isLocalDraft ? 'sync-dot-draft' : (p.synced ? 'sync-dot-green' : 'sync-dot-red')}`} />
+                    {isLocalDraft ? 'Bozza locale' : (formatYapPracticeStatus(p) === 'Non sincronizzata' ? 'Da sincronizzare' : formatYapPracticeStatus(p))}
                   </span>
                 </div>
                 <div className="practice-card-customer-row">
-                  <div className="practice-card-customer">{p.customer_name || '—'}</div>
+                  <div className="practice-card-customer">{p.customer_name || (isLocalDraft ? 'Compilazione non completata' : '—')}</div>
                   {showDeveloperUi && <div className="practice-card-id">#{p.id}</div>}
                 </div>
                 <div className="practice-card-badges">
@@ -3297,7 +3397,7 @@ function App() {
                 </div>
                 <div className="practice-card-footer">
                   <span className="practice-card-date">📅 {formatDate(p.appointment_date || p.created_at)}</span>
-                  <span className="practice-card-open">Apri dettagli →</span>
+                  <span className="practice-card-open">{isLocalDraft ? 'Riprendi bozza →' : 'Apri dettagli →'}</span>
                 </div>
               </div>
               );
@@ -3317,6 +3417,7 @@ function App() {
       </button>
     </div>
   );
+  };
 
   // --- Detail View ---
   const renderDetail = () => {
