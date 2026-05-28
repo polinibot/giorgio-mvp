@@ -1031,12 +1031,24 @@ async function runYapAutomation(job, args) {
   const username = ensureEnv("YAP_USERNAME");
   const password = ensureEnv("YAP_PASSWORD");
   await fs.mkdir(args.artifactDir, { recursive: true });
+  const safeMode = String(process.env.YAP_SAFE_MODE || "").trim() === "1";
+  const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+  if (safeMode) {
+    launchArgs.push(
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--disable-extensions",
+      "--no-zygote",
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+    );
+  }
 
   const browser = await launchChromiumWithFallback(
     chromium,
     {
       headless: !args.headed,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      args: launchArgs,
     },
     { resolveModule: requireFromMiniApp.resolve.bind(requireFromMiniApp), cwd: ROOT_DIR },
   );
@@ -1119,7 +1131,19 @@ async function runYapAutomation(job, args) {
 
     if (dedup.hit) {
       // Upsert su duplicato: apriamo l'evento esistente, riallineiamo popup/tag e continuiamo con ODL.
-      const openExisting = await clickAgendaEvent(page, [job.customer.plate, pickCosaFromJob(job), job.customer.name].filter(Boolean));
+      const dedupTitle = dedup?.event?.title || "";
+      const dedupTime = dedup?.event?.time || "";
+      const preferredTerms = [
+        job.customer.plate,
+        dedupTitle,
+        pickCosaFromJob(job),
+        job.customer.name,
+        dedupTime,
+      ].filter(Boolean);
+      let openExisting = await clickAgendaEvent(page, preferredTerms);
+      if (!openExisting?.success) {
+        openExisting = await clickAgendaEvent(page, [job.customer.plate].filter(Boolean));
+      }
       if (!openExisting?.success) {
         return {
           saved: false,

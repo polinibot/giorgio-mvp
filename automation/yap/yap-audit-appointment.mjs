@@ -415,11 +415,24 @@ async function runAudit(mapping, args) {
   const searchTerms = [plate, plan.agenda.cosa, mapping.anagrafica?.cliente_nome].filter(Boolean);
 
   await fs.mkdir(args.artifactDir, { recursive: true });
+  const safeMode = String(process.env.YAP_SAFE_MODE || "").trim() === "1";
+  const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+  if (safeMode) {
+    launchArgs.push(
+      "--disable-gpu",
+      "--disable-software-rasterizer",
+      "--disable-extensions",
+      "--no-zygote",
+      "--disable-background-networking",
+      "--disable-background-timer-throttling",
+    );
+  }
+
   const browser = await launchChromiumWithFallback(
     chromium,
     {
       headless: !args.headed,
-      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      args: launchArgs,
     },
     { resolveModule: requireFromMiniApp.resolve.bind(requireFromMiniApp), cwd: ROOT_DIR },
   );

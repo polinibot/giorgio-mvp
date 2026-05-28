@@ -863,6 +863,47 @@ def _extract_json_blob(text: str) -> Optional[dict]:
     raw = text.strip()
     if not raw:
         return None
+
+    objects: List[dict] = []
+    depth = 0
+    start_idx = -1
+    in_string = False
+    escaped = False
+    for idx, ch in enumerate(raw):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                start_idx = idx
+            depth += 1
+            continue
+        if ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start_idx >= 0:
+                    candidate = raw[start_idx:idx + 1]
+                    try:
+                        parsed = _json.loads(candidate)
+                        if isinstance(parsed, dict):
+                            objects.append(parsed)
+                    except Exception:
+                        pass
+                    start_idx = -1
+            continue
+
+    if objects:
+        return objects[-1]
+
     start = raw.find("{")
     end = raw.rfind("}")
     if start >= 0 and end >= start:
@@ -921,25 +962,31 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
         except Exception as e:
             logger.warning("Impossibile ripristinare la sessione YAP dal database: %s", e)
 
-    node_bin = os.getenv("NODE_BINARY") or (_shutil.which("node") or _shutil.which("nodejs") or "node")
-    process = await asyncio.create_subprocess_exec(
-        node_bin,
-        script_path,
-        *args,
-        cwd=root,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=os.environ.copy(),
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.communicate()
-        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Timeout automazione YAP")
+    async def _run_once(extra_env: Optional[Dict[str, str]] = None) -> tuple[int, str, str]:
+        node_bin = os.getenv("NODE_BINARY") or (_shutil.which("node") or _shutil.which("nodejs") or "node")
+        env = os.environ.copy()
+        if extra_env:
+            env.update(extra_env)
+        process = await asyncio.create_subprocess_exec(
+            node_bin,
+            script_path,
+            *args,
+            cwd=root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.communicate()
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Timeout automazione YAP")
+        out_text = stdout.decode("utf-8", errors="replace").strip()
+        err_text = stderr.decode("utf-8", errors="replace").strip()
+        return process.returncode, out_text, err_text
 
-    out = stdout.decode("utf-8", errors="replace").strip()
-    err = stderr.decode("utf-8", errors="replace").strip()
+    returncode, out, err = await _run_once()
 
     # Salva Session State nel Database dopo l'esecuzione, anche in caso di fallimento
     if db and os.path.exists(session_file_path):
@@ -959,7 +1006,30 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
             db.rollback()
             logger.warning("Impossibile salvare la sessione YAP nel database: %s", e)
 
-    if process.returncode != 0:
+    if returncode != 0:
+        failure_detail = _build_yap_failure_detail(out, err)
+        recoverable_signals = (
+            "target crashed",
+            "target closed",
+            "page crashed",
+            "browser has been closed",
+            "execution context was destroyed",
+        )
+        message_lc = str(failure_detail.get("message") or "").lower()
+        is_recoverable = any(signal in message_lc for signal in recoverable_signals)
+        if is_recoverable:
+            logger.warning("YAP script recoverable failure (%s), retrying once in safe mode", script_name)
+            retry_code, retry_out, retry_err = await _run_once({"YAP_SAFE_MODE": "1"})
+            if retry_code == 0:
+                out = retry_out
+                err = retry_err
+                returncode = 0
+            else:
+                out = retry_out
+                err = retry_err
+                failure_detail = _build_yap_failure_detail(out, err)
+
+    if returncode != 0:
         failure_detail = _build_yap_failure_detail(out, err)
         logger.error(
             "YAP script failed (%s): %s",
@@ -975,13 +1045,9 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
             detail=failure_detail,
         )
 
-    start = out.find("{")
-    end = out.rfind("}")
-    if start >= 0 and end >= start:
-        try:
-            return _json.loads(out[start:end + 1])
-        except Exception:
-            pass
+    parsed = _extract_json_blob(out)
+    if parsed:
+        return parsed
     return {"ok": True, "raw": out}
 
 
@@ -1399,7 +1465,8 @@ async def delete_practice(
         getattr(practice, "management_external_id", None)
         or
         getattr(practice, "synced", False)
-        or management_status in {"synced", "duplicate", "agenda_synced", "partial_synced", "complete_synced"}
+        or getattr(practice, "management_last_sync_at", None)
+        or management_status in {"synced", "duplicate", "agenda_synced", "partial_synced", "complete_synced", "unknown"}
     )
     if not needs_yap_delete:
         practice.status = PracticeStatus.DELETED

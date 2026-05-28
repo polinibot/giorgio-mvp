@@ -2152,6 +2152,11 @@ function App() {
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
+    const showActionProgress = Boolean(
+      yapActionProgress &&
+      resolvedPracticeId &&
+      String(yapActionProgress.practiceId) === String(resolvedPracticeId)
+    );
 
     return (
       <div className={`yap-result-banner ${toneClass}`}>
@@ -2194,6 +2199,21 @@ function App() {
                 Elimina YAP
               </button>
             )}
+          </div>
+        )}
+        {showActionProgress && (
+          <div className={`yap-action-progress ${yapActionProgress.status === 'error' ? 'save-progress-error' : yapActionProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
+            <div className="save-progress-header">
+              {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
+              <span className="save-progress-label">{yapActionProgress.label}</span>
+              <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
+            </div>
+            <div className="upload-progress-bar" aria-hidden="true">
+              <div
+                className="upload-progress-bar-fill"
+                style={{ width: `${Math.max(0, Math.min(100, yapActionProgress.percent))}%` }}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -3288,7 +3308,12 @@ function App() {
 
   // --- Dashboard View ---
   const renderDashboard = () => {
-    const dashboardItems = dashboardDraftCard ? [dashboardDraftCard, ...practices] : practices;
+    const effectiveDraftCard = (
+      dashboardDraftCard && !practices.some((practiceItem) => isDraftDuplicatedByPractice(dashboardDraftCard, practiceItem))
+        ? dashboardDraftCard
+        : null
+    );
+    const dashboardItems = effectiveDraftCard ? [effectiveDraftCard, ...practices] : practices;
     return (
     <div className="view-dashboard view-enter">
       <div className="container">
