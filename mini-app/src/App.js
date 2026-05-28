@@ -120,6 +120,45 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
   };
 }
 
+function getYapSyncScope(result) {
+  return result?.syncScope || result?.practice?.management_sync_scope || null;
+}
+
+function isAgendaOnlyYapSync(result) {
+  const scope = getYapSyncScope(result);
+  if (!scope) return false;
+  return scope.mode === 'agenda_only' || scope.complete === false || scope.partial === true || scope.full === false;
+}
+
+function formatYapSyncScopeSummary(result) {
+  const scope = getYapSyncScope(result);
+  if (!scope) return '';
+  if (scope.summary) return scope.summary;
+
+  const agenda = scope.agenda?.written || scope.written?.agenda || [];
+  const contexts = scope.agenda?.used_contexts || scope.usedContexts || scope.contexts || [];
+  const odl = scope.odl?.planned || scope.planned?.odl || [];
+  const parts = [];
+
+  if (agenda.length) parts.push(`Agenda: ${agenda.join(', ')}`);
+  if (contexts.length) parts.push(`Contesti: ${contexts.join(', ')}`);
+  if (odl.length) parts.push(`ODL pianificati: ${odl.join(', ')}`);
+
+  return parts.join(' | ');
+}
+
+function formatYapPracticeStatus(practice) {
+  const status = String(practice?.management_sync_status || '').trim();
+  if (status === 'agenda_synced') return 'Agenda sincronizzata';
+  if (status === 'sync_failed') return 'Sync YAP fallita';
+  if (status === 'deleted') return 'Appuntamento eliminato da YAP';
+  if (status === 'blocked_by_odl') return 'Eliminazione bloccata da ODL';
+  if (status === 'duplicate') return 'Agenda già presente in YAP';
+  if (status === 'not_ready') return 'Pratica non pronta per YAP';
+  if (status) return status;
+  return practice?.synced ? 'Sincronizzata' : 'Non sincronizzata';
+}
+
 /** Format date to DD/MM/YYYY */
 function formatDate(dateStr) {
   if (!dateStr) return '';
@@ -1725,10 +1764,11 @@ function App() {
       setYapLastResult(data);
       rememberResponse('yap.sync');
       if (data.status === 'synced' || data.status === 'duplicate') {
+        const scopeSummary = formatYapSyncScopeSummary(data);
         if (!silent) {
           addToast(data.status === 'duplicate'
-            ? 'Appuntamento già presente in YAP: nessuna modifica necessaria'
-            : 'Appuntamento sincronizzato con YAP', 'success');
+            ? (scopeSummary || 'Agenda già presente in YAP: nessuna modifica necessaria')
+            : (scopeSummary || 'Agenda sincronizzata con YAP'), 'success');
         }
         loadDetail(id);
       } else if (data.status === 'dry_run') {
@@ -1804,8 +1844,10 @@ function App() {
     const isSuccess = status === 'synced' || status === 'deleted' || status === 'duplicate';
     const isWarning = status === 'not_ready' || status === 'blocked_by_odl' || status === 'dry_run';
     const toneClass = isSuccess ? 'yap-success' : (isWarning ? 'yap-warning' : 'yap-error');
+    const scopeSummary = formatYapSyncScopeSummary(result);
+    const agendaOnly = isAgendaOnlyYapSync(result);
     const titleMap = {
-      synced: 'Sync YAP completata',
+      synced: agendaOnly ? 'Agenda sincronizzata' : 'Sync YAP completata',
       duplicate: 'Duplicato rilevato',
       dry_run: 'Dry-run YAP completato',
       not_ready: 'Pratica non pronta',
@@ -1818,7 +1860,7 @@ function App() {
     const message = result.message
       || result.yap?.result?.message
       || result.yap?.message
-      || (status === 'synced' ? 'Appuntamento salvato su YAP.' : '')
+      || ((status === 'synced' || status === 'duplicate') && scopeSummary ? scopeSummary : '')
       || (status === 'deleted' ? 'Appuntamento eliminato da YAP.' : '')
       || '';
     const meta = [];
@@ -1826,6 +1868,7 @@ function App() {
     if (result.yap?.result?.telemetry?.saveAttempts) meta.push(`${result.yap.result.telemetry.saveAttempts} tentativi`);
     if (result.screenshot) meta.push('Screenshot salvato');
     if (result.duplicate) meta.push('Dedup attivo');
+    if (scopeSummary && message !== scopeSummary) meta.push(scopeSummary);
     const resolvedPracticeId = practiceId || yapLastPracticeId;
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['synced', 'duplicate', 'dry_run', 'not_ready'].includes(status);
@@ -2684,8 +2727,9 @@ function App() {
           void (async () => {
             const syncResult = await syncToYap(practiceId, { dry_run: false, silent: true });
             const actionLabel = practice ? 'aggiornata' : 'creata';
+            const scopeSummary = formatYapSyncScopeSummary(syncResult);
             const finalMessage = syncResult.status === 'synced' || syncResult.status === 'duplicate'
-              ? `Pratica ${actionLabel} e sincronizzata con YAP.`
+              ? `Pratica ${actionLabel}. ${scopeSummary || 'Agenda sincronizzata con YAP.'}`
               : syncResult.status === 'dry_run'
                 ? `Pratica ${actionLabel}. Dry-run YAP completato.`
                 : syncResult.status === 'not_ready'
@@ -3023,7 +3067,9 @@ function App() {
                   <span className="practice-plate">{p.plate || '—'}</span>
                   <span className={`sync-pill ${p.synced ? 'sync-pill-green' : 'sync-pill-red'}`}>
                     <span className={`sync-dot ${p.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
-                    {p.synced ? 'Sincronizzata' : 'Da sincronizzare'}
+                    {p.management_sync_status === 'agenda_synced'
+                      ? 'Agenda sincronizzata'
+                      : (p.synced ? 'Sincronizzata' : 'Da sincronizzare')}
                   </span>
                 </div>
                 <div className="practice-card-customer-row">
@@ -3132,7 +3178,7 @@ function App() {
             <div className="detail-meta-item">
               <span className="detail-meta-label">Stato YAP</span>
               <span className="detail-meta-value">
-                {practice.management_sync_status || (practice.synced ? 'synced' : 'non sincronizzata')}
+                {formatYapPracticeStatus(practice)}
               </span>
             </div>
             {practice.management_last_sync_at && (
@@ -3184,7 +3230,7 @@ function App() {
             <div className="detail-sync-label">Stato sincronizzazione</div>
             <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
               <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
-              {practice.synced ? 'Sincronizzata' : 'Non sincronizzata'}
+              {formatYapPracticeStatus(practice)}
             </div>
           </div>
 

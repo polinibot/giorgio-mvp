@@ -57,6 +57,7 @@ from security import SecurityService
 from ocr_service import OCRService
 from cloudinary_service import cloudinary_service
 from telegram_utils import build_practice_summary
+from yap_field_map import build_full_field_mapping
 
 logger = logging.getLogger(__name__)
 
@@ -655,6 +656,8 @@ async def list_practices(
         Practice.created_at,
         Practice.contexts,
         Practice.synced,
+        Practice.management_sync_status,
+        Practice.management_last_sync_at,
     ).all()
 
     results = []
@@ -666,6 +669,8 @@ async def list_practices(
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "contexts": [c.strip() for c in p.contexts.split(",") if c.strip()] if isinstance(p.contexts, str) else p.contexts,
             "synced": p.synced,
+            "management_sync_status": p.management_sync_status,
+            "management_last_sync_at": p.management_last_sync_at.isoformat() if p.management_last_sync_at else None,
         })
 
     logger.info("Listed %d practices for user %d", len(results), telegram_id)
@@ -753,6 +758,38 @@ def _ensure_yap_credentials(action: str) -> None:
                 "missing": missing,
             },
         )
+
+
+def _build_yap_sync_scope(mapped: Dict[str, Any]) -> Dict[str, Any]:
+    """Describe what the current YAP automation actually writes vs. what stays planned."""
+    try:
+        field_map = build_full_field_mapping(mapped)
+    except Exception as exc:
+        logger.warning("Impossibile costruire il sync scope YAP: %s", exc)
+        field_map = {}
+
+    summary = field_map.get("summary") or {}
+    contexts = list(mapped.get("contexts") or [])
+    agenda_worker = list(summary.get("agendaWorker") or ["popup.cosa", "popup.quando", "popup.dalle", "popup.alle", "popup.tag"])
+    odl_planned = list(summary.get("odlWorkerPlanned") or ["MAN", "MAC", "materiali", "ricambi", "smaltimento"])
+
+    return {
+        "mode": "agenda_only",
+        "complete": False,
+        "summary": "Agenda sincronizzata. ODL/materiali/ricambi pianificati.",
+        "agenda": {
+            "written": ["Cosa", "Quando", "Dalle", "Alle", "Tag"],
+            "used_contexts": contexts,
+            "notes": ["Note interne", "Note reparto"],
+        },
+        "odl": {
+            "planned": ["MAN", "MAC", "Materiali", "Ricambi", "Smaltimento"],
+        },
+        "mappingSummary": {
+            "agendaWorker": agenda_worker,
+            "odlWorkerPlanned": odl_planned,
+        },
+    }
 
 
 def _extract_json_blob(text: str) -> Optional[dict]:
@@ -1472,6 +1509,7 @@ async def sync_practice_to_yap(
             mapped.setdefault("agenda", {})["ora"] = _normalize_slot_time(body.time)
         if body.duration:
             mapped.setdefault("agenda", {})["durata_minuti"] = body.duration
+        sync_scope = _build_yap_sync_scope(mapped)
 
         artifacts = os.path.join(_project_root(), "automation", "artifacts", "yap", "payloads")
         os.makedirs(artifacts, exist_ok=True)
@@ -1492,10 +1530,11 @@ async def sync_practice_to_yap(
         saved = bool(result_data.get("saved"))
         duplicate = result_data.get("mode") == "commit-blocked-duplicate"
         response_status = "synced" if saved else ("duplicate" if duplicate else "dry_run")
+        response_message = sync_scope["summary"] if (saved or duplicate) else (result_data.get("message") or result.get("message") or "Dry-run YAP completato: nessuna modifica eseguita.")
 
         if not body.dry_run and (saved or duplicate):
             practice.synced = True
-            practice.management_sync_status = "synced"
+            practice.management_sync_status = "agenda_synced"
             practice.management_last_sync_at = datetime.now(timezone.utc)
             practice.updated_by_telegram_id = user_data["id"]
             external_id = result_data.get("externalId") or result_data.get("external_id")
@@ -1507,6 +1546,8 @@ async def sync_practice_to_yap(
             success=True,
             data={
                 "status": response_status,
+                "message": response_message,
+                "syncScope": sync_scope,
                 "preSync": check,
                 "yap": result,
                 "practice": {
@@ -1515,6 +1556,7 @@ async def sync_practice_to_yap(
                     "management_sync_status": practice.management_sync_status,
                     "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
                     "management_external_id": practice.management_external_id,
+                    "management_sync_scope": sync_scope,
                 },
             },
         )

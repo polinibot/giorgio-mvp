@@ -182,7 +182,20 @@ const DEFAULT_YAP_SYNC_RESPONSE = {
     success: true,
     data: {
       status: 'synced',
-      message: 'Appuntamento salvato su YAP.',
+      message: 'Agenda sincronizzata. ODL/materiali/ricambi pianificati.',
+      syncScope: {
+        mode: 'agenda_only',
+        complete: false,
+        summary: 'Agenda sincronizzata. ODL/materiali/ricambi pianificati.',
+        agenda: {
+          written: ['Cosa', 'Quando', 'Dalle', 'Alle', 'Tag'],
+          used_contexts: ['officina', 'carrozzeria'],
+          notes: ['Note interne', 'Note reparto'],
+        },
+        odl: {
+          planned: ['MAN', 'MAC', 'Materiali', 'Ricambi', 'Smaltimento'],
+        },
+      },
       preSync: { ready: true, score: 100, issues: [] },
       yap: {
         result: {
@@ -195,9 +208,14 @@ const DEFAULT_YAP_SYNC_RESPONSE = {
       },
       practice: {
         synced: true,
-        management_sync_status: 'synced',
+        management_sync_status: 'agenda_synced',
         management_last_sync_at: '2026-11-15T10:05:00.000Z',
         management_external_id: null,
+        management_sync_scope: {
+          mode: 'agenda_only',
+          complete: false,
+          summary: 'Agenda sincronizzata. ODL/materiali/ricambi pianificati.',
+        },
       },
     },
   },

@@ -148,6 +148,45 @@ class TestYapSyncEndpoints:
         assert "Configurazione YAP mancante" in data["detail"]["message"]
         assert called["value"] is False
 
+    def test_yap_sync_returns_agenda_scope_summary(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+        from automation_service import AutomationService
+
+        monkeypatch.setattr(
+            AutomationService,
+            "pre_sync_check",
+            staticmethod(lambda payload: {"ready": True, "score": 92, "issues": [], "warnings": []}),
+        )
+
+        async def fake_run_yap_script(*args, **kwargs):
+            return {
+                "result": {
+                    "saved": True,
+                    "mode": "commit",
+                    "message": "Appuntamento salvato su YAP.",
+                    "telemetry": {"saveAttempts": 1},
+                },
+                "stdout": "",
+                "stderr": "",
+            }
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/sync?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "synced"
+        assert data["message"] == "Agenda sincronizzata. ODL/materiali/ricambi pianificati."
+        assert data["syncScope"]["mode"] == "agenda_only"
+        assert data["practice"]["management_sync_status"] == "agenda_synced"
+
 
 class TestYapTestErrorChannel:
     """Test endpoint POST /yap/test-error-channel."""
