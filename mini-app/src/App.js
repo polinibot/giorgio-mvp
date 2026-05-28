@@ -950,6 +950,28 @@ const getDashboardDraftCard = (search = '', filters = {}) => {
   }
 };
 
+const normalizeCompareText = (value) => String(value || '').trim().toLowerCase();
+const normalizeComparePlate = (value) => String(value || '').replace(/[\s-]/g, '').toUpperCase();
+
+function isDraftDuplicatedByPractice(draftCard, practice) {
+  if (!draftCard || !practice) return false;
+  const draftPlate = normalizeComparePlate(draftCard.plate_confirmed || draftCard.plate);
+  const practicePlate = normalizeComparePlate(practice.plate_confirmed || practice.plate);
+  if (draftPlate && practicePlate && draftPlate === practicePlate) return true;
+
+  const draftCustomer = normalizeCompareText(draftCard.customer_name);
+  const practiceCustomer = normalizeCompareText(practice.customer_name);
+  const draftPhone = normalizeCompareText(draftCard.phone);
+  const practicePhone = normalizeCompareText(practice.phone);
+
+  if (!draftCustomer || !practiceCustomer || draftCustomer !== practiceCustomer) return false;
+  if (draftPhone && practicePhone && draftPhone === practicePhone) return true;
+
+  const draftContexts = normalizeContexts(draftCard.contexts);
+  const practiceContexts = normalizeContexts(practice.contexts);
+  return draftContexts.some((ctx) => practiceContexts.includes(ctx));
+}
+
 const buildPreviewDetail = (p) => {
   const { sections = [], parts = [], photos = [], ...practice } = p;
   return { practice, sections, parts, photos };
@@ -1578,8 +1600,20 @@ function App() {
     return params;
   }, [telegramUserId, practiceAccessToken]);
 
-  const refreshDashboardDraftCard = useCallback((search = '', filters = {}) => {
-    setDashboardDraftCard(getDashboardDraftCard(search, filters));
+  const refreshDashboardDraftCard = useCallback((search = '', filters = {}, practiceItems = []) => {
+    const draftCard = getDashboardDraftCard(search, filters);
+    if (!draftCard) {
+      setDashboardDraftCard(null);
+      return;
+    }
+    const items = Array.isArray(practiceItems) ? practiceItems : [];
+    const duplicated = items.some((practiceItem) => isDraftDuplicatedByPractice(draftCard, practiceItem));
+    if (duplicated) {
+      try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+      setDashboardDraftCard(null);
+      return;
+    }
+    setDashboardDraftCard(draftCard);
   }, []);
 
   const loadPreSyncChecks = useCallback(async (practiceItems) => {
@@ -1615,7 +1649,7 @@ function App() {
     if (browserPreviewMode) {
       const previewItems = filterPreviewPractices(previewPractices, search, filters);
       setPractices(previewItems);
-      refreshDashboardDraftCard(search, filters);
+      refreshDashboardDraftCard(search, filters, previewItems);
       setStats(buildPreviewStats(previewPractices));
       setPreSyncByPractice(buildPreviewPreSyncMap(previewItems));
       rememberResponse('dashboard.preview', {
@@ -1645,14 +1679,14 @@ function App() {
 
       const practiceItems = practicesRes.data?.data || practicesRes.data || [];
       setPractices(practiceItems);
-      refreshDashboardDraftCard(search, filters);
+      refreshDashboardDraftCard(search, filters, practiceItems);
       setStats(statsRes.data?.data || statsRes.data || { total: 0, this_month: 0, pending_sync: 0 });
       loadPreSyncChecks(practiceItems);
       rememberResponse('dashboard.list');
     } catch (err) {
       rememberError('dashboard.list', err);
       addToast(classifyError(err), 'error');
-      refreshDashboardDraftCard(search, filters);
+      refreshDashboardDraftCard(search, filters, []);
     } finally {
       setDashboardLoading(false);
     }
@@ -2118,7 +2152,9 @@ function App() {
     if (result.screenshot) meta.push('Screenshot salvato');
     if (result.duplicate) meta.push('Dedup attivo');
     if (audit) meta.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
-    if (scopeSummary && message !== scopeSummary) meta.push(scopeSummary);
+    const normalizedMessage = String(message || '').toLowerCase();
+    const normalizedScopeSummary = String(scopeSummary || '').toLowerCase();
+    if (scopeSummary && normalizedScopeSummary && !normalizedMessage.includes(normalizedScopeSummary)) meta.push(scopeSummary);
     const resolvedPracticeId = practiceId || yapLastPracticeId;
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
