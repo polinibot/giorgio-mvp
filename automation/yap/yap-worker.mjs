@@ -276,6 +276,70 @@ async function openAgenda(page, isoDate) {
   }
 }
 
+function shouldWriteOdlFromWorker() {
+  return String(process.env.YAP_WRITE_ODL || "1").trim() !== "0";
+}
+
+function normalizeLoose(value) {
+  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function buildOdlNeedles(job) {
+  const needles = [];
+  if (job.internalNotes) needles.push(job.internalNotes);
+  for (const section of job.sections || []) {
+    const reparto = String(section.reparto || "").trim();
+    if (reparto) needles.push(reparto);
+    for (const row of section.descrizioni || []) {
+      if (row) needles.push(String(row));
+    }
+    if (section.ore_man != null) needles.push(`MAN ${section.ore_man}`);
+    if (section.ore_mac != null) needles.push(`MAC ${section.ore_mac}`);
+    if (section.materiali_euro != null) needles.push(String(section.materiali_euro));
+    if (section.smaltimento_applica) needles.push(String(section.smaltimento_percentuale ?? 2));
+    for (const part of section.ricambi || []) {
+      const name = part?.name || part?.nome;
+      const qty = part?.quantity || part?.quantita;
+      if (name) needles.push(String(name));
+      if (qty) needles.push(String(qty));
+    }
+    if (section.note) needles.push(String(section.note));
+  }
+  return [...new Set(needles.map((item) => String(item || "").trim()).filter(Boolean))];
+}
+
+function buildSectionSummary(section) {
+  const lines = [];
+  const reparto = String(section.reparto || "reparto").trim();
+  lines.push(`[${reparto}]`);
+  for (const row of section.descrizioni || []) {
+    if (row) lines.push(`- ${String(row).trim()}`);
+  }
+  if (section.ore_man != null) lines.push(`MAN: ${section.ore_man}`);
+  if (section.ore_mac != null) lines.push(`MAC: ${section.ore_mac}`);
+  if (section.materiali_euro != null) lines.push(`Materiali: ${section.materiali_euro}`);
+  if (section.smaltimento_applica) lines.push(`Smaltimento: ${section.smaltimento_percentuale ?? 2}%`);
+  for (const part of section.ricambi || []) {
+    const name = part?.name || part?.nome;
+    const qty = part?.quantity || part?.quantita;
+    if (!name) continue;
+    lines.push(`Ricambio: ${String(name).trim()}${qty ? ` x ${String(qty).trim()}` : ""}`);
+  }
+  if (section.note) lines.push(`Note reparto: ${String(section.note).trim()}`);
+  return lines.join("\n");
+}
+
+function buildOdlSummaryText(job) {
+  const blocks = [];
+  if (job.internalNotes) {
+    blocks.push(`Note interne: ${String(job.internalNotes).trim()}`);
+  }
+  for (const section of job.sections || []) {
+    blocks.push(buildSectionSummary(section));
+  }
+  return blocks.join("\n\n").slice(0, 12000);
+}
+
 async function safeEvaluate(page, evaluator, arg, { retries = 2, delayMs = 250 } = {}) {
   let lastError = null;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -551,6 +615,303 @@ async function addYapTagChips(page, tags) {
   }, tags);
 }
 
+async function clickAppointmentPopupPractice(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 3 && rect.height > 3 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const popup = document.querySelector(".gwt-DecoratedPopupPanel");
+    const root = popup || document.body;
+    const candidates = [...root.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div")].filter((el) => {
+      const t = (el.textContent || "").toLowerCase();
+      return (
+        (t.includes("gestione pratica")
+          || t.includes("apri pratica")
+          || (t.includes("pratica") && !t.includes("prenotazione")))
+        && t.length < 80
+      );
+    });
+    for (const el of candidates) {
+      if (!isVisible(el)) continue;
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return { clicked: true, label: (el.textContent || "").trim().slice(0, 100) };
+    }
+    return { clicked: false, label: null };
+  }).catch(() => ({ clicked: false, label: null }));
+}
+
+async function clickOdlSection(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 3 && rect.height > 3 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")].filter((el) => {
+      const t = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      return (t.includes("ordini di lavoro") || t === "odl" || t.startsWith("ordini di lavoro")) && t.length < 60;
+    });
+    for (const el of candidates) {
+      if (!isVisible(el)) continue;
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return { clicked: true, label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100) };
+    }
+    return { clicked: false, label: null };
+  }).catch(() => ({ clicked: false, label: null }));
+}
+
+async function clickRepartoSection(page, reparto) {
+  const needle = normalizeLoose(reparto);
+  if (!needle) return false;
+  return safeEvaluate(page, (target) => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 3 && rect.height > 3 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
+      .filter(isVisible)
+      .filter((el) => {
+        const t = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+        return t && (t === target || t.includes(target));
+      });
+    const best = candidates.sort((a, b) => a.getBoundingClientRect().y - b.getBoundingClientRect().y)[0];
+    if (!best) return false;
+    best.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }, needle).catch(() => false);
+}
+
+async function fillBestEditableByKeywords(page, keywords, value, { append = false } = {}) {
+  const textValue = String(value || "").trim();
+  if (!textValue) return false;
+  return safeEvaluate(page, ({ keywordsRaw, text, appendMode }) => {
+    const keywords = (keywordsRaw || []).map((k) => String(k || "").toLowerCase().trim()).filter(Boolean);
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const editableNodes = [...document.querySelectorAll("textarea, input[type='text'], input[type='number'], input:not([type]), [contenteditable='true']")]
+      .filter(isVisible)
+      .filter((el) => !el.disabled && !el.readOnly);
+
+    const normalize = (val) => String(val || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const scoreNode = (node) => {
+      const attrText = normalize(
+        [
+          node.getAttribute("name"),
+          node.getAttribute("id"),
+          node.getAttribute("placeholder"),
+          node.getAttribute("aria-label"),
+          node.className,
+        ].join(" "),
+      );
+      let container = node;
+      for (let i = 0; i < 4 && container?.parentElement; i += 1) {
+        container = container.parentElement;
+      }
+      const ctxText = normalize((container?.textContent || "").slice(0, 800));
+      let score = 0;
+      for (const keyword of keywords) {
+        if (!keyword) continue;
+        if (attrText.includes(keyword)) score += 4;
+        if (ctxText.includes(keyword)) score += 2;
+      }
+      if (node.tagName === "TEXTAREA") score += 0.4;
+      return score;
+    };
+
+    const ranked = editableNodes
+      .map((node) => ({ node, score: scoreNode(node), y: node.getBoundingClientRect().y, x: node.getBoundingClientRect().x }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => (b.score - a.score) || (a.y - b.y) || (a.x - b.x));
+
+    const target = ranked[0]?.node;
+    if (!target) return false;
+
+    const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA";
+    const current = isInput ? (target.value || "") : (target.innerText || target.textContent || "");
+    const nextValue = appendMode && current ? `${current}\n${text}` : text;
+
+    target.focus();
+    if (isInput) target.value = nextValue;
+    else target.textContent = nextValue;
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    target.blur();
+    return true;
+  }, { keywordsRaw: keywords, text: textValue, appendMode: Boolean(append) }).catch(() => false);
+}
+
+async function appendStructuredBlockToAnyTextarea(page, text) {
+  const payload = String(text || "").trim();
+  if (!payload) return false;
+  return safeEvaluate(page, (blockText) => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const targets = [...document.querySelectorAll("textarea, [contenteditable='true']")].filter(isVisible);
+    if (!targets.length) return false;
+    const target = targets.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)[0];
+    const isInput = target.tagName === "TEXTAREA";
+    const current = isInput ? (target.value || "") : (target.innerText || target.textContent || "");
+    const nextValue = current ? `${current}\n${blockText}` : blockText;
+    target.focus();
+    if (isInput) target.value = nextValue;
+    else target.textContent = nextValue;
+    target.dispatchEvent(new Event("input", { bubbles: true }));
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    target.blur();
+    return true;
+  }, payload).catch(() => false);
+}
+
+async function clickGenericSaveInPractice(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Button, .gwt-Anchor, span, div")]
+      .filter(isVisible)
+      .map((el) => {
+        const t = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
+        return { el, t };
+      });
+    const save = candidates.find(({ t }) => t.includes("salva") || t.includes("save") || t.includes("conferma"));
+    if (!save) return false;
+    save.el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }).catch(() => false);
+}
+
+async function writePracticeAndOdl(page, job, args) {
+  const summary = buildOdlSummaryText(job);
+  const writeReport = {
+    attempted: true,
+    openedPractice: false,
+    openedOdl: false,
+    written: {
+      notes: false,
+      sections: [],
+      man: false,
+      mac: false,
+      materials: false,
+      waste: false,
+      parts: false,
+    },
+    verify: {
+      matched: 0,
+      total: 0,
+    },
+  };
+
+  const practiceLink = await clickAppointmentPopupPractice(page);
+  if (!practiceLink?.clicked) {
+    writeReport.attempted = false;
+    writeReport.reason = "practice_link_not_found";
+    return writeReport;
+  }
+  writeReport.openedPractice = true;
+  await page.waitForTimeout(2200);
+
+  const odlTab = await clickOdlSection(page);
+  if (odlTab?.clicked) {
+    writeReport.openedOdl = true;
+    await page.waitForTimeout(1600);
+  }
+
+  if (job.internalNotes) {
+    writeReport.written.notes = await fillBestEditableByKeywords(
+      page,
+      ["note", "note interne", "pratica", "annotazioni"],
+      String(job.internalNotes).trim(),
+      { append: true },
+    );
+  }
+
+  for (const section of job.sections || []) {
+    const reparto = String(section.reparto || "").trim();
+    if (reparto) {
+      await clickRepartoSection(page, reparto).catch(() => false);
+      await page.waitForTimeout(180);
+    }
+    const sectionSummary = buildSectionSummary(section);
+    const sectionWritten = await fillBestEditableByKeywords(
+      page,
+      [reparto, "descrizione", "lavoro", "odl", "intervento", "note reparto"],
+      sectionSummary,
+      { append: true },
+    );
+    writeReport.written.sections.push({ reparto, written: sectionWritten });
+
+    if (section.ore_man != null) {
+      const manOk = await fillBestEditableByKeywords(page, [reparto, "man", "ore uomo", "manodopera"], String(section.ore_man));
+      writeReport.written.man = writeReport.written.man || manOk;
+    }
+    if (section.ore_mac != null) {
+      const macOk = await fillBestEditableByKeywords(page, [reparto, "mac", "ore macchina", "manodopera"], String(section.ore_mac));
+      writeReport.written.mac = writeReport.written.mac || macOk;
+    }
+    if (section.materiali_euro != null) {
+      const matOk = await fillBestEditableByKeywords(page, [reparto, "materiali", "consumo", "euro"], String(section.materiali_euro));
+      writeReport.written.materials = writeReport.written.materials || matOk;
+    }
+    if (section.smaltimento_applica) {
+      const smaltOk = await fillBestEditableByKeywords(page, [reparto, "smaltimento", "rifiuti", "%"], String(section.smaltimento_percentuale ?? 2));
+      writeReport.written.waste = writeReport.written.waste || smaltOk;
+    }
+    if ((section.ricambi || []).length) {
+      const partsText = (section.ricambi || [])
+        .map((part) => {
+          const name = part?.name || part?.nome || "";
+          const qty = part?.quantity || part?.quantita || "";
+          return `${String(name).trim()}${qty ? ` x ${String(qty).trim()}` : ""}`.trim();
+        })
+        .filter(Boolean)
+        .join("\n");
+      if (partsText) {
+        const partsOk = await fillBestEditableByKeywords(
+          page,
+          [reparto, "ricambi", "articoli", "magazzino", "pezzi"],
+          partsText,
+          { append: true },
+        );
+        writeReport.written.parts = writeReport.written.parts || partsOk;
+      }
+    }
+  }
+
+  // Fallback unico: se non troviamo campi specifici, mettiamo il blocco completo in una textarea visibile.
+  if (!writeReport.written.notes && !writeReport.written.man && !writeReport.written.mac && !writeReport.written.materials && !writeReport.written.parts) {
+    writeReport.written.notes = await appendStructuredBlockToAnyTextarea(page, summary);
+  }
+
+  await clickGenericSaveInPractice(page).catch(() => false);
+  await page.waitForTimeout(500);
+
+  const needles = buildOdlNeedles(job);
+  const bodyText = await safeEvaluate(page, () => (document.body?.innerText || "").replace(/\s+/g, " ").trim()).catch(() => "");
+  const normalizedBody = normalizeLoose(bodyText);
+  const matched = needles.filter((needle) => normalizedBody.includes(normalizeLoose(needle))).length;
+  writeReport.verify = {
+    matched,
+    total: needles.length,
+    ratio: needles.length ? Number((matched / needles.length).toFixed(3)) : 1,
+  };
+  writeReport.ok = Boolean(writeReport.openedPractice && writeReport.verify.matched > 0);
+  if (args.debug) {
+    writeReport.summary = summary;
+  }
+  return writeReport;
+}
+
 async function fillAppointmentPopup(page, job) {
   const rect = await appointmentPopupRect(page);
   if (!rect) {
@@ -789,6 +1150,14 @@ async function runYapAutomation(job, args) {
       afterSavePath = path.join(args.artifactDir, `after-save-${suffix}.png`);
       await page.screenshot({ path: afterSavePath, fullPage: true });
     }
+    let managementWrite = null;
+    if (shouldWriteOdlFromWorker()) {
+      managementWrite = await writePracticeAndOdl(page, job, args).catch((error) => ({
+        attempted: true,
+        ok: false,
+        error: error.message,
+      }));
+    }
     await updatePracticeSynced(args, job).catch(() => {});
 
     return {
@@ -802,6 +1171,7 @@ async function runYapAutomation(job, args) {
       telemetry: {
         saveAttempts: saveAttemptsUsed,
       },
+      managementWrite,
       message: "Appuntamento salvato su YAP.",
     };
   } catch (error) {
