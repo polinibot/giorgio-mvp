@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
+from datetime import datetime, timezone
 from copy import deepcopy
 import os
 import json
@@ -85,6 +85,10 @@ STATE = deepcopy(INITIAL_STATE)
 def _reset_state():
     global STATE
     STATE = deepcopy(INITIAL_STATE)
+
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _json_response(handler, status_code, payload):
@@ -200,8 +204,8 @@ def _save_practice(payload, practice_id=None):
         'customer_name': customer_name,
         'contexts': contexts,
         'synced': False,
-        'appointment_date': datetime.utcnow().isoformat() + 'Z',
-        'created_at': datetime.utcnow().isoformat() + 'Z',
+        'appointment_date': _utc_iso(),
+        'created_at': _utc_iso(),
     }
     STATE['practices'] = [p for p in STATE['practices'] if p['id'] != practice_id] + [practice]
 
@@ -214,7 +218,7 @@ def _save_practice(payload, practice_id=None):
             'customer_name': customer_name,
             'customer_type': practice_payload.get('customer_type', 'privato'),
             'billing_to_complete': practice_payload.get('billing_to_complete', False),
-            'appointment_date': datetime.utcnow().isoformat() + 'Z',
+            'appointment_date': _utc_iso(),
             'appointment_time': practice_payload.get('appointment_time', '09:00'),
             'practice_type': practice_payload.get('practice_type', 'preventivo'),
             'contexts': ','.join(contexts),
@@ -241,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
         params = parse_qs(parsed.query)
 
         if path in ('/', '/health', '/test-connection'):
-            return _json_response(self, 200, {'status': 'ok', 'service': 'mock-api', 'timestamp': datetime.utcnow().isoformat() + 'Z'})
+            return _json_response(self, 200, {'status': 'ok', 'service': 'mock-api', 'timestamp': _utc_iso()})
 
         if path == '/api/practices/stats':
             return _json_response(self, 200, {'success': True, 'data': _compute_stats()})
@@ -284,6 +288,34 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/practices/full':
             data = _save_practice(payload)
             return _json_response(self, 200, {'success': True, 'data': data})
+
+        if path.startswith('/practices/') and path.endswith('/yap/sync'):
+            try:
+                practice_id = int(path.split('/')[2])
+            except ValueError:
+                practice_id = 0
+            practice = _find_practice(practice_id)
+            detail = STATE['details'].get(practice_id)
+            if practice:
+                practice['synced'] = True
+            if detail and detail.get('practice'):
+                detail['practice']['synced'] = True
+            return _json_response(
+                self,
+                200,
+                {
+                    'success': True,
+                    'data': {
+                        'status': 'agenda_synced',
+                        'message': 'Agenda verificata (mock)',
+                        'synced': True,
+                        'yap': {
+                            'status': 'agenda_synced',
+                            'deleted': False,
+                        },
+                    },
+                },
+            )
 
         if path.startswith('/api/practices/') and path.endswith('/photos'):
             try:

@@ -1,11 +1,13 @@
 import logging
 import os
 import json
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import Any, List
 
 logger = logging.getLogger(__name__)
+_BASE_DIR = Path(__file__).resolve().parent
 
 
 class Settings(BaseSettings):
@@ -33,7 +35,7 @@ class Settings(BaseSettings):
     ]
 
     class Config:
-        env_file = ".env"
+        env_file = str(_BASE_DIR / ".env")
         env_file_encoding = "utf-8"
         extra = "ignore"
 

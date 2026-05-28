@@ -46,7 +46,8 @@ test('editing an existing practice in the real browser preserves descriptive row
   await page.locator('#notes_officina').fill('Nota aggiornata smoke');
   await page.getByRole('button', { name: 'Aggiorna' }).click();
 
-  await expect(page.locator('body')).toContainText('Pratica aggiornata con successo!');
+  await expect(page.locator('body')).toContainText('Pratica aggiornata.');
+  await expect(page.locator('body')).not.toContainText('sync YAP fallita');
   await expect(page.locator('body')).not.toContainText('Inserisci almeno una riga descrittiva per officina');
 });
 
@@ -73,6 +74,7 @@ test('demo mode can be submitted end-to-end on the production build output', asy
   await expect(page.locator('#plate_confirmed')).toHaveValue('AB123CD');
   await page.getByRole('button', { name: 'Salva' }).click();
 
-  await expect(page.locator('body')).toContainText('Pratica creata con successo!');
+  await expect(page.locator('body')).toContainText('Pratica creata.');
+  await expect(page.locator('body')).not.toContainText('sync YAP fallita');
   await expect(page.locator('.practice-card')).toHaveCount(3);
 });

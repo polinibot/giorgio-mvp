@@ -112,6 +112,12 @@ class TestYapSyncEndpoints:
 
         monkeypatch.setattr(main, "_run_yap_script", fail_if_called)
 
+        mark_synced = client.patch(
+            f"/api/practices/{sample_practice['id']}/sync?user_id=761118078",
+            json={"synced": True},
+        )
+        assert mark_synced.status_code == 200
+
         response = client.delete(
             f"/practices/{sample_practice['id']}?user_id=761118078",
         )
@@ -241,6 +247,12 @@ class TestYapSyncEndpoints:
             }
 
         monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        mark_synced = client.patch(
+            f"/api/practices/{sample_practice['id']}/sync?user_id=761118078",
+            json={"synced": True},
+        )
+        assert mark_synced.status_code == 200
 
         response = client.delete(
             f"/practices/{sample_practice['id']}?user_id=761118078",

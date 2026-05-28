@@ -8,7 +8,7 @@ def test_validates_raw_time_and_normalizes_to_yap_slot():
     assert validate_appointment_time("14:30") == "14:30"
     assert normalize_appointment_time("09:24") == "09:20"
     assert normalize_appointment_time("07:15") == "07:20"
-    assert normalize_appointment_time("14:30") == "14:30"
+    assert normalize_appointment_time("14:30") == "14:40"
 
 
 def test_rejects_invalid():

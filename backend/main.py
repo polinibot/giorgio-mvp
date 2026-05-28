@@ -1393,6 +1393,18 @@ async def delete_practice(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
     _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
+    management_status = str(getattr(practice, "management_sync_status", "") or "").strip()
+    needs_yap_delete = bool(
+        getattr(practice, "synced", False)
+        or management_status in {"synced", "duplicate", "agenda_synced", "partial_synced", "complete_synced"}
+    )
+    if not needs_yap_delete:
+        practice.status = PracticeStatus.DELETED
+        practice.updated_by_telegram_id = user_data["id"]
+        db.commit()
+        logger.info("Practice %d soft-deleted locally without YAP delete (never synced)", practice_id)
+        return APIResponse(success=True, data={"message": "Pratica cancellata con successo"})
+
     try:
         _ensure_yap_credentials("eliminare l'appuntamento su YAP")
         date_iso = _practice_date_iso(practice)
