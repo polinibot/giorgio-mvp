@@ -308,10 +308,11 @@ async function main() {
     process.exit(1);
   }
 
-  const user = process.env.YAP_USERNAME;
-  const pass = process.env.YAP_PASSWORD;
-  if (!user || !pass) {
-    console.error("Servono YAP_USERNAME e YAP_PASSWORD");
+  const user = process.env.YAP_USERNAME || "";
+  const pass = process.env.YAP_PASSWORD || "";
+  const hasCredentials = Boolean(user && pass);
+  if (!hasCredentials && args.freshLogin) {
+    console.error("Con --fresh-login servono YAP_USERNAME e YAP_PASSWORD");
     process.exit(1);
   }
 
@@ -327,7 +328,12 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    await loginYap(page, user, pass);
+    if (hasCredentials) {
+      await loginYap(page, user, pass);
+    } else {
+      // Prova sessione esistente senza forzare login.
+      await openAgendaInApp(page);
+    }
     await openAgendaInApp(page);
     await gotoAgendaDate(page, args.date);
 

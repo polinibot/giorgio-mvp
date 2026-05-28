@@ -406,6 +406,14 @@ class YapDeleteAppointmentRequest(BaseModel):
     fresh_login: bool = False
 
 
+class YapManualDeleteRequest(BaseModel):
+    date: str
+    search: str
+    dry_run: bool = False
+    debug: bool = False
+    fresh_login: bool = False
+
+
 class YapAuditRequest(BaseModel):
     date: Optional[str] = None
     time: Optional[str] = None
@@ -1813,6 +1821,39 @@ async def delete_practice_yap_appointment(
         success=True,
         data={
             "status": result.get("status") or ("deleted" if result.get("deleted") else "not_deleted"),
+            "yap": result,
+        },
+    )
+
+
+@app.post("/yap/appointment/manual-delete")
+@limiter.limit("10/minute")
+async def manual_delete_yap_appointment(
+    request: Request,
+    body: YapManualDeleteRequest,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    del user_data
+    _ensure_yap_credentials("eliminare manualmente l'appuntamento su YAP")
+
+    if not str(body.date or "").strip() or not str(body.search or "").strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Date e search sono obbligatori")
+
+    args = ["--date", str(body.date).strip(), "--search", str(body.search).strip()]
+    if body.dry_run:
+        args.append("--dry-run")
+    if body.debug:
+        args.append("--debug")
+    if body.fresh_login:
+        args.append("--fresh-login")
+
+    result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
+    status_value = result.get("status") or ("deleted" if result.get("deleted") else "not_deleted")
+    return APIResponse(
+        success=bool(result.get("deleted")),
+        data={
+            "status": status_value,
             "yap": result,
         },
     )
