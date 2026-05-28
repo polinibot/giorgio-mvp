@@ -287,6 +287,23 @@ async function visibleTimeLabels(page) {
   });
 }
 
+async function waitForAppointmentPopup(page, timeout = 6000) {
+  return page.waitForFunction(() => {
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const popups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")];
+    return popups.some((popup) => {
+      if (!isVisible(popup)) return false;
+      const text = (popup.textContent || "").toLowerCase();
+      const visibleInputs = [...popup.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible);
+      return text.includes("dettagli appuntamento") || visibleInputs.length >= 5;
+    });
+  }, null, { timeout }).then(() => true).catch(() => false);
+}
+
 function minutesOf(time) {
   const [hours, minutes] = String(time || "").replace(".", ":").split(":").map(Number);
   return hours * 60 + minutes;
@@ -367,13 +384,35 @@ async function clickApproximateSlot(page, targetTime) {
     }
   }
 
-  await page.waitForTimeout(120);
-  const clickX = (slot.text || slot.time)
-    ? slot.x + slot.width + 260
-    : slot.x + Math.min(220, slot.width / 2);
   const clickY = slot.y + Math.max(8, slot.height / 2);
-  await page.mouse.dblclick(clickX, clickY);
-  await page.getByText("Dettagli appuntamento").first().waitFor({ state: "visible", timeout: 15000 });
+  const clickPoints = [
+    {
+      x: slot.x + Math.max(20, slot.width / 2),
+      y: clickY,
+    },
+    {
+      x: slot.x + slot.width + 120,
+      y: clickY,
+    },
+    {
+      x: slot.x + slot.width + 220,
+      y: clickY,
+    },
+    {
+      x: slot.x + slot.width + 320,
+      y: clickY,
+    },
+  ];
+
+  for (const point of clickPoints) {
+    await page.mouse.dblclick(point.x, point.y);
+    const opened = await waitForAppointmentPopup(page, 5000);
+    if (opened) return;
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(200);
+  }
+
+  throw new Error("Popup YAP non aperto dopo il click sullo slot");
 }
 
 async function inputSnapshot(page) {
@@ -401,8 +440,19 @@ async function inputSnapshot(page) {
 
 async function appointmentPopupRect(page) {
   return page.evaluate(() => {
-    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
-      .find((element) => (element.textContent || "").includes("Dettagli appuntamento"));
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")]
+      .find((element) => {
+        if (!isVisible(element)) return false;
+        const text = (element.textContent || "").toLowerCase();
+        if (text.includes("dettagli appuntamento")) return true;
+        const visibleInputs = [...element.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible);
+        return visibleInputs.length >= 5;
+      });
     if (!popup) return null;
     const rect = popup.getBoundingClientRect();
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
