@@ -1676,7 +1676,36 @@ async def sync_practice_to_yap(
             args.append("--fresh-login")
 
         # Budget hardening: timeout contenuto per evitare attese eccessive lato UI.
-        result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=150, db=db)
+        try:
+            result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=150, db=db)
+        except HTTPException as worker_exc:
+            detail = worker_exc.detail if isinstance(worker_exc.detail, dict) else {"message": str(worker_exc.detail)}
+            practice.synced = False
+            practice.management_sync_status = "sync_failed"
+            practice.management_last_sync_at = datetime.now(timezone.utc)
+            practice.updated_by_telegram_id = user_data["id"]
+            db.commit()
+            return APIResponse(
+                success=True,
+                data={
+                    "status": "sync_failed",
+                    "message": str(detail.get("message") or "Sync YAP non riuscita."),
+                    "audit": None,
+                    "preSync": check,
+                    "yap": {
+                        "ok": False,
+                        "error": detail,
+                    },
+                    "practice": {
+                        "id": practice.id,
+                        "synced": practice.synced,
+                        "management_sync_status": practice.management_sync_status,
+                        "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
+                        "management_external_id": practice.management_external_id,
+                        "management_audit_result": serialize(practice).get("management_audit_result"),
+                    },
+                },
+            )
         result_data = result.get("result") or {}
         saved = bool(result_data.get("saved"))
         duplicate = result_data.get("mode") == "commit-blocked-duplicate"

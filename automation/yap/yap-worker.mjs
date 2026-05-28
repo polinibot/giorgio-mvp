@@ -1152,10 +1152,21 @@ async function runYapAutomation(job, args) {
           message: "Commit bloccato: appuntamento duplicato rilevato in agenda.",
         };
       }
-      await page.waitForTimeout(900);
-      await fillAppointmentPopup(page, job);
-      const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
-      await page.waitForTimeout(220);
+      await page.waitForTimeout(700);
+      let putResponse = null;
+      let saveAttemptsUsed = 0;
+      let popupSaveError = null;
+      try {
+        await fillAppointmentPopup(page, job);
+        const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
+        putResponse = popupSave.putResponse;
+        saveAttemptsUsed = popupSave.saveAttemptsUsed;
+        await page.waitForTimeout(220);
+      } catch (saveErr) {
+        popupSaveError = saveErr?.message || "Salvataggio popup duplicato non confermato";
+        await page.keyboard.press("Escape").catch(() => {});
+        await page.waitForTimeout(140);
+      }
       let managementWrite = null;
       if (shouldWriteOdlFromWorker()) {
         managementWrite = await writePracticeAndOdl(page, job, args).catch((error) => ({
@@ -1176,8 +1187,11 @@ async function runYapAutomation(job, args) {
         telemetry: {
           saveAttempts: saveAttemptsUsed,
         },
+        warning: popupSaveError || undefined,
         managementWrite,
-        message: "Appuntamento duplicato aggiornato su YAP.",
+        message: popupSaveError
+          ? "Duplicato gestito: popup agenda non confermato, verifica tramite audit."
+          : "Appuntamento duplicato aggiornato su YAP.",
       };
     }
 
