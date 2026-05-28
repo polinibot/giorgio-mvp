@@ -151,6 +151,7 @@ class TestYapSyncEndpoints:
     def test_yap_sync_returns_agenda_scope_summary(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
+        monkeypatch.delenv("YAP_AUTO_AUDIT_ON_SYNC", raising=False)
 
         import main
         from automation_service import AutomationService
@@ -162,15 +163,6 @@ class TestYapSyncEndpoints:
         )
 
         async def fake_run_yap_script(script_name, *args, **kwargs):
-            if script_name == "yap-audit-appointment.mjs":
-                return {
-                    "ok": True,
-                    "status": "partial_synced",
-                    "message": "Agenda presente, mancano ODL/materiali/ricambi/note.",
-                    "present": [{"field": "agenda.cosa", "label": "Cosa", "expected": "YAPTEST01", "found": "YAPTEST01"}],
-                    "missing": [{"field": "odl.officina.man", "label": "MAN officina", "expected": "MAN 1", "found": None}],
-                    "mismatch": [],
-                }
             return {
                 "result": {
                     "saved": True,
@@ -191,11 +183,11 @@ class TestYapSyncEndpoints:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["status"] == "partial_synced"
-        assert data["message"] == "Agenda presente, mancano ODL/materiali/ricambi/note."
+        assert data["status"] == "agenda_synced"
+        assert data["message"] == "Agenda sincronizzata. ODL/materiali/ricambi pianificati."
         assert data["syncScope"]["mode"] == "agenda_only"
-        assert data["practice"]["management_sync_status"] == "partial_synced"
-        assert data["audit"]["missing"][0]["field"] == "odl.officina.man"
+        assert data["practice"]["management_sync_status"] == "agenda_synced"
+        assert data["audit"] is None
 
     @pytest.mark.parametrize(
         "audit_status,expected_synced",
@@ -234,6 +226,29 @@ class TestYapSyncEndpoints:
         assert data["status"] == audit_status
         assert data["practice"]["management_sync_status"] == audit_status
         assert data["practice"]["synced"] is expected_synced
+
+    def test_practice_delete_blocks_local_delete_when_yap_not_found(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+
+        async def fake_run_yap_script(*args, **kwargs):
+            return {
+                "found": False,
+                "deleted": False,
+                "status": "not_found",
+            }
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.delete(
+            f"/practices/{sample_practice['id']}?user_id=761118078",
+        )
+
+        assert response.status_code == 409
+        data = response.json()
+        assert "eliminazione locale bloccata" in str(data["detail"]).lower()
 
 
 class TestYapTestErrorChannel:

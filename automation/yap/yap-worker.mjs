@@ -422,11 +422,30 @@ async function clickApproximateSlot(page, targetTime) {
   ];
 
   for (const point of clickPoints) {
-    await page.mouse.dblclick(point.x, point.y);
-    const opened = await waitForAppointmentPopup(page, 5000);
+    const clicked = await safeEvaluate(page, ({ x, y }) => {
+      const dispatch = (type) => {
+        const target = document.elementFromPoint(x, y);
+        if (!target) return false;
+        target.dispatchEvent(new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          clientX: x,
+          clientY: y,
+        }));
+        return true;
+      };
+      const first = dispatch("click");
+      if (!first) return false;
+      dispatch("click");
+      dispatch("dblclick");
+      return true;
+    }, point).catch(() => false);
+    if (!clicked) continue;
+    const opened = await waitForAppointmentPopup(page, 1800);
     if (opened) return;
     await page.keyboard.press("Escape").catch(() => {});
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(120);
   }
 
   throw new Error("Popup YAP non aperto dopo il click sullo slot");

@@ -1395,12 +1395,17 @@ async def delete_practice(
                 ["--date", date_iso, "--search", str(search)],
                 db=db,
             )
-            if result.get("found") and not result.get("deleted"):
+            if not result.get("deleted"):
                 failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
                 if failure_status == "blocked_by_odl":
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Impossibile cancellare la pratica: l'appuntamento YAP è collegato a un ordine di lavoro",
+                    )
+                if failure_status == "not_found" or result.get("found") is False:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Impossibile cancellare la pratica: appuntamento YAP non trovato, eliminazione locale bloccata",
                     )
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1585,7 +1590,7 @@ async def sync_practice_to_yap(
         result_data = result.get("result") or {}
         saved = bool(result_data.get("saved"))
         duplicate = result_data.get("mode") == "commit-blocked-duplicate"
-        response_status = "synced" if saved else ("duplicate" if duplicate else "dry_run")
+        response_status = "agenda_synced" if saved else ("duplicate" if duplicate else "dry_run")
         response_message = sync_scope["summary"] if (saved or duplicate) else (result_data.get("message") or result.get("message") or "Dry-run YAP completato: nessuna modifica eseguita.")
         audit_result = None
 
@@ -1593,24 +1598,33 @@ async def sync_practice_to_yap(
             external_id = result_data.get("externalId") or result_data.get("external_id")
             if external_id:
                 practice.management_external_id = str(external_id)
-            audit_args = ["--payload-file", tmp_path]
-            if body.debug:
-                audit_args.append("--debug")
-            if body.fresh_login:
-                audit_args.append("--fresh-login")
-            try:
-                audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=240, db=db)
-            except HTTPException as audit_exc:
-                failed_audit = {
-                    "ok": False,
-                    "status": "sync_failed",
-                    "message": "Salvataggio YAP non verificato.",
-                    "error": audit_exc.detail,
-                }
-                _persist_yap_audit_result(db, practice, failed_audit, user_data["id"])
-                raise
-            response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
-            response_message = _audit_message_for_status(response_status, audit_result)
+            practice.synced = True
+            practice.management_sync_status = "agenda_synced"
+            practice.management_last_sync_at = datetime.now(timezone.utc)
+            practice.updated_by_telegram_id = user_data["id"]
+            db.commit()
+
+            should_auto_audit = str(os.getenv("YAP_AUTO_AUDIT_ON_SYNC", "")).strip().lower() in {"1", "true", "yes", "on"}
+            if should_auto_audit:
+                audit_args = ["--payload-file", tmp_path, "--quick"]
+                if body.debug:
+                    audit_args.append("--debug")
+                if body.fresh_login:
+                    audit_args.append("--fresh-login")
+                try:
+                    audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=120, db=db)
+                    response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
+                    response_message = _audit_message_for_status(response_status, audit_result)
+                except HTTPException as audit_exc:
+                    logger.warning("Audit auto-sync non riuscito per pratica %d: %s", practice_id, audit_exc.detail)
+                    audit_result = {
+                        "ok": False,
+                        "status": "agenda_synced",
+                        "message": "Agenda salvata, verifica completa non disponibile ora.",
+                        "error": audit_exc.detail,
+                    }
+                    response_status = "agenda_synced"
+                    response_message = "Agenda sincronizzata. Verifica completa disponibile dal pulsante Verifica YAP."
         elif not body.dry_run:
             practice.synced = False
             practice.management_sync_status = "sync_failed"

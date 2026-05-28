@@ -35,6 +35,7 @@ function parseArgs(argv) {
     headed: false,
     debug: false,
     freshLogin: false,
+    quick: false,
     artifactDir: process.env.YAP_ARTIFACT_DIR || DEFAULT_ARTIFACT_DIR,
   };
 
@@ -53,6 +54,7 @@ function parseArgs(argv) {
     else if (arg === "--headed") args.headed = true;
     else if (arg === "--debug") args.debug = true;
     else if (arg === "--fresh-login") args.freshLogin = true;
+    else if (arg === "--quick") args.quick = true;
     else if (arg === "--artifact-dir") args.artifactDir = next();
     else if (arg === "--help" || arg === "-h") args.help = true;
     else throw new Error(`Argomento non riconosciuto: ${arg}`);
@@ -385,7 +387,7 @@ async function runAudit(mapping, args) {
     const popup = await extractPopup(page);
     const toolbar = await extractAgendaToolbar(page);
     let practice = { openedPractice: false, openedOdl: false, text: "", clickLabels: [] };
-    if (popup.found) {
+    if (popup.found && !args.quick) {
       practice = await tryOpenPracticeAndOdl(page);
     }
 
@@ -402,6 +404,7 @@ async function runAudit(mapping, args) {
       ok: outcome.status !== "sync_failed",
       checkedAt: new Date().toISOString(),
       mode: "readonly_yap_audit",
+      quick: Boolean(args.quick),
       status: outcome.status,
       message: outcome.message,
       expected: {
