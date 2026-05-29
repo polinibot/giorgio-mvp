@@ -118,6 +118,7 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
     else if (result.yap?.result?.saved || result.yap?.result?.mode === 'commit') status = 'partial_synced';
     else if (normalizedMessage.includes('agenda sincronizzata')) status = 'partial_synced';
     else if (normalizedMessage.includes('appuntamento eliminato')) status = 'deleted';
+    else if (normalizedMessage.includes('non trovato') || normalizedMessage.includes('not found')) status = 'not_found';
     else if (normalizedMessage.includes('fallita') || normalizedMessage.includes('errore')) status = 'sync_failed';
   }
 
@@ -167,6 +168,7 @@ function formatYapPracticeStatus(practice) {
   if (status === 'blocked_by_odl') return 'Eliminazione bloccata da ODL';
   if (status === 'duplicate') return 'Agenda già presente in YAP';
   if (status === 'not_ready') return 'Pratica non pronta per YAP';
+  if (status === 'not_found') return 'Appuntamento giÃ  assente su YAP';
   if (status) return status;
   return practice?.synced ? 'Sincronizzata' : 'Non sincronizzata';
 }
@@ -2046,9 +2048,15 @@ function App() {
       setYapLastResult(data);
       rememberResponse('yap.delete');
       const phaseLabel = summarizePhaseTimeline(data.phase_timeline, data.message || 'Eliminazione YAP completata.');
-      if (data.status === 'deleted') {
-        addToast('Appuntamento eliminato da YAP', 'success');
-        loadDetail(id);
+      if (data.status === 'deleted' || data.status === 'not_found') {
+        addToast(data.status === 'not_found' ? 'Appuntamento giÃ  assente su YAP. Pratica rimossa.' : 'Appuntamento eliminato da YAP', 'success');
+        if (String(selectedPracticeId || '') === String(id)) {
+          setCurrentView('dashboard');
+          setNavigationStack([]);
+          setSelectedPracticeId(null);
+          setDetailData(null);
+        }
+        await loadDashboard(searchQuery, activeFilters);
       } else if (data.status === 'blocked_by_odl') {
         addToast('Impossibile eliminare: associato a ordine di lavoro', 'warning');
       } else {
@@ -2075,7 +2083,7 @@ function App() {
     } finally {
       setYapDeleteLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, selectedPracticeId, loadDashboard, searchQuery, activeFilters]);
 
   const auditYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -2148,6 +2156,7 @@ function App() {
       not_ready: 'Pratica non pronta',
       blocked_by_odl: 'Eliminazione bloccata da ODL',
       deleted: 'Appuntamento eliminato',
+      not_found: 'Appuntamento giÃ  assente',
       sync_failed: 'Sync YAP fallita',
       delete_failed: 'Eliminazione YAP fallita',
       running: 'Operazione YAP in corso',
@@ -2156,15 +2165,16 @@ function App() {
     const message = safeResult.message
       || safeResult.yap?.result?.message
       || safeResult.yap?.message
-      || (status === 'deleted' ? 'Appuntamento eliminato da YAP.' : '')
+      || ((status === 'deleted' || status === 'not_found') ? 'Appuntamento eliminato da YAP.' : '')
       || '';
     if (status === 'unknown') {
       const normalizedMessage = String(message || '').toLowerCase();
       if (normalizedMessage.includes('agenda sincronizzata')) status = 'agenda_synced';
       if (normalizedMessage.includes('appuntamento eliminato')) status = 'deleted';
+      if (normalizedMessage.includes('non trovato') || normalizedMessage.includes('not found')) status = 'not_found';
       if (normalizedMessage.includes('fallita') || normalizedMessage.includes('errore')) status = 'sync_failed';
     }
-    const isSuccess = status === 'complete_synced' || status === 'deleted';
+    const isSuccess = status === 'complete_synced' || status === 'deleted' || status === 'not_found';
     const isWarning = ['partial_synced', 'agenda_synced', 'synced', 'not_ready', 'blocked_by_odl', 'dry_run'].includes(status);
     const toneClass = isSuccess ? 'yap-success' : (isWarning ? 'yap-warning' : 'yap-error');
     const meta = [];
@@ -2272,7 +2282,9 @@ function App() {
                     <li key={`${group.key}-${item.field || index}`}>
                       <span>{item.label || item.field}</span>
                       {item.expected != null && <small>atteso: {String(item.expected)}</small>}
-                      {item.found && group.key === 'mismatch' && <small>trovato: {String(item.found).slice(0, 120)}</small>}
+                      {item.found && group.key === 'mismatch' && <small>trovato: {String(item.found_preview || item.found).slice(0, 160)}</small>}
+                      {item.reason && <small>motivo: {String(item.reason)}</small>}
+                      {item.hint && <small>azione: {String(item.hint)}</small>}
                     </li>
                   ))}
                   {group.items.length > 8 && <li className="yap-audit-more">+{group.items.length - 8} altri campi</li>}

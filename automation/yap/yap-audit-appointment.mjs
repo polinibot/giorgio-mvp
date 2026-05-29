@@ -116,8 +116,8 @@ function buildExpected(mapping) {
     }
     if (lav.ore_man != null) fields.push({ group: "odl", field: `odl.${rep}.man`, label: `MAN ${rep}`, expected: `MAN ${lav.ore_man}`, kind: "contains" });
     if (lav.ore_mac != null) fields.push({ group: "odl", field: `odl.${rep}.mac`, label: `MAC ${rep}`, expected: `MAC ${lav.ore_mac}`, kind: "contains" });
-    if (lav.materiali_euro != null) fields.push({ group: "materials", field: `odl.${rep}.materiali`, label: `Materiali ${rep}`, expected: String(lav.materiali_euro), kind: "contains" });
-    if (lav.smaltimento?.applica) fields.push({ group: "waste", field: `odl.${rep}.smaltimento`, label: `Smaltimento ${rep}`, expected: String(lav.smaltimento.percentuale ?? 2), kind: "contains" });
+    if (lav.materiali_euro != null) fields.push({ group: "materials", field: `odl.${rep}.materiali`, label: `Materiali ${rep}`, expected: String(lav.materiali_euro), kind: "number_contains" });
+    if (lav.smaltimento?.applica) fields.push({ group: "waste", field: `odl.${rep}.smaltimento`, label: `Smaltimento ${rep}`, expected: String(lav.smaltimento.percentuale ?? 2), kind: "number_contains" });
     for (const part of lav.ricambi || []) {
       const name = part.name || part.nome || "";
       const qty = part.quantity || part.quantita || "";
@@ -146,11 +146,45 @@ function normalizeTimeValue(value) {
   return `${Number(match[1])}.${match[2]}`;
 }
 
+function normalizeDateValue(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})/);
+  if (!match) return comparable(value);
+  const day = String(Number(match[1])).padStart(2, "0");
+  const month = String(Number(match[2])).padStart(2, "0");
+  const year = String(match[3]).length === 2 ? `20${match[3]}` : String(match[3]);
+  return `${day}/${month}/${year}`;
+}
+
+function parseNumeric(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const normalized = raw.replace(/\s+/g, "").replace(",", ".");
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const num = Number.parseFloat(match[0]);
+  return Number.isFinite(num) ? num : null;
+}
+
+function numericContains(expected, found) {
+  const expectedNum = parseNumeric(expected);
+  if (expectedNum == null) return false;
+  const values = String(found || "")
+    .replace(/,/g, ".")
+    .match(/-?\d+(?:\.\d+)?/g);
+  if (!values?.length) return false;
+  return values.some((candidate) => {
+    const num = Number.parseFloat(candidate);
+    return Number.isFinite(num) && Math.abs(num - expectedNum) <= 0.01;
+  });
+}
+
 function valueMatches(expected, found, kind) {
   if (!expected) return true;
   if (!found) return false;
   if (kind === "time") return normalizeTimeValue(expected) === normalizeTimeValue(found);
-  if (kind === "date") return comparable(expected) === comparable(found);
+  if (kind === "date") return normalizeDateValue(expected) === normalizeDateValue(found);
+  if (kind === "number_contains") return numericContains(expected, found);
   if (kind === "contains") return comparable(found).includes(comparable(expected));
   return comparable(expected) === comparable(found);
 }
@@ -320,17 +354,21 @@ async function tryOpenPracticeAndOdl(page) {
       return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
     };
     const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const isBoilerplate = (value) =>
+      /dettagli pratica preventivi ordini di lavoro documenti fiscali ddt di uscita ordini a fornitore notifiche firme/i.test(
+        clean(value).toLowerCase(),
+      );
     const sectionTextFromKeyword = (keywordRegex) => {
       const anchors = [...document.querySelectorAll("h1,h2,h3,h4,label,span,div,td,th,a,button")]
         .filter(isVisible)
         .filter((el) => keywordRegex.test(clean(el.textContent || "").toLowerCase()));
       const sections = anchors
-        .map((el) => el.closest(".gwt-DecoratorPanel, .gwt-DialogBox, .gwt-PopupPanel, .gwt-TabLayoutPanel, .gwt-TabPanel, .gwt-StackPanel, table, form, section, article, .panel, .content, .container"))
+        .map((el) => el.closest("tr, .gwt-DecoratorPanel, .gwt-DialogBox, .gwt-PopupPanel, .gwt-TabLayoutPanel, .gwt-TabPanel, .gwt-StackPanel, table, form, section, article, .panel, .content, .container"))
         .filter(Boolean);
       const uniqueSections = [...new Set(sections)];
       const text = uniqueSections
         .map((section) => clean(section.innerText || section.textContent || ""))
-        .filter(Boolean)
+        .filter((chunk) => chunk && chunk.length <= 1600 && !isBoilerplate(chunk))
         .join(" | ");
       return text.slice(0, 12000);
     };
@@ -343,7 +381,7 @@ async function tryOpenPracticeAndOdl(page) {
         .slice(0, 12000);
 
     return {
-      notesText: [sectionTextFromKeyword(/\bnote\b/i), readValues("textarea,input[type='text']")].filter(Boolean).join(" | "),
+      notesText: [sectionTextFromKeyword(/\bnote\b/i), readValues("textarea")].filter(Boolean).join(" | "),
       odlText: sectionTextFromKeyword(/\bordini?\s+di\s+lavoro\b|\bodl\b|\bman\b|\bmac\b/i),
       materialsText: sectionTextFromKeyword(/\bmateriali\b|\bconsumo\b/i),
       partsText: sectionTextFromKeyword(/\bricambi\b|\barticoli\b|\bmagazzino\b/i),
@@ -374,21 +412,75 @@ function resolveFoundValue(field, found) {
   return "";
 }
 
+function sanitizeFoundValue(field, value) {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  const normalized = raw.toLowerCase();
+  const isPracticeBoilerplate = /dettagli pratica preventivi ordini di lavoro documenti fiscali ddt di uscita ordini a fornitore notifiche firme/.test(
+    normalized,
+  );
+  if (isPracticeBoilerplate && ["notes", "odl", "materials", "parts", "waste"].includes(field.group)) {
+    return "";
+  }
+  return raw;
+}
+
+function buildAuditHint(field) {
+  if (field.group === "agenda") return "Apri popup appuntamento e verifica Cosa/Quando/Dalle/Alle.";
+  if (field.group === "tags") return "Apri popup appuntamento e riallinea i tag richiesti.";
+  if (field.group === "notes") return "Apri Gestione pratica e controlla note interne/reparto.";
+  if (field.group === "odl") return "Apri Gestione pratica > Ordini di lavoro e verifica descrizioni/MAN/MAC.";
+  if (field.group === "materials") return "Apri Ordini di lavoro > Materiali di consumo e verifica importo.";
+  if (field.group === "parts") return "Apri Ordini di lavoro > Ricambi/Articoli e verifica nome + quantita'.";
+  if (field.group === "waste") return "Apri Gestione pratica > Smaltimento rifiuti e verifica percentuale.";
+  return "Verifica il campo in YAP.";
+}
+
+function buildMismatchReason(field, expected, actual) {
+  if (!actual) return "campo_non_rilevato";
+  if (field.kind === "time") return "orario_diverso";
+  if (field.kind === "date") return "data_diversa";
+  if (field.kind === "number_contains") return "valore_numerico_diverso";
+  if (field.kind === "contains") return "testo_atteso_non_trovato";
+  return "valore_diverso";
+}
+
+function previewValue(value, maxLen = 180) {
+  const clean = String(value || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  return clean.length <= maxLen ? clean : `${clean.slice(0, maxLen)}...`;
+}
+
 function classifyAudit(fields, found) {
   const present = [];
   const missing = [];
   const mismatch = [];
 
   for (const field of fields) {
-    const actual = resolveFoundValue(field, found);
+    const actual = sanitizeFoundValue(field, resolveFoundValue(field, found));
     if (valueMatches(field.expected, actual, field.kind)) {
       present.push({ ...field, found: actual });
       continue;
     }
+    const reason = buildMismatchReason(field, field.expected, actual);
+    const hint = buildAuditHint(field);
     if (actual) {
-      mismatch.push({ ...field, found: actual });
+      mismatch.push({
+        ...field,
+        found: actual,
+        found_preview: previewValue(actual),
+        expected_preview: previewValue(field.expected),
+        reason,
+        hint,
+      });
     } else {
-      missing.push({ ...field, found: actual || null });
+      missing.push({
+        ...field,
+        found: actual || null,
+        expected_preview: previewValue(field.expected),
+        reason,
+        hint,
+      });
     }
   }
 

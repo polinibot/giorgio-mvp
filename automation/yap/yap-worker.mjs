@@ -589,16 +589,36 @@ async function addYapTagChips(page, tags) {
     const popup = popups.find((p) => (p.textContent || "").includes("Dettagli"));
     if (!popup) return;
 
-    const existing = (popup.textContent || "").toLowerCase();
-    for (const tag of desiredTags) {
-      if (existing.includes(tag.toLowerCase())) continue;
+    const normalize = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const isPressedNode = (node) => {
+      if (!node) return false;
+      const pressed = node.getAttribute("aria-pressed");
+      if (pressed === "true") return true;
+      const cls = normalize(node.className || "");
+      return /\b(active|selected|checked|on)\b/.test(cls);
+    };
+    const findTagHost = (tag) => {
+      const tagNorm = normalize(tag);
+      const candidates = [...popup.querySelectorAll("button, a, [role='button'], .gwt-ToggleButton, .gwt-Button, div, span")]
+        .filter(isVisible)
+        .map((el) => {
+          const text = normalize(el.textContent || el.getAttribute("title") || el.getAttribute("aria-label") || "");
+          return { el, text };
+        })
+        .filter((item) => item.text === tagNorm);
+      return candidates[0]?.el || null;
+    };
 
-      const clickable = [...popup.querySelectorAll("div, span, button, a")].find((el) => {
-        const text = (el.textContent || "").trim().toLowerCase();
-        return text === tag.toLowerCase() && el.getBoundingClientRect().width > 0;
-      });
-      if (clickable) {
-        clickable.click();
+    for (const tag of desiredTags) {
+      const host = findTagHost(tag);
+      if (host) {
+        if (isPressedNode(host)) continue;
+        host.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
         continue;
       }
 
@@ -748,6 +768,18 @@ async function fillBestEditableByKeywords(page, keywords, value, { append = fals
   }, { keywordsRaw: keywords, text: textValue, appendMode: Boolean(append) }).catch(() => false);
 }
 
+async function fillWithRetry(page, attempts, value, options = {}) {
+  const plans = Array.isArray(attempts) ? attempts : [];
+  for (const attempt of plans) {
+    const keywords = Array.isArray(attempt) ? attempt : (attempt?.keywords || []);
+    const append = typeof attempt === "object" && "append" in attempt ? attempt.append : options.append;
+    const ok = await fillBestEditableByKeywords(page, keywords, value, { ...options, append });
+    if (ok) return true;
+    await page.waitForTimeout(120).catch(() => {});
+  }
+  return false;
+}
+
 async function appendStructuredBlockToAnyTextarea(page, text) {
   const payload = String(text || "").trim();
   if (!payload) return false;
@@ -835,9 +867,13 @@ async function writePracticeAndOdl(page, job, args) {
 
   if (job.internalNotes) {
     try {
-      writeReport.notes.success = await fillBestEditableByKeywords(
+      writeReport.notes.success = await fillWithRetry(
         page,
-        ["note", "note interne", "pratica", "annotazioni"],
+        [
+          ["note interne", "note", "pratica", "annotazioni"],
+          ["note", "annotazioni", "odl"],
+          ["note", "pratica"],
+        ],
         String(job.internalNotes).trim(),
         { append: true },
       );
@@ -861,9 +897,13 @@ async function writePracticeAndOdl(page, job, args) {
       await page.waitForTimeout(180);
     }
     const sectionSummary = buildSectionSummary(section);
-    const sectionWritten = await fillBestEditableByKeywords(
+    const sectionWritten = await fillWithRetry(
       page,
-      [...repartoKeys, "descrizione", "lavoro", "odl", "intervento", "note reparto"],
+      [
+        [...repartoKeys, "descrizione", "lavoro", "odl", "intervento", "note reparto"],
+        [...repartoKeys, "odl", "descrizione"],
+        [...repartoKeys, "lavoro", "intervento"],
+      ],
       sectionSummary,
       { append: true },
     );
@@ -872,27 +912,59 @@ async function writePracticeAndOdl(page, job, args) {
 
     if (section.ore_man != null) {
       writeReport.hours.man.attempted = true;
-      const manOk = await fillBestEditableByKeywords(page, [...repartoKeys, "man", "ore uomo", "manodopera"], String(section.ore_man));
+      const manOk = await fillWithRetry(
+        page,
+        [
+          [...repartoKeys, "man", "ore uomo", "manodopera"],
+          [...repartoKeys, "manodopera", "man"],
+          [...repartoKeys, "ore uomo", "man"],
+        ],
+        String(section.ore_man),
+      );
       writeReport.hours.man.success = writeReport.hours.man.success || manOk;
       if (!manOk && !writeReport.hours.man.error) writeReport.hours.man.error = "man_field_not_found";
       writeReport.odl.success = writeReport.odl.success || manOk;
     }
     if (section.ore_mac != null) {
       writeReport.hours.mac.attempted = true;
-      const macOk = await fillBestEditableByKeywords(page, [...repartoKeys, "mac", "ore macchina", "manodopera"], String(section.ore_mac));
+      const macOk = await fillWithRetry(
+        page,
+        [
+          [...repartoKeys, "mac", "ore macchina", "manodopera"],
+          [...repartoKeys, "manodopera", "mac"],
+          [...repartoKeys, "ore macchina", "mac"],
+        ],
+        String(section.ore_mac),
+      );
       writeReport.hours.mac.success = writeReport.hours.mac.success || macOk;
       if (!macOk && !writeReport.hours.mac.error) writeReport.hours.mac.error = "mac_field_not_found";
       writeReport.odl.success = writeReport.odl.success || macOk;
     }
     if (section.materiali_euro != null) {
       writeReport.materials.attempted = true;
-      const matOk = await fillBestEditableByKeywords(page, [...repartoKeys, "materiali", "consumo", "euro"], String(section.materiali_euro));
+      const matOk = await fillWithRetry(
+        page,
+        [
+          [...repartoKeys, "materiali", "consumo", "euro"],
+          [...repartoKeys, "materiali di consumo", "materiali"],
+          [...repartoKeys, "materiali"],
+        ],
+        String(section.materiali_euro),
+      );
       writeReport.materials.success = writeReport.materials.success || matOk;
       if (!matOk && !writeReport.materials.error) writeReport.materials.error = "materials_field_not_found";
     }
     if (section.smaltimento_applica) {
       writeReport.waste.attempted = true;
-      const smaltOk = await fillBestEditableByKeywords(page, [...repartoKeys, "smaltimento", "rifiuti", "%"], String(section.smaltimento_percentuale ?? 2));
+      const smaltOk = await fillWithRetry(
+        page,
+        [
+          [...repartoKeys, "smaltimento", "rifiuti", "%"],
+          [...repartoKeys, "smaltimento rifiuti", "smaltimento"],
+          [...repartoKeys, "rifiuti", "percentuale"],
+        ],
+        String(section.smaltimento_percentuale ?? 2),
+      );
       writeReport.waste.success = writeReport.waste.success || smaltOk;
       if (!smaltOk && !writeReport.waste.error) writeReport.waste.error = "waste_field_not_found";
     }
@@ -907,9 +979,13 @@ async function writePracticeAndOdl(page, job, args) {
         .filter(Boolean)
         .join("\n");
       if (partsText) {
-        const partsOk = await fillBestEditableByKeywords(
+        const partsOk = await fillWithRetry(
           page,
-          [...repartoKeys, "ricambi", "articoli", "magazzino", "pezzi"],
+          [
+            [...repartoKeys, "ricambi", "articoli", "magazzino", "pezzi"],
+            [...repartoKeys, "articoli magazzino", "ricambi"],
+            [...repartoKeys, "ricambi", "articoli"],
+          ],
           partsText,
           { append: true },
         );

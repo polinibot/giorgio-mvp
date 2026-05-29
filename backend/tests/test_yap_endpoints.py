@@ -254,7 +254,7 @@ class TestYapSyncEndpoints:
         assert data["practice"]["management_sync_status"] == audit_status
         assert data["practice"]["synced"] is expected_synced
 
-    def test_practice_delete_blocks_local_delete_when_yap_not_found(self, client, sample_practice, monkeypatch):
+    def test_practice_delete_allows_local_delete_when_yap_not_found(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
@@ -279,9 +279,75 @@ class TestYapSyncEndpoints:
             f"/practices/{sample_practice['id']}?user_id=761118078",
         )
 
-        assert response.status_code == 409
-        data = response.json()
-        assert "eliminazione locale bloccata" in str(data["detail"]).lower()
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "cancellata" in str(data.get("message", "")).lower()
+
+        listed = client.get("/api/practices?user_id=761118078")
+        assert listed.status_code == 200
+        ids = [item["id"] for item in listed.json().get("data", [])]
+        assert sample_practice["id"] not in ids
+
+    def test_yap_delete_endpoint_soft_deletes_when_not_found(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+
+        async def fake_run_yap_script(*args, **kwargs):
+            return {
+                "found": False,
+                "deleted": False,
+                "status": "not_found",
+            }
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.request(
+            "DELETE",
+            f"/practices/{sample_practice['id']}/yap/appointment?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "not_found"
+
+        listed = client.get("/api/practices?user_id=761118078")
+        assert listed.status_code == 200
+        ids = [item["id"] for item in listed.json().get("data", [])]
+        assert sample_practice["id"] not in ids
+
+    def test_yap_delete_endpoint_keeps_practice_when_blocked_by_odl(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+
+        async def fake_run_yap_script(*args, **kwargs):
+            return {
+                "found": True,
+                "deleted": False,
+                "status": "blocked_by_odl",
+                "deleteAction": {"failureStatus": "blocked_by_odl"},
+            }
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.request(
+            "DELETE",
+            f"/practices/{sample_practice['id']}/yap/appointment?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "blocked_by_odl"
+
+        listed = client.get("/api/practices?user_id=761118078")
+        assert listed.status_code == 200
+        ids = [item["id"] for item in listed.json().get("data", [])]
+        assert sample_practice["id"] in ids
 
 
 class TestYapTestErrorChannel:

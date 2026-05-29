@@ -1569,15 +1569,12 @@ async def delete_practice(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Impossibile cancellare la pratica: l'appuntamento YAP è collegato a un ordine di lavoro",
                     )
-                if failure_status == "not_found" or result.get("found") is False:
+                # Se non trovato su YAP, consideriamo la pratica gia' rimossa lato agenda.
+                if failure_status not in {"not_found"} and result.get("found") is not False:
                     raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Impossibile cancellare la pratica: appuntamento YAP non trovato, eliminazione locale bloccata",
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="Impossibile cancellare l'appuntamento su YAP",
                     )
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="Impossibile cancellare l'appuntamento su YAP",
-                )
 
         practice.status = PracticeStatus.DELETED
         practice.updated_by_telegram_id = user_data["id"]
@@ -2060,10 +2057,13 @@ async def delete_practice_yap_appointment(
         args.append("--fresh-login")
 
     result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
-    close_phase("delete", "completed" if result.get("deleted") else "failed", "Delete YAP eseguita.")
-    if not body.dry_run and result.get("deleted"):
+    status_value = result.get("status") or ("deleted" if result.get("deleted") else ("not_found" if result.get("found") is False else "not_deleted"))
+    delete_succeeded = bool(result.get("deleted") or status_value == "not_found" or result.get("found") is False)
+    close_phase("delete", "completed" if delete_succeeded else "failed", "Delete YAP eseguita.")
+    if not body.dry_run and delete_succeeded:
+        practice.status = PracticeStatus.DELETED
         practice.synced = False
-        practice.management_sync_status = "deleted"
+        practice.management_sync_status = "deleted" if result.get("deleted") else "not_found"
         practice.management_last_sync_at = datetime.now(timezone.utc)
         practice.management_audit_result = None
         practice.updated_by_telegram_id = user_data["id"]
@@ -2072,7 +2072,7 @@ async def delete_practice_yap_appointment(
     return APIResponse(
         success=True,
         data={
-            "status": result.get("status") or ("deleted" if result.get("deleted") else "not_deleted"),
+            "status": status_value,
             "phase_timeline": phase_timeline,
             "yap": result,
         },
