@@ -23,6 +23,7 @@ import {
   pickYapTagsFromJob,
   buildNotesForPopup,
   jobToMapping,
+  yapRepartoForOdl,
 } from "./lib/yap-mapping.mjs";
 import {
   buildDedupKey,
@@ -848,43 +849,50 @@ async function writePracticeAndOdl(page, job, args) {
 
   for (const section of job.sections || []) {
     const reparto = String(section.reparto || "").trim();
+    // Su YAP non esiste la sezione "carrozzeria": si naviga/compila "pneumatici".
+    const yapReparto = yapRepartoForOdl(reparto);
+    // Keyword di reparto da provare nei campi ODL: prima l'alias YAP, poi il reparto Giorgio.
+    const repartoKeys = [...new Set([yapReparto, reparto].filter(Boolean))];
     if (reparto) {
-      await clickRepartoSection(page, reparto).catch(() => false);
+      await clickRepartoSection(page, yapReparto).catch(() => false);
+      if (yapReparto !== reparto) {
+        await clickRepartoSection(page, reparto).catch(() => false);
+      }
       await page.waitForTimeout(180);
     }
     const sectionSummary = buildSectionSummary(section);
     const sectionWritten = await fillBestEditableByKeywords(
       page,
-      [reparto, "descrizione", "lavoro", "odl", "intervento", "note reparto"],
+      [...repartoKeys, "descrizione", "lavoro", "odl", "intervento", "note reparto"],
       sectionSummary,
       { append: true },
     );
-    writeReport.odl.sections.push({ reparto, written: sectionWritten });
+    writeReport.odl.sections.push({ reparto, yapReparto, written: sectionWritten });
     writeReport.odl.success = writeReport.odl.success || sectionWritten;
 
     if (section.ore_man != null) {
       writeReport.hours.man.attempted = true;
-      const manOk = await fillBestEditableByKeywords(page, [reparto, "man", "ore uomo", "manodopera"], String(section.ore_man));
+      const manOk = await fillBestEditableByKeywords(page, [...repartoKeys, "man", "ore uomo", "manodopera"], String(section.ore_man));
       writeReport.hours.man.success = writeReport.hours.man.success || manOk;
       if (!manOk && !writeReport.hours.man.error) writeReport.hours.man.error = "man_field_not_found";
       writeReport.odl.success = writeReport.odl.success || manOk;
     }
     if (section.ore_mac != null) {
       writeReport.hours.mac.attempted = true;
-      const macOk = await fillBestEditableByKeywords(page, [reparto, "mac", "ore macchina", "manodopera"], String(section.ore_mac));
+      const macOk = await fillBestEditableByKeywords(page, [...repartoKeys, "mac", "ore macchina", "manodopera"], String(section.ore_mac));
       writeReport.hours.mac.success = writeReport.hours.mac.success || macOk;
       if (!macOk && !writeReport.hours.mac.error) writeReport.hours.mac.error = "mac_field_not_found";
       writeReport.odl.success = writeReport.odl.success || macOk;
     }
     if (section.materiali_euro != null) {
       writeReport.materials.attempted = true;
-      const matOk = await fillBestEditableByKeywords(page, [reparto, "materiali", "consumo", "euro"], String(section.materiali_euro));
+      const matOk = await fillBestEditableByKeywords(page, [...repartoKeys, "materiali", "consumo", "euro"], String(section.materiali_euro));
       writeReport.materials.success = writeReport.materials.success || matOk;
       if (!matOk && !writeReport.materials.error) writeReport.materials.error = "materials_field_not_found";
     }
     if (section.smaltimento_applica) {
       writeReport.waste.attempted = true;
-      const smaltOk = await fillBestEditableByKeywords(page, [reparto, "smaltimento", "rifiuti", "%"], String(section.smaltimento_percentuale ?? 2));
+      const smaltOk = await fillBestEditableByKeywords(page, [...repartoKeys, "smaltimento", "rifiuti", "%"], String(section.smaltimento_percentuale ?? 2));
       writeReport.waste.success = writeReport.waste.success || smaltOk;
       if (!smaltOk && !writeReport.waste.error) writeReport.waste.error = "waste_field_not_found";
     }
@@ -901,7 +909,7 @@ async function writePracticeAndOdl(page, job, args) {
       if (partsText) {
         const partsOk = await fillBestEditableByKeywords(
           page,
-          [reparto, "ricambi", "articoli", "magazzino", "pezzi"],
+          [...repartoKeys, "ricambi", "articoli", "magazzino", "pezzi"],
           partsText,
           { append: true },
         );

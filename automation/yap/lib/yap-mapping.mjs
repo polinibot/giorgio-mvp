@@ -11,6 +11,18 @@ const GENERIC_REVISIONE = /^(revisione(\s+periodica)?|rev\.?)$/i;
 /** Priorità titolo breve agenda (Cosa) quando più reparti sono attivi. */
 export const REPARTO_ORDER = ["officina", "carrozzeria", "revisione"];
 
+/**
+ * Alias reparto Giorgio -> sezione/etichetta usata in YAP.
+ * Su YAP non esiste ancora una sezione "carrozzeria": si usa "pneumatici"
+ * (stesso criterio dei tag). Serve al worker per navigare/compilare l'ODL.
+ */
+export const REPARTO_YAP_ALIAS = { carrozzeria: "pneumatici" };
+
+export function yapRepartoForOdl(reparto) {
+  const r = String(reparto || "").trim().toLowerCase();
+  return REPARTO_YAP_ALIAS[r] || r;
+}
+
 export function repartoSortIndex(reparto) {
   const i = REPARTO_ORDER.indexOf(reparto);
   return i === -1 ? 99 : i;
