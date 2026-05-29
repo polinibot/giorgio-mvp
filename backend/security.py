@@ -1,60 +1,104 @@
-import hmac
+import base64
 import hashlib
+import hmac
+import json
 import logging
-from urllib.parse import parse_qsl, unquote
+import time
 from typing import Dict, Optional
+from urllib.parse import parse_qsl
+
 from config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class SecurityService:
-    """Servizio per la sicurezza minima del bot e Mini App."""
+    """Servizio per sicurezza Mini App, whitelist e token pratica."""
 
     @staticmethod
     def _practice_access_secret() -> bytes:
-        secret = (settings.secret_key or settings.telegram_bot_token or "").encode("utf-8")
-        return secret
-    
+        if settings.secret_key:
+            return settings.secret_key.encode("utf-8")
+        if settings.debug:
+            fallback = settings.telegram_bot_token or "dev-practice-access-secret"
+            return fallback.encode("utf-8")
+        raise ValueError("SECRET_KEY is required to issue or validate practice access tokens in production")
+
+    @staticmethod
+    def _parse_init_data_pairs(init_data: str) -> list[tuple[str, str]]:
+        return parse_qsl(init_data, keep_blank_values=True)
+
+    @staticmethod
+    def _current_timestamp() -> int:
+        return int(time.time())
+
+    @staticmethod
+    def _is_init_data_fresh(pairs: list[tuple[str, str]]) -> bool:
+        auth_date_value = next((v for k, v in pairs if k == "auth_date"), None)
+        if not auth_date_value:
+            logger.warning("validate_telegram_init_data: auth_date missing from initData")
+            return False
+        try:
+            auth_date = int(auth_date_value)
+        except (TypeError, ValueError):
+            logger.warning("validate_telegram_init_data: auth_date is invalid: %s", auth_date_value)
+            return False
+
+        age_seconds = SecurityService._current_timestamp() - auth_date
+        if age_seconds < 0:
+            logger.warning("validate_telegram_init_data: auth_date is in the future")
+            return False
+        if age_seconds > settings.telegram_init_data_max_age_seconds:
+            logger.warning(
+                "validate_telegram_init_data: initData expired (age=%ds, max=%ds)",
+                age_seconds,
+                settings.telegram_init_data_max_age_seconds,
+            )
+            return False
+        return True
+
+    @staticmethod
+    def _urlsafe_b64encode(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _urlsafe_b64decode(raw: str) -> bytes:
+        padding = "=" * (-len(raw) % 4)
+        return base64.urlsafe_b64decode(raw + padding)
+
+    @staticmethod
+    def _generate_legacy_practice_access_token(practice_id: int, telegram_user_id: int) -> str:
+        payload = f"{practice_id}:{telegram_user_id}".encode("utf-8")
+        return hmac.new(
+            SecurityService._practice_access_secret(),
+            payload,
+            hashlib.sha256,
+        ).hexdigest()
+
     @staticmethod
     def is_user_whitelisted(telegram_user_id: int) -> bool:
-        """
-        Verifica se l'utente Telegram è nella whitelist.
-        """
         return telegram_user_id in settings.whitelist_telegram_ids
-    
+
     @staticmethod
     def validate_telegram_init_data(init_data: str) -> bool:
-        """
-        Valida l'initData di Telegram Mini App usando HMAC-SHA256.
-        
-        Args:
-            init_data: Dati init ricevuti dalla Mini App (formato query string)
-            
-        Returns:
-            True se validi, False altrimenti
-        """
         try:
             if not init_data:
                 logger.warning("validate_telegram_init_data: initData is empty")
                 return False
 
-            pairs = parse_qsl(init_data, keep_blank_values=True)
+            pairs = SecurityService._parse_init_data_pairs(init_data)
             hash_value = next((v for k, v in pairs if k == "hash"), None)
             if not hash_value:
                 logger.warning("validate_telegram_init_data: no hash in initData")
                 return False
 
-            auth_data = [(k, unquote(v)) for k, v in pairs if k != "hash"]
+            if not SecurityService._is_init_data_fresh(pairs):
+                return False
+
+            auth_data = [(k, v) for k, v in pairs if k != "hash"]
             sorted_data = sorted(auth_data, key=lambda item: item[0])
+            data_check_string = "\n".join(f"{k}={v}" for k, v in sorted_data)
 
-            data_check_string = '\n'.join(f"{k}={v}" for k, v in sorted_data)
-
-            logger.debug("validate_telegram_init_data: data_check_string length=%d", len(data_check_string))
-
-            # Algoritmo Telegram WebApp:
-            # secret_key = HMAC_SHA256("WebAppData", bot_token)
-            # check_hash = HMAC_SHA256(secret_key, data_check_string)
             webapp_secret = hmac.new(
                 b"WebAppData",
                 settings.telegram_bot_token.encode("utf-8"),
@@ -67,40 +111,73 @@ class SecurityService:
                 hashlib.sha256,
             ).hexdigest()
 
-            # Confronta gli hash in modo sicuro
             return hmac.compare_digest(calculated_hash, hash_value)
-            
-        except Exception as e:
-            print(f"Errore validazione initData: {e}")
+        except Exception as exc:
+            logger.warning("Errore validazione initData: %s", exc)
             return False
-    
+
     @staticmethod
     def extract_user_from_init_data(init_data: str) -> Optional[Dict]:
-        """
-        Estrae i dati utente dall'initData validato.
-        """
         try:
-            pairs = parse_qsl(init_data, keep_blank_values=True)
+            pairs = SecurityService._parse_init_data_pairs(init_data)
             user_data = next((v for k, v in pairs if k == "user"), None)
             if user_data:
-                import json
-                return json.loads(unquote(user_data))
+                return json.loads(user_data)
             return None
         except Exception:
             return None
 
     @staticmethod
-    def generate_practice_access_token(practice_id: int, telegram_user_id: int) -> str:
-        payload = f"{practice_id}:{telegram_user_id}".encode("utf-8")
-        return hmac.new(
+    def generate_practice_access_token(
+        practice_id: int,
+        telegram_user_id: int,
+        expires_in_seconds: Optional[int] = None,
+        issued_at: Optional[int] = None,
+    ) -> str:
+        ttl_seconds = expires_in_seconds or settings.practice_access_token_ttl_seconds
+        now = issued_at if issued_at is not None else SecurityService._current_timestamp()
+        payload = {
+            "practice_id": int(practice_id),
+            "telegram_user_id": int(telegram_user_id),
+            "iat": int(now),
+            "exp": int(now + ttl_seconds),
+        }
+        payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        payload_token = SecurityService._urlsafe_b64encode(payload_bytes)
+        signature = hmac.new(
             SecurityService._practice_access_secret(),
-            payload,
+            payload_token.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
+        return f"{payload_token}.{signature}"
 
     @staticmethod
     def validate_practice_access_token(practice_id: int, telegram_user_id: int, token: Optional[str]) -> bool:
         if not token:
             return False
-        expected = SecurityService.generate_practice_access_token(practice_id, telegram_user_id)
-        return hmac.compare_digest(expected, token)
+        try:
+            if "." not in token:
+                if settings.debug:
+                    expected = SecurityService._generate_legacy_practice_access_token(practice_id, telegram_user_id)
+                    return hmac.compare_digest(expected, token)
+                return False
+
+            payload_token, signature = token.split(".", 1)
+            expected_signature = hmac.new(
+                SecurityService._practice_access_secret(),
+                payload_token.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(expected_signature, signature):
+                return False
+
+            payload = json.loads(SecurityService._urlsafe_b64decode(payload_token).decode("utf-8"))
+            if int(payload.get("practice_id", -1)) != int(practice_id):
+                return False
+            if int(payload.get("telegram_user_id", -1)) != int(telegram_user_id):
+                return False
+            if int(payload.get("exp", 0)) < SecurityService._current_timestamp():
+                return False
+            return True
+        except Exception:
+            return False

@@ -91,7 +91,7 @@ function isValidItalianPhone(val) {
 /** Italian license plate */
 function isValidItalianPlate(val) {
   const cleaned = val.replace(/[\s-]/g, '').toUpperCase();
-  return /^[A-Z]{2}\d{3}[A-Z]{2}$/.test(cleaned);
+  return /^[A-Z0-9]{5,10}$/.test(cleaned);
 }
 
 function isLocalDevHost() {

@@ -392,9 +392,13 @@ async function notifyError(error, args) {
   };
 
   try {
+    const headers = { "content-type": "application/json" };
+    if (process.env.YAP_WORKER_SECRET) {
+      headers["X-Yap-Worker-Secret"] = process.env.YAP_WORKER_SECRET;
+    }
     const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/yap/notify-error`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify(payload),
     });
     if (response.ok) {

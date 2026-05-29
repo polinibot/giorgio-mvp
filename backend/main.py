@@ -5,8 +5,10 @@ import shutil
 import shutil as _shutil
 import json as _json
 import asyncio
+import hmac
 import time
 import traceback
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, date
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -67,11 +69,19 @@ os.makedirs("storage/photos", exist_ok=True)
 
 # --- Rate Limiter ---
 limiter = Limiter(key_func=get_remote_address)
+YAP_RUN_LOCK: Optional[asyncio.Lock] = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await asyncio.to_thread(_initialize_database)
+    yield
 
 app = FastAPI(
     title="Giorgio API",
     description="API per il sistema di inserimento pratiche meccanico",
     version="2.0.0",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 
@@ -82,11 +92,6 @@ def _initialize_database() -> None:
         logger.info("Database initialization completed")
     except Exception as exc:
         logger.exception("Database initialization failed: %s", exc)
-
-
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(asyncio.to_thread(_initialize_database))
 
 # --- CORS ---
 app.add_middleware(
@@ -177,7 +182,6 @@ def _mask_init_data(init_data: Optional[str]) -> Dict[str, Any]:
         "present": bool(raw),
         "length": len(raw),
         "has_hash": "hash=" in raw,
-        "preview": f"{raw[:80]}..." if len(raw) > 80 else raw,
     }
 
 
@@ -213,6 +217,13 @@ def _can_access_practice(practice: Practice, user_data: dict, access_token: Opti
     if practice.created_by_telegram_id == user_data["id"]:
         return True
     return SecurityService.validate_practice_access_token(practice.id, user_data["id"], access_token)
+
+
+def _get_yap_run_lock() -> asyncio.Lock:
+    global YAP_RUN_LOCK
+    if YAP_RUN_LOCK is None:
+        YAP_RUN_LOCK = asyncio.Lock()
+    return YAP_RUN_LOCK
 
 
 def _repair_practice_owner_if_needed(db: Session, practice: Practice, user_data: dict, access_token: Optional[str]) -> None:
@@ -307,25 +318,6 @@ def validate_telegram_init_data(
     except Exception as e:
         logger.warning("Failed to extract user from initData: %s", e)
 
-    # Fallback for Telegram clients/entry points where initData can be empty.
-    # We only accept a numeric user_id and the request remains subject to whitelist checks.
-    fallback_uid = None
-    if x_telegram_user_id and str(x_telegram_user_id).strip().lstrip("-").isdigit():
-        fallback_uid = int(str(x_telegram_user_id).strip())
-    elif user_id is not None:
-        fallback_uid = int(user_id)
-
-    if fallback_uid is not None:
-        _log_auth_debug("fallback_user_id_ok", {**auth_snapshot, "resolved_user_id": fallback_uid}, level="info")
-        logger.warning("Auth fallback used without initData for Telegram user %s", fallback_uid)
-        return {
-            "id": fallback_uid,
-            "first_name": "",
-            "last_name": "",
-            "username": "",
-        }
-
-    # In production, reject unauthenticated requests
     if not DEBUG:
         _log_auth_debug("auth_missing", auth_snapshot)
         logger.warning("Auth failed: no valid initData and DEBUG=False")
@@ -334,14 +326,27 @@ def validate_telegram_init_data(
             detail="Authentication required",
         )
 
-    # Dev fallback
+    fallback_uid = None
+    if x_telegram_user_id and str(x_telegram_user_id).strip().lstrip("-").isdigit():
+        fallback_uid = int(str(x_telegram_user_id).strip())
+    elif user_id is not None:
+        fallback_uid = int(user_id)
+
+    if fallback_uid is not None:
+        _log_auth_debug("debug_fallback_user_id_ok", {**auth_snapshot, "resolved_user_id": fallback_uid}, level="info")
+        logger.warning("DEBUG auth fallback used without initData for Telegram user %s", fallback_uid)
+        return {
+            "id": fallback_uid,
+            "first_name": "",
+            "last_name": "",
+            "username": "",
+        }
+
     logger.debug("Using dev fallback user (DEBUG mode)")
     return {"id": 123456789, "first_name": "User", "last_name": "Test", "username": "dev_test"}
 
 
-def require_whitelisted_user(
-    user_data: dict = Depends(validate_telegram_init_data),
-) -> dict:
+def _enforce_whitelist(user_data: dict) -> dict:
     """Enforce Telegram whitelist.
 
     If whitelist is empty (dev/test), allow all users through with a warning.
@@ -361,6 +366,67 @@ def require_whitelisted_user(
             detail="Utente non autorizzato",
         )
     return user_data
+
+
+def require_whitelisted_user(
+    user_data: dict = Depends(validate_telegram_init_data),
+) -> dict:
+    return _enforce_whitelist(user_data)
+
+
+def _try_resolve_whitelisted_user(
+    request: Request,
+    init_data: Optional[str],
+    x_telegram_init_data: Optional[str],
+    user_id: Optional[int],
+    x_telegram_user_id: Optional[str],
+) -> Optional[dict]:
+    try:
+        user_data = validate_telegram_init_data(
+            request=request,
+            init_data=init_data,
+            x_telegram_init_data=x_telegram_init_data,
+            user_id=user_id,
+            x_telegram_user_id=x_telegram_user_id,
+        )
+        return _enforce_whitelist(user_data)
+    except HTTPException:
+        return None
+
+
+def require_yap_internal_auth(
+    request: Request,
+    init_data: Optional[str] = None,
+    x_telegram_init_data: Optional[str] = Header(None, alias="X-Telegram-Init-Data"),
+    user_id: Optional[int] = None,
+    x_telegram_user_id: Optional[str] = Header(None, alias="X-Telegram-User-Id"),
+    x_yap_worker_secret: Optional[str] = Header(None, alias="X-Yap-Worker-Secret"),
+) -> dict:
+    expected_secret = (settings.yap_worker_secret or settings.secret_key).strip()
+    if expected_secret and x_yap_worker_secret:
+        if hmac.compare_digest(expected_secret, x_yap_worker_secret):
+            return {"id": 0, "first_name": "YAP", "last_name": "Worker", "username": "yap_worker"}
+        logger.warning("Rejected YAP internal request with invalid worker secret")
+
+    user_data = _try_resolve_whitelisted_user(
+        request=request,
+        init_data=init_data,
+        x_telegram_init_data=x_telegram_init_data,
+        user_id=user_id,
+        x_telegram_user_id=x_telegram_user_id,
+    )
+    if user_data:
+        return user_data
+
+    if expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid worker secret",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required",
+    )
 
 
 # --- Health Check ---
@@ -749,6 +815,15 @@ def _serialize_photo(photo) -> dict:
     return data
 
 
+def _delete_cloudinary_asset_for_photo(photo: PracticePhoto) -> None:
+    public_id = photo.cloudinary_public_id or cloudinary_service.extract_public_id_from_url(photo.storage_path)
+    if not public_id:
+        return
+    deleted = cloudinary_service.delete_photo(public_id)
+    if not deleted:
+        logger.warning("Failed to delete Cloudinary photo for practice photo %s", photo.id)
+
+
 def _project_root() -> str:
     # In container/runtime the backend code lives under /app.
     # Using dirname(__file__) keeps all derived paths writable and stable.
@@ -947,109 +1022,108 @@ def _build_yap_failure_detail(out: str, err: str) -> dict:
 
 
 async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180, db: Optional[Session] = None) -> Dict[str, Any]:
-    root = _project_root()
-    script_path = os.path.join(root, "automation", "yap", script_name)
+    async with _get_yap_run_lock():
+        root = _project_root()
+        script_path = os.path.join(root, "automation", "yap", script_name)
 
-    # Gestione Session State da Database
-    session_file_path = os.path.join(root, "automation", "artifacts", "yap", "session-state.json")
-    if db:
-        try:
-            setting = db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
-            if setting and setting.value:
-                os.makedirs(os.path.dirname(session_file_path), exist_ok=True)
-                with open(session_file_path, "w", encoding="utf-8") as f:
-                    f.write(setting.value)
-                logger.info("Session state YAP ripristinato dal database")
-        except Exception as e:
-            logger.warning("Impossibile ripristinare la sessione YAP dal database: %s", e)
-
-    async def _run_once(extra_env: Optional[Dict[str, str]] = None) -> tuple[int, str, str]:
-        node_bin = os.getenv("NODE_BINARY") or (_shutil.which("node") or _shutil.which("nodejs") or "node")
-        env = os.environ.copy()
-        if extra_env:
-            env.update(extra_env)
-        process = await asyncio.create_subprocess_exec(
-            node_bin,
-            script_path,
-            *args,
-            cwd=root,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
-            process.kill()
-            await process.communicate()
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Timeout automazione YAP")
-        out_text = stdout.decode("utf-8", errors="replace").strip()
-        err_text = stderr.decode("utf-8", errors="replace").strip()
-        return process.returncode, out_text, err_text
-
-    returncode, out, err = await _run_once()
-
-    # Salva Session State nel Database dopo l'esecuzione, anche in caso di fallimento
-    if db and os.path.exists(session_file_path):
-        try:
-            with open(session_file_path, "r", encoding="utf-8") as f:
-                session_data = f.read()
-            if session_data.strip():
+        # Serializziamo l'accesso al session-state condiviso.
+        session_file_path = os.path.join(root, "automation", "artifacts", "yap", "session-state.json")
+        if db:
+            try:
                 setting = db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
-                if not setting:
-                    setting = SystemSetting(key="yap_session_state", value=session_data)
-                    db.add(setting)
+                if setting and setting.value:
+                    os.makedirs(os.path.dirname(session_file_path), exist_ok=True)
+                    with open(session_file_path, "w", encoding="utf-8") as f:
+                        f.write(setting.value)
+                    logger.info("Session state YAP ripristinato dal database")
+            except Exception as e:
+                logger.warning("Impossibile ripristinare la sessione YAP dal database: %s", e)
+
+        async def _run_once(extra_env: Optional[Dict[str, str]] = None) -> tuple[int, str, str]:
+            node_bin = os.getenv("NODE_BINARY") or (_shutil.which("node") or _shutil.which("nodejs") or "node")
+            env = os.environ.copy()
+            if extra_env:
+                env.update(extra_env)
+            process = await asyncio.create_subprocess_exec(
+                node_bin,
+                script_path,
+                *args,
+                cwd=root,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.communicate()
+                raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Timeout automazione YAP")
+            out_text = stdout.decode("utf-8", errors="replace").strip()
+            err_text = stderr.decode("utf-8", errors="replace").strip()
+            return process.returncode, out_text, err_text
+
+        returncode, out, err = await _run_once()
+
+        if db and os.path.exists(session_file_path):
+            try:
+                with open(session_file_path, "r", encoding="utf-8") as f:
+                    session_data = f.read()
+                if session_data.strip():
+                    setting = db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
+                    if not setting:
+                        setting = SystemSetting(key="yap_session_state", value=session_data)
+                        db.add(setting)
+                    else:
+                        setting.value = session_data
+                    db.commit()
+                    logger.info("Session state YAP salvato nel database")
+            except Exception as e:
+                db.rollback()
+                logger.warning("Impossibile salvare la sessione YAP nel database: %s", e)
+
+        if returncode != 0:
+            failure_detail = _build_yap_failure_detail(out, err)
+            recoverable_signals = (
+                "target crashed",
+                "target closed",
+                "page crashed",
+                "browser has been closed",
+                "execution context was destroyed",
+            )
+            message_lc = str(failure_detail.get("message") or "").lower()
+            is_recoverable = any(signal in message_lc for signal in recoverable_signals)
+            if is_recoverable:
+                logger.warning("YAP script recoverable failure (%s), retrying once in safe mode", script_name)
+                retry_code, retry_out, retry_err = await _run_once({"YAP_SAFE_MODE": "1"})
+                if retry_code == 0:
+                    out = retry_out
+                    err = retry_err
+                    returncode = 0
                 else:
-                    setting.value = session_data
-                db.commit()
-                logger.info("Session state YAP salvato nel database")
-        except Exception as e:
-            db.rollback()
-            logger.warning("Impossibile salvare la sessione YAP nel database: %s", e)
+                    out = retry_out
+                    err = retry_err
 
-    if returncode != 0:
-        failure_detail = _build_yap_failure_detail(out, err)
-        recoverable_signals = (
-            "target crashed",
-            "target closed",
-            "page crashed",
-            "browser has been closed",
-            "execution context was destroyed",
-        )
-        message_lc = str(failure_detail.get("message") or "").lower()
-        is_recoverable = any(signal in message_lc for signal in recoverable_signals)
-        if is_recoverable:
-            logger.warning("YAP script recoverable failure (%s), retrying once in safe mode", script_name)
-            retry_code, retry_out, retry_err = await _run_once({"YAP_SAFE_MODE": "1"})
-            if retry_code == 0:
-                out = retry_out
-                err = retry_err
-                returncode = 0
-            else:
-                out = retry_out
-                err = retry_err
-                failure_detail = _build_yap_failure_detail(out, err)
+        if returncode != 0:
+            failure_detail = _build_yap_failure_detail(out, err)
+            logger.error(
+                "YAP script failed (%s): %s",
+                script_name,
+                failure_detail.get("message"),
+                extra={
+                    "stdout_tail": out[-3000:],
+                    "stderr_tail": err[-3000:],
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=failure_detail,
+            )
 
-    if returncode != 0:
-        failure_detail = _build_yap_failure_detail(out, err)
-        logger.error(
-            "YAP script failed (%s): %s",
-            script_name,
-            failure_detail.get("message"),
-            extra={
-                "stdout_tail": out[-3000:],
-                "stderr_tail": err[-3000:],
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=failure_detail,
-        )
-
-    parsed = _extract_json_blob(out)
-    if parsed:
-        return parsed
-    return {"ok": True, "raw": out}
+        parsed = _extract_json_blob(out)
+        if parsed:
+            return parsed
+        return {"ok": True, "raw": out}
 
 
 @app.patch("/api/practices/{practice_id}/sync")
@@ -1149,6 +1223,7 @@ async def upload_practice_photo(
             practice_id=practice_id,
             telegram_file_id=generated_file_id,
             storage_path=secure_url,
+            cloudinary_public_id=metadata.get("public_id"),
             ocr_result=None,
             ocr_confidence=None,
         )
@@ -1205,6 +1280,7 @@ async def delete_practice_photo(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Foto non trovata")
 
     try:
+        await asyncio.to_thread(_delete_cloudinary_asset_for_photo, photo)
         db.delete(photo)
         db.commit()
         logger.info("Photo %d deleted from practice %d by user %d", photo_id, practice_id, user_data["id"])
@@ -2121,7 +2197,10 @@ async def get_error_channel_status(request: Request):
 
 @app.post("/yap/test-error-channel")
 @limiter.limit("5/minute")
-async def test_error_channel(request: Request):
+async def test_error_channel(
+    request: Request,
+    _auth: dict = Depends(require_yap_internal_auth),
+):
     """Invia un messaggio di test al canale errori."""
     from error_notifier import get_error_notifier
 
@@ -2155,6 +2234,7 @@ async def test_error_channel(request: Request):
 async def notify_yap_error_endpoint(
     request: Request,
     body: YapErrorNotificationRequest,
+    _auth: dict = Depends(require_yap_internal_auth),
 ):
     """Riceve notifiche errori dai worker YAP e le invia su canale Telegram."""
     try:

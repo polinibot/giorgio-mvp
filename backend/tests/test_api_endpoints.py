@@ -259,6 +259,58 @@ class TestPracticeFullEndpoints:
         assert data["customer_name"] == "Cliente Full"
 
 
+class TestPracticePhotoEndpoints:
+    def test_upload_and_delete_photo_uses_cloudinary_public_id(self, client, monkeypatch):
+        import main
+
+        deleted_public_ids = []
+
+        def fake_upload(_path, _practice_id, _telegram_file_id):
+            return (
+                "https://res.cloudinary.com/demo/image/upload/v1/giorgio/practices/1/photo_test.webp",
+                {"public_id": "giorgio/practices/1/photo_test"},
+            )
+
+        def fake_delete(public_id):
+            deleted_public_ids.append(public_id)
+            return True
+
+        monkeypatch.setattr(main.cloudinary_service, "upload_practice_photo", fake_upload)
+        monkeypatch.setattr(main.cloudinary_service, "delete_photo", fake_delete)
+
+        create_resp = client.post(
+            "/practices?user_id=761118078",
+            json={
+                "plate_confirmed": "PHOTO01",
+                "phone": "+39 333 000 1122",
+                "customer_name": "Cliente Foto",
+                "customer_type": "privato",
+                "billing_to_complete": False,
+                "appointment_date": "2026-11-19T00:00:00",
+                "appointment_time": "09:00",
+                "practice_type": "preventivo",
+                "contexts": ["officina"],
+            },
+        )
+        assert create_resp.status_code == 200
+        practice_id = create_resp.json()["data"]["id"]
+        assert create_resp.json()["data"]["phone"] == "+393330001122"
+
+        upload_resp = client.post(
+            f"/api/practices/{practice_id}/photos?user_id=761118078",
+            files={"file": ("plate.jpg", b"fake-image-content", "image/jpeg")},
+        )
+        assert upload_resp.status_code == 200
+        photo = upload_resp.json()["data"]
+        assert photo["cloudinary_public_id"] == "giorgio/practices/1/photo_test"
+
+        delete_resp = client.delete(
+            f"/api/practices/{practice_id}/photos/{photo['id']}?user_id=761118078"
+        )
+        assert delete_resp.status_code == 200
+        assert deleted_public_ids == ["giorgio/practices/1/photo_test"]
+
+
 class TestErrorEndpoints:
     """Test error handlers."""
 

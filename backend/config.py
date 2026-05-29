@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     whitelist_telegram_ids: Any = []
     ocr_confidence_threshold: float = 0.6
     secret_key: str = ""
+    practice_access_token_ttl_seconds: int = 86400
+    telegram_init_data_max_age_seconds: int = 86400
+    yap_worker_secret: str = ""
 
     # Cloudinary settings
     cloudinary_cloud_name: str = ""
@@ -122,3 +125,7 @@ else:
 
 if DEBUG:
     logger.info("Running in DEBUG mode.")
+elif not settings.secret_key:
+    logger.warning(
+        "SECRET_KEY is empty while DEBUG=False. Practice access tokens require SECRET_KEY in production."
+    )
