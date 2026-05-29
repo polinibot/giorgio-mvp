@@ -844,6 +844,52 @@ async function clickGenericSaveInPractice(page) {
   }).catch(() => false);
 }
 
+function buildFieldWriteReport(job, writeReport) {
+  const fields = [];
+  const pushField = (fieldId, expected, ok, hint) => {
+    fields.push({
+      field_id: fieldId,
+      expected: expected ?? "",
+      found: ok ? String(expected ?? "") : null,
+      status: ok ? "written" : "missing",
+      hint,
+    });
+  };
+
+  if (job.internalNotes) {
+    pushField("note.interne", String(job.internalNotes).trim(), Boolean(writeReport?.notes?.success), "Apri Gestione pratica e verifica note interne.");
+  }
+
+  for (const section of job.sections || []) {
+    const reparto = String(section.reparto || "").trim().toLowerCase() || "reparto";
+    const labels = writeReport?.odl?.sections || [];
+    const sectionHit = labels.some((item) => String(item?.reparto || "").trim().toLowerCase() === reparto && item.written);
+    for (const row of section.descrizioni || []) {
+      pushField(`odl.${reparto}.descrizione`, String(row || "").trim(), sectionHit, "Apri ODL e verifica le righe descrizione.");
+    }
+    if (section.ore_man != null) {
+      pushField(`odl.${reparto}.man`, `MAN ${section.ore_man}`, Boolean(writeReport?.hours?.man?.success), "Apri ODL e verifica MAN.");
+    }
+    if (section.ore_mac != null) {
+      pushField(`odl.${reparto}.mac`, `MAC ${section.ore_mac}`, Boolean(writeReport?.hours?.mac?.success), "Apri ODL e verifica MAC.");
+    }
+    if (section.materiali_euro != null) {
+      pushField(`odl.${reparto}.materiali`, String(section.materiali_euro), Boolean(writeReport?.materials?.success), "Apri Materiali di consumo e verifica importo.");
+    }
+    if (section.smaltimento_applica) {
+      pushField(`odl.${reparto}.smaltimento`, String(section.smaltimento_percentuale ?? 2), Boolean(writeReport?.waste?.success), "Apri Smaltimento rifiuti e verifica percentuale.");
+    }
+    for (const part of section.ricambi || []) {
+      const name = String(part?.name || part?.nome || "").trim();
+      const qty = String(part?.quantity || part?.quantita || "").trim();
+      const expected = [name, qty].filter(Boolean).join(" ").trim();
+      if (!expected) continue;
+      pushField(`odl.${reparto}.ricambio.${name || "item"}`, expected, Boolean(writeReport?.parts?.success), "Apri Ricambi/Articoli e verifica nome + quantita.");
+    }
+  }
+  return fields;
+}
+
 async function writePracticeAndOdl(page, job, args) {
   const summary = buildOdlSummaryText(job);
   const writeReport = {
@@ -1081,6 +1127,7 @@ async function writePracticeAndOdl(page, job, args) {
   if (args.debug) {
     writeReport.summary = summary;
   }
+  writeReport.fields = buildFieldWriteReport(job, writeReport);
   return writeReport;
 }
 

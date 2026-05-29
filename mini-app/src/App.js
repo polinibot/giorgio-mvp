@@ -13,6 +13,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL
 const DEV_TELEGRAM_USER_ID = process.env.REACT_APP_DEV_TELEGRAM_USER_ID || '761118078';
 
 const DRAFT_STORAGE_KEY = 'giorgio_draft';
+const CLIENT_CACHE_TTL_MS = 30 * 1000;
 
 // --- Helpers ---
 
@@ -82,6 +83,14 @@ function classifyError(err) {
   return detail || 'Errore sconosciuto. Riprova.';
 }
 
+function actionLabelFromTarget(actionTarget) {
+  if (actionTarget === 'sync') return 'Riprova sync';
+  if (actionTarget === 'audit') return 'Verifica YAP';
+  if (actionTarget === 'delete') return 'Elimina YAP';
+  if (actionTarget === 'open_odl') return 'Apri pratica-ODL';
+  return '';
+}
+
 /** Italian phone validation */
 function isValidItalianPhone(val) {
   const cleaned = val.replace(/[\s.()-]/g, '');
@@ -122,11 +131,25 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
     else if (normalizedMessage.includes('fallita') || normalizedMessage.includes('errore')) status = 'sync_failed';
   }
 
+  const nestedError = result?.yap?.error || result?.error || {};
+  const errorCode = result.error_code || nestedError.error_code || null;
+  const statusReason = result.status_reason || nestedError.reason || null;
+  const nextAction = result.next_action || nestedError.next_action || '';
+  const actionTarget = result.action_target || nestedError.action_target || '';
+  const retryable = typeof result.retryable === 'boolean'
+    ? result.retryable
+    : (status === 'sync_failed' || status === 'not_ready');
+
   return {
     ...result,
     status,
     message,
-    retryable: status === 'sync_failed' || status === 'not_ready' ? true : result.retryable,
+    retryable,
+    status_reason: statusReason,
+    error_code: errorCode,
+    next_action: nextAction,
+    action_target: actionTarget,
+    action_label: actionLabelFromTarget(actionTarget),
     duplicate: isDuplicate || result.duplicate || false,
     dryRun: dryRun || result.dryRun || false,
   };
@@ -1121,6 +1144,7 @@ function App() {
   // Detail state
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailTab, setDetailTab] = useState('overview');
   const [yapPreview, setYapPreview] = useState(null);
   const [yapPreviewLoading, setYapPreviewLoading] = useState(false);
   const [yapLastPracticeId, setYapLastPracticeId] = useState(null);
@@ -1157,6 +1181,9 @@ function App() {
   const formRef = useRef(null);
   const searchTimerRef = useRef(null);
   const previewSeqRef = useRef(BROWSER_PREVIEW_PRACTICES.length + 1);
+  const preSyncCacheRef = useRef(new Map());
+  const detailCacheRef = useRef(new Map());
+  const yapPreviewCacheRef = useRef(new Map());
 
   const { register, control, handleSubmit, setValue, watch, getValues, formState: { errors } } = useForm();
   const authMode = browserPreviewMode ? 'preview browser' : (initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato'));
@@ -1322,6 +1349,31 @@ function App() {
   const normalizeYapOutcome = useCallback((rawResult, options = {}) => (
     normalizeYapResult(rawResult, options)
   ), []);
+
+  const getCacheValue = useCallback((storeRef, key) => {
+    const entry = storeRef.current.get(String(key));
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      storeRef.current.delete(String(key));
+      return null;
+    }
+    return entry.value;
+  }, []);
+
+  const setCacheValue = useCallback((storeRef, key, value, ttlMs = CLIENT_CACHE_TTL_MS) => {
+    storeRef.current.set(String(key), {
+      value,
+      expiresAt: Date.now() + Math.max(1000, ttlMs),
+    });
+  }, []);
+
+  const invalidatePracticeCaches = useCallback((practiceId) => {
+    const id = String(practiceId || '');
+    if (!id) return;
+    preSyncCacheRef.current.delete(id);
+    detailCacheRef.current.delete(id);
+    yapPreviewCacheRef.current.delete(id);
+  }, []);
 
   const watchedValues = watch();
 
@@ -1629,26 +1681,32 @@ function App() {
       setPreSyncByPractice({});
       return;
     }
-
-    const entries = await Promise.all(
-      list.map(async (p) => {
-        try {
-          const res = await axios.get(`${API_BASE_URL}/practices/${p.id}/pre-sync-check`, {
-            params: getAuthParams(),
-            headers: getHeaders(),
-            timeout: 10000,
-          });
-          return [p.id, res.data?.data || null];
-        } catch (_) {
-          return [p.id, null];
-        }
-      })
-    );
-
     const map = {};
-    entries.forEach(([id, value]) => { map[id] = value; });
+    const missingIds = [];
+    for (const item of list) {
+      const cached = getCacheValue(preSyncCacheRef, item.id);
+      if (cached) map[item.id] = cached;
+      else missingIds.push(item.id);
+    }
+
+    if (missingIds.length) {
+      try {
+        const res = await axios.get(`${API_BASE_URL}/practices/pre-sync-check-batch`, {
+          params: { ...getAuthParams(), ids: missingIds.join(',') },
+          headers: getHeaders(),
+          timeout: 12000,
+        });
+        const payload = res.data?.data || {};
+        for (const [id, value] of Object.entries(payload)) {
+          map[id] = value;
+          setCacheValue(preSyncCacheRef, id, value);
+        }
+      } catch (_) {
+        // keep partial cached map
+      }
+    }
     setPreSyncByPractice(map);
-  }, [getAuthParams, getHeaders]);
+  }, [getAuthParams, getHeaders, getCacheValue, setCacheValue]);
 
   // --- Dashboard: Load practices ---
   const loadDashboard = useCallback(async (search = '', filters = {}) => {
@@ -1757,6 +1815,14 @@ function App() {
   // --- Detail: Load practice ---
   const loadDetail = useCallback(async (id) => {
     if (!id) return;
+    const cachedDetail = getCacheValue(detailCacheRef, id);
+    const cachedPreview = getCacheValue(yapPreviewCacheRef, id);
+    if (cachedDetail) {
+      setDetailData(cachedDetail);
+      setYapPreview(cachedPreview || null);
+      setDetailLoading(false);
+      return;
+    }
     setDetailLoading(true);
     setDetailData(null);
     setYapPreview(null);
@@ -1777,7 +1843,9 @@ function App() {
       const res = await fetchWithRetry(() =>
         axios.get(`${API_BASE_URL}/api/practices/${id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 })
       );
-      setDetailData(res.data?.data || res.data);
+      const detailPayload = res.data?.data || res.data;
+      setDetailData(detailPayload);
+      setCacheValue(detailCacheRef, id, detailPayload);
       rememberResponse('practice.detail');
       setYapPreviewLoading(true);
       try {
@@ -1785,7 +1853,9 @@ function App() {
         const yapRes = await fetchWithRetry(() =>
           axios.get(`${API_BASE_URL}/practices/${id}/yap-mapping-preview`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 })
         );
-        setYapPreview(yapRes.data?.data || yapRes.data);
+        const previewPayload = yapRes.data?.data || yapRes.data;
+        setYapPreview(previewPayload);
+        setCacheValue(yapPreviewCacheRef, id, previewPayload);
         rememberResponse('yap.preview');
       } catch (yapErr) {
         rememberError('yap.preview', yapErr);
@@ -1800,10 +1870,11 @@ function App() {
     } finally {
       setDetailLoading(false);
     }
-  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, navigateBack]);
+  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, navigateBack, getCacheValue, setCacheValue]);
 
   useEffect(() => {
     if (currentView === 'detail' && selectedPracticeId) {
+      setDetailTab('overview');
       loadDetail(selectedPracticeId);
     }
   }, [currentView, selectedPracticeId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1939,6 +2010,7 @@ function App() {
       await fetchWithRetry(() =>
         axios.patch(`${API_BASE_URL}/api/practices/${id}/sync`, { synced: !currentSynced }, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 })
       );
+      invalidatePracticeCaches(id);
       setDetailData(prev => prev ? { ...prev, synced: !currentSynced } : prev);
       setPractices(prev => prev.map(p => p.id === id ? { ...p, synced: !currentSynced } : p));
       rememberResponse('practice.sync');
@@ -1947,7 +2019,7 @@ function App() {
       rememberError('practice.sync', err);
       addToast(classifyError(err), 'error');
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, invalidatePracticeCaches]);
 
   // --- YAP Automation ---
   const [yapSyncLoading, setYapSyncLoading] = useState(false);
@@ -1989,6 +2061,7 @@ function App() {
         updateYapActionProgress({ percent: 90, label: phaseLabel });
       }
       if (['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(data.status)) {
+        invalidatePracticeCaches(id);
         if (!silent) {
           addToast(data.status === 'duplicate'
             ? (data.message || 'Agenda già presente in YAP: nessuna modifica necessaria')
@@ -2024,7 +2097,7 @@ function App() {
     } finally {
       setYapSyncLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches]);
 
   const deleteYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -2047,6 +2120,7 @@ function App() {
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
+      invalidatePracticeCaches(id);
       const phaseLabel = summarizePhaseTimeline(data.phase_timeline, data.message || 'Eliminazione YAP completata.');
       if (data.status === 'deleted' || data.status === 'not_found') {
         addToast(data.status === 'not_found' ? 'Appuntamento giÃ  assente su YAP. Pratica rimossa.' : 'Appuntamento eliminato da YAP', 'success');
@@ -2083,7 +2157,7 @@ function App() {
     } finally {
       setYapDeleteLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, selectedPracticeId, loadDashboard, searchQuery, activeFilters]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, selectedPracticeId, loadDashboard, searchQuery, activeFilters, invalidatePracticeCaches]);
 
   const auditYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -2108,6 +2182,7 @@ function App() {
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.audit');
+      invalidatePracticeCaches(id);
       const tone = data.status === 'complete_synced' ? 'success' : (data.status === 'sync_failed' ? 'error' : 'warning');
       addToast(data.message || 'Controllo YAP completato', tone);
       loadDetail(id);
@@ -2126,7 +2201,7 @@ function App() {
     } finally {
       setYapAuditLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapOutcome]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapOutcome, invalidatePracticeCaches]);
 
   const renderYapResultBanner = (result, { practiceId = null, showRetry = false, showDelete = false } = {}) => {
     const resolvedPracticeId = practiceId || yapLastPracticeId;
@@ -2197,9 +2272,21 @@ function App() {
       ].filter(Boolean);
       meta.push(issues.length ? `Write report: incompleto (${issues.slice(0, 2).join(', ')})` : 'Write report: incompleto');
     }
+    const errorCode = safeResult.error_code || safeResult?.yap?.error?.error_code || null;
+    const statusReason = safeResult.status_reason || safeResult?.yap?.error?.reason || null;
+    const nextAction = safeResult.next_action || safeResult?.yap?.error?.next_action || '';
+    const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
+    if (errorCode) meta.push(`Codice ${errorCode}`);
+    if (statusReason) meta.push(`Causa ${statusReason}`);
+    if (nextAction) meta.push(`Azione ${nextAction}`);
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
+    const canActionHint = Boolean(
+      resolvedPracticeId
+      && ['sync', 'audit', 'delete'].includes(actionTarget)
+      && ['sync_failed', 'partial_synced', 'blocked_by_odl', 'delete_failed', 'not_ready'].includes(status)
+    );
 
     return (
       <div className={`yap-result-banner ${toneClass}`}>
@@ -2240,6 +2327,36 @@ function App() {
                 disabled={yapDeleteLoading}
               >
                 Elimina YAP
+              </button>
+            )}
+            {canActionHint && actionTarget === 'sync' && (
+              <button
+                type="button"
+                className="yap-result-action"
+                onClick={() => syncToYap(resolvedPracticeId, { dry_run: false })}
+                disabled={yapSyncLoading}
+              >
+                {safeResult.action_label || 'Riprova sync'}
+              </button>
+            )}
+            {canActionHint && actionTarget === 'audit' && (
+              <button
+                type="button"
+                className="yap-result-action"
+                onClick={() => auditYapAppointment(resolvedPracticeId, { debug: false })}
+                disabled={yapAuditLoading}
+              >
+                {safeResult.action_label || 'Verifica YAP'}
+              </button>
+            )}
+            {canActionHint && actionTarget === 'delete' && (
+              <button
+                type="button"
+                className="yap-result-action yap-result-action-danger"
+                onClick={() => deleteYapAppointment(resolvedPracticeId, { dry_run: false })}
+                disabled={yapDeleteLoading}
+              >
+                {safeResult.action_label || 'Elimina YAP'}
               </button>
             )}
           </div>
@@ -2973,6 +3090,7 @@ function App() {
       onConfirm: async () => {
         setConfirmModal(null);
         if (browserPreviewMode) {
+          invalidatePracticeCaches(p.id);
           const nextPreviewPractices = previewPractices.filter(pr => String(pr.id) !== String(p.id));
           const visibleItems = filterPreviewPractices(nextPreviewPractices, searchQuery, activeFilters);
           setPreviewPractices(nextPreviewPractices);
@@ -2993,6 +3111,7 @@ function App() {
           await fetchWithRetry(() =>
             axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 })
           );
+          invalidatePracticeCaches(p.id);
           clearDraft();
           addToast('Pratica cancellata con successo', 'success');
           setCurrentView('dashboard');
@@ -3168,6 +3287,7 @@ function App() {
         rememberResponse(practice ? 'practice.update' : 'practice.create');
         const responseData = response.data.data || {};
         const practiceId = responseData.id || (practice && practice.id);
+        if (practiceId) invalidatePracticeCaches(practiceId);
 
         // Evita la ricreazione automatica della bozza mentre la sync è ancora in corso.
         setSuccessDone(true);
@@ -3674,6 +3794,27 @@ function App() {
           </div>
         </div>
 
+          <div className="detail-tabs section">
+            {[
+              { key: 'overview', label: 'Panoramica' },
+              { key: 'works', label: 'Lavori' },
+              { key: 'parts', label: 'Ricambi' },
+              { key: 'photos', label: `Foto (${photos.length})` },
+              { key: 'yap', label: 'YAP' },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                className={`detail-tab-button ${detailTab === tab.key ? 'active' : ''}`}
+                onClick={() => setDetailTab(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {detailTab === 'yap' && (
+            <>
           {yapLastPracticeId === practice.id && renderYapResultBanner(yapLastResult, { practiceId: practice.id, showRetry: true, showDelete: true })}
 
           {renderYapAuditReport(getYapAuditResult(yapLastPracticeId === practice.id ? yapLastResult : null) || practice.management_audit_result)}
@@ -3727,18 +3868,59 @@ function App() {
               )}
             </div>
           )}
+            </>
+          )}
 
           {/* Sync status */}
-          <div className="section detail-sync-section" onClick={() => toggleSync(practice.id, practice.synced)}>
-            <div className="detail-sync-label">Stato sincronizzazione</div>
-            <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
-              <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
-              {formatYapPracticeStatus(practice)}
-            </div>
-          </div>
+          {detailTab === 'overview' && (
+            <>
+              <div className="section detail-sync-section" onClick={() => toggleSync(practice.id, practice.synced)}>
+                <div className="detail-sync-label">Stato sincronizzazione</div>
+                <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
+                  <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
+                  {formatYapPracticeStatus(practice)}
+                </div>
+              </div>
+              <div className="section detail-overview-section">
+                {practice.internal_notes && (
+                  <div className="detail-overview-block">
+                    <div className="detail-overview-label">Note interne</div>
+                    <div className="detail-overview-value">{practice.internal_notes}</div>
+                  </div>
+                )}
+                {dSections.length > 0 && (
+                  <div className="detail-overview-block">
+                    <div className="detail-overview-label">Lavori principali</div>
+                    <div className="detail-overview-list">
+                      {dSections.slice(0, 3).map((sectionItem, idx) => {
+                        const rows = Array.isArray(sectionItem.description_rows) ? sectionItem.description_rows.filter(Boolean) : [];
+                        const firstRow = rows[0] || 'Descrizione non disponibile';
+                        return (
+                          <div key={`overview-work-${idx}`} className="detail-overview-item">
+                            <span className="context-badge" style={{ background: CONTEXT_COLORS[sectionItem.context]?.bg || 'rgba(255,255,255,0.06)', color: CONTEXT_COLORS[sectionItem.context]?.color || '#cbd5e1', borderColor: CONTEXT_COLORS[sectionItem.context]?.border || 'rgba(255,255,255,0.15)' }}>
+                              {sectionItem.context?.charAt(0).toUpperCase() + sectionItem.context?.slice(1)}
+                            </span>
+                            <span className="detail-overview-item-text">{firstRow}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {dParts.length > 0 && (
+                  <div className="detail-overview-block">
+                    <div className="detail-overview-label">Ricambi principali</div>
+                    <div className="detail-overview-value">
+                      {dParts.slice(0, 6).map((partItem) => [partItem.name, partItem.quantity].filter(Boolean).join(' ')).join(', ')}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           {/* Sections */}
-          {dSections.length > 0 && (
+          {detailTab === 'works' && dSections.length > 0 && (
             <div className="section">
               <h2>📋 Sezioni</h2>
               {dSections.map((s, i) => (
@@ -3769,7 +3951,7 @@ function App() {
           )}
 
           {/* Parts */}
-          {dParts.length > 0 && (
+          {detailTab === 'parts' && dParts.length > 0 && (
             <div className="section">
               <h2>🔩 Ricambi</h2>
               {Object.entries(partsByContext).map(([context, items]) => (
@@ -3792,6 +3974,7 @@ function App() {
           )}
 
           {/* Photos */}
+          {detailTab === 'photos' && (
           <div className="section">
             <h2>📷 Foto ({photos.length})</h2>
             {photos.length > 0 ? (
@@ -3811,6 +3994,8 @@ function App() {
             )}
             <div className="photo-view-note">In modalità visualizzazione non è possibile aggiungere o eliminare foto. Usa Modifica pratica.</div>
           </div>
+
+          )}
 
           {/* Actions */}
           <div className="detail-actions">

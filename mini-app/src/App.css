@@ -579,6 +579,31 @@ h2 {
   text-align: center;
 }
 
+.detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  position: sticky;
+  top: 8px;
+  z-index: 5;
+}
+
+.detail-tab-button {
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-tab-button.active {
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: rgba(79, 140, 255, 0.18);
+}
+
 .detail-plate {
   font-size: 28px;
   font-weight: 800;
@@ -645,6 +670,50 @@ h2 {
 
 .detail-sync-section:active {
   transform: scale(0.98);
+}
+
+.detail-overview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detail-overview-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.detail-overview-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.detail-overview-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.detail-overview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-overview-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-overview-item-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.3;
 }
 
 .detail-sync-label {

@@ -8,6 +8,7 @@ import asyncio
 import hmac
 import time
 import traceback
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, date
 from enum import Enum
@@ -70,6 +71,9 @@ os.makedirs("storage/photos", exist_ok=True)
 # --- Rate Limiter ---
 limiter = Limiter(key_func=get_remote_address)
 YAP_RUN_LOCK: Optional[asyncio.Lock] = None
+YAP_PRECHECK_CACHE_TTL_SECONDS = 30
+YAP_PRECHECK_CACHE: Dict[str, Dict[str, Any]] = {}
+YAP_PREVIEW_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 @asynccontextmanager
@@ -890,6 +894,79 @@ def _build_yap_sync_scope(mapped: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _practice_cache_stamp(practice: Practice, db: Session) -> str:
+    sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice.id).all()
+    parts = db.query(PracticePart).filter(PracticePart.practice_id == practice.id).all()
+    data = {
+        "id": practice.id,
+        "updated_at": practice.updated_at.isoformat() if practice.updated_at else "",
+        "contexts": practice.contexts or "",
+        "date": _practice_date_iso(practice),
+        "time": practice.appointment_time or "",
+        "sections": [
+            {
+                "ctx": str(s.context.value if hasattr(s.context, "value") else s.context),
+                "rows": s.description_rows or "",
+                "man": s.man_hours,
+                "mac": s.mac_hours,
+                "mat": s.materials_amount,
+                "w_apply": s.waste_apply,
+                "w_pct": s.waste_percentage,
+                "notes": s.notes or "",
+            }
+            for s in sections
+        ],
+        "parts": [
+            {
+                "ctx": str(p.context.value if hasattr(p.context, "value") else p.context),
+                "name": p.name or "",
+                "qty": p.quantity or "",
+            }
+            for p in parts
+        ],
+    }
+    raw = _json.dumps(data, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _cache_get(cache: Dict[str, Dict[str, Any]], key: str) -> Optional[Any]:
+    entry = cache.get(key)
+    if not entry:
+        return None
+    if entry.get("expires_at", 0) < time.time():
+        cache.pop(key, None)
+        return None
+    return entry.get("value")
+
+
+def _cache_set(cache: Dict[str, Dict[str, Any]], key: str, value: Any, ttl_seconds: int = YAP_PRECHECK_CACHE_TTL_SECONDS) -> None:
+    cache[key] = {
+        "value": value,
+        "expires_at": time.time() + max(1, ttl_seconds),
+    }
+
+
+def _cache_invalidate_practice(practice_id: int) -> None:
+    pid = str(practice_id)
+    for store in (YAP_PRECHECK_CACHE, YAP_PREVIEW_CACHE):
+        stale = [k for k in store.keys() if k.startswith(f"{pid}:")]
+        for key in stale:
+            store.pop(key, None)
+
+
+def _build_yap_action_from_error(reason: str) -> Dict[str, Any]:
+    msg = str(reason or "").lower()
+    if "timeout" in msg:
+        return {"error_code": "YAP_TIMEOUT", "next_action": "Riprova sync", "action_target": "sync", "failed_phase": "write_or_audit", "retryable": True}
+    if "ordine di lavoro" in msg or "blocked_by_odl" in msg:
+        return {"error_code": "BLOCKED_BY_ODL", "next_action": "Apri pratica-ODL e scollega prima l'ODL", "action_target": "open_odl", "failed_phase": "delete", "retryable": False}
+    if "popup" in msg:
+        return {"error_code": "POPUP_NOT_OPENED", "next_action": "Verifica YAP e poi Riprova sync", "action_target": "audit", "failed_phase": "agenda_popup", "retryable": True}
+    if "appuntamento" in msg and "non verificato" in msg:
+        return {"error_code": "APPT_NOT_VERIFIED", "next_action": "Verifica YAP", "action_target": "audit", "failed_phase": "audit", "retryable": True}
+    return {"error_code": "YAP_GENERIC_ERROR", "next_action": "Riprova sync", "action_target": "sync", "failed_phase": None, "retryable": True}
+
+
 def _audit_status_from_result(audit_result: Dict[str, Any]) -> str:
     status_value = str(audit_result.get("status") or "").strip()
     if status_value in {"complete_synced", "partial_synced", "agenda_synced", "sync_failed"}:
@@ -916,6 +993,21 @@ def _audit_message_for_status(status_value: str, audit_result: Dict[str, Any]) -
     return "Appuntamento YAP non verificato."
 
 
+def _audit_reason_for_status(status_value: str, audit_result: Dict[str, Any]) -> str:
+    explicit_reason = str(audit_result.get("status_reason") or "").strip()
+    if explicit_reason:
+        return explicit_reason
+    if status_value == "complete_synced":
+        return "strict_match_complete"
+    if status_value == "partial_synced":
+        missing = len(audit_result.get("missing") or [])
+        mismatch = len(audit_result.get("mismatch") or [])
+        if missing or mismatch:
+            return f"strict_mismatch_missing_{missing}_mismatch_{mismatch}"
+        return "strict_partial"
+    return "appointment_not_verified"
+
+
 def _persist_yap_audit_result(
     db: Session,
     practice: Practice,
@@ -930,6 +1022,7 @@ def _persist_yap_audit_result(
     practice.synced = status_value == "complete_synced"
     practice.updated_by_telegram_id = user_id
     db.commit()
+    _cache_invalidate_practice(practice.id)
     return status_value
 
 
@@ -1018,6 +1111,19 @@ def _build_yap_failure_detail(out: str, err: str) -> dict:
     stack = parsed.get("stack")
     if stack:
         detail["stack"] = stack
+    reason = parsed.get("status_reason") or parsed.get("reason") or message
+    action = _build_yap_action_from_error(str(reason))
+    detail.update(
+        {
+            "error_code": action["error_code"],
+            "reason": str(reason),
+            "failed_phase": action["failed_phase"],
+            "retryable": action["retryable"],
+            "next_action": action["next_action"],
+            "action_target": action["action_target"],
+            "debug_ref": {"screenshot": screenshot} if screenshot else None,
+        }
+    )
     return detail
 
 
@@ -1664,12 +1770,63 @@ async def pre_sync_check(
     try:
         from automation_service import AutomationService
 
-        payload = AutomationService.prepare_automation_payload(practice_id, db)
-        check = AutomationService.pre_sync_check(payload)
+        stamp = _practice_cache_stamp(practice, db)
+        cache_key = f"{practice.id}:{stamp}"
+        check = _cache_get(YAP_PRECHECK_CACHE, cache_key)
+        if check is None:
+            payload = AutomationService.prepare_automation_payload(practice_id, db)
+            check = AutomationService.pre_sync_check(payload)
+            _cache_set(YAP_PRECHECK_CACHE, cache_key, check)
         return APIResponse(success=True, data=check)
     except Exception as e:
         logger.error("Error running pre-sync-check for practice %d: %s", practice_id, e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore pre-sync-check")
+
+
+@app.get("/practices/pre-sync-check-batch")
+@limiter.limit("20/minute")
+async def pre_sync_check_batch(
+    request: Request,
+    ids: str,
+    user_data: dict = Depends(require_whitelisted_user),
+    db: Session = Depends(get_db),
+):
+    """Controllo pre-sync batch con cache corta per dashboard."""
+    raw_ids = [s.strip() for s in str(ids or "").split(",") if s.strip()]
+    parsed_ids: List[int] = []
+    for value in raw_ids:
+        if value.isdigit():
+            parsed_ids.append(int(value))
+    parsed_ids = list(dict.fromkeys(parsed_ids))[:200]
+    if not parsed_ids:
+        return APIResponse(success=True, data={})
+
+    try:
+        from automation_service import AutomationService
+
+        practices = db.query(Practice).filter(
+            Practice.id.in_(parsed_ids),
+            Practice.created_by_telegram_id == user_data["id"],
+            Practice.status != PracticeStatus.DELETED,
+        ).all()
+        by_id = {p.id: p for p in practices}
+        result: Dict[str, Any] = {}
+        for pid in parsed_ids:
+            practice = by_id.get(pid)
+            if not practice:
+                continue
+            stamp = _practice_cache_stamp(practice, db)
+            cache_key = f"{practice.id}:{stamp}"
+            check = _cache_get(YAP_PRECHECK_CACHE, cache_key)
+            if check is None:
+                payload = AutomationService.prepare_automation_payload(practice.id, db)
+                check = AutomationService.pre_sync_check(payload)
+                _cache_set(YAP_PRECHECK_CACHE, cache_key, check)
+            result[str(practice.id)] = check
+        return APIResponse(success=True, data=result)
+    except Exception as e:
+        logger.error("Error running pre-sync-check-batch for user %d: %s", user_data["id"], e, exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore pre-sync-check batch")
 
 
 @app.get("/practices/{practice_id}/management-mapping")
@@ -1742,10 +1899,16 @@ async def sync_practice_to_yap(
         check = AutomationService.pre_sync_check(payload)
         if check.get("ready") is False:
             close_phase("precheck", "failed", "Precheck non superato.")
+            action_meta = _build_yap_action_from_error("precheck_not_ready")
             return APIResponse(
                 success=False,
                 data={
                     "status": "not_ready",
+                    "status_reason": "precheck_not_ready",
+                    "error_code": action_meta["error_code"],
+                    "next_action": action_meta["next_action"],
+                    "action_target": action_meta["action_target"],
+                    "retryable": action_meta["retryable"],
                     "preSync": check,
                     "phase_timeline": phase_timeline,
                     "write_report": None,
@@ -1781,17 +1944,26 @@ async def sync_practice_to_yap(
         except HTTPException as worker_exc:
             close_phase("write", "failed", "Scrittura YAP non riuscita.")
             detail = worker_exc.detail if isinstance(worker_exc.detail, dict) else {"message": str(worker_exc.detail)}
+            action_meta = _build_yap_action_from_error(str(detail.get("reason") or detail.get("message") or ""))
             practice.synced = False
             practice.management_sync_status = "sync_failed"
             practice.management_last_sync_at = datetime.now(timezone.utc)
             practice.updated_by_telegram_id = user_data["id"]
             db.commit()
+            _cache_invalidate_practice(practice.id)
             close_phase("finalize", "completed", "Stato finale persistito.")
             return APIResponse(
                 success=True,
                 data={
                     "status": "sync_failed",
                     "message": str(detail.get("message") or "Sync YAP non riuscita."),
+                    "status_reason": str(detail.get("reason") or "worker_failed"),
+                    "error_code": detail.get("error_code") or action_meta["error_code"],
+                    "next_action": detail.get("next_action") or action_meta["next_action"],
+                    "action_target": detail.get("action_target") or action_meta["action_target"],
+                    "retryable": bool(detail.get("retryable", action_meta["retryable"])),
+                    "failed_phase": detail.get("failed_phase") or action_meta["failed_phase"],
+                    "debug_ref": detail.get("debug_ref"),
                     "audit": None,
                     "preSync": check,
                     "phase_timeline": phase_timeline,
@@ -1836,6 +2008,7 @@ async def sync_practice_to_yap(
             practice.management_last_sync_at = datetime.now(timezone.utc)
             practice.updated_by_telegram_id = user_data["id"]
             db.commit()
+            _cache_invalidate_practice(practice.id)
 
             audit_args = ["--payload-file", tmp_path]
             if body.debug:
@@ -1863,16 +2036,24 @@ async def sync_practice_to_yap(
             practice.management_last_sync_at = datetime.now(timezone.utc)
             practice.updated_by_telegram_id = user_data["id"]
             db.commit()
+            _cache_invalidate_practice(practice.id)
             response_status = "sync_failed"
             response_message = result_data.get("message") or result.get("message") or "Sync YAP non riuscita."
             close_phase("audit", "skipped", "Audit saltato: scrittura non confermata.")
             close_phase("finalize", "completed", "Stato finale persistito.")
 
+        status_reason = _audit_reason_for_status(response_status, audit_result or {})
+        action_meta = _build_yap_action_from_error(status_reason if response_status == "sync_failed" else response_status)
         return APIResponse(
             success=True,
             data={
                 "status": response_status,
                 "message": response_message,
+                "status_reason": status_reason,
+                "error_code": action_meta["error_code"] if response_status == "sync_failed" else None,
+                "next_action": action_meta["next_action"] if response_status == "sync_failed" else None,
+                "action_target": action_meta["action_target"] if response_status == "sync_failed" else None,
+                "retryable": action_meta["retryable"] if response_status == "sync_failed" else response_status in {"partial_synced", "not_ready", "dry_run"},
                 "audit": audit_result,
                 "preSync": check,
                 "phase_timeline": phase_timeline,
@@ -1904,6 +2085,7 @@ async def sync_practice_to_yap(
                 failed_practice.management_last_sync_at = datetime.now(timezone.utc)
                 failed_practice.updated_by_telegram_id = user_data["id"]
                 db.commit()
+                _cache_invalidate_practice(failed_practice.id)
         except Exception:
             db.rollback()
         logger.error("Error syncing practice %d to YAP: %s", practice_id, e, exc_info=True)
@@ -1970,12 +2152,19 @@ async def audit_practice_yap(
         audit_status = _audit_status_from_result(audit_result)
         if body.persist:
             audit_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
+        status_reason = _audit_reason_for_status(audit_status, audit_result or {})
+        action_meta = _build_yap_action_from_error(status_reason if audit_status == "sync_failed" else audit_status)
 
         return APIResponse(
             success=True,
             data={
                 "status": audit_status,
                 "message": _audit_message_for_status(audit_status, audit_result),
+                "status_reason": status_reason,
+                "error_code": action_meta["error_code"] if audit_status == "sync_failed" else None,
+                "next_action": action_meta["next_action"] if audit_status == "sync_failed" else None,
+                "action_target": action_meta["action_target"] if audit_status == "sync_failed" else None,
+                "retryable": action_meta["retryable"] if audit_status == "sync_failed" else audit_status in {"partial_synced"},
                 "audit": audit_result,
                 "practice": {
                     "id": practice.id,
@@ -2068,11 +2257,19 @@ async def delete_practice_yap_appointment(
         practice.management_audit_result = None
         practice.updated_by_telegram_id = user_data["id"]
         db.commit()
+        _cache_invalidate_practice(practice.id)
     close_phase("finalize", "completed", "Stato pratica aggiornato.")
+    status_reason = "already_deleted_on_yap" if status_value == "not_found" else ("deleted_on_yap" if status_value == "deleted" else status_value)
+    action_meta = _build_yap_action_from_error(status_reason if status_value in {"delete_failed", "blocked_by_odl"} else "delete_ok")
     return APIResponse(
         success=True,
         data={
             "status": status_value,
+            "status_reason": status_reason,
+            "error_code": action_meta["error_code"] if status_value in {"delete_failed", "blocked_by_odl"} else None,
+            "next_action": action_meta["next_action"] if status_value in {"delete_failed", "blocked_by_odl"} else None,
+            "action_target": action_meta["action_target"] if status_value in {"delete_failed", "blocked_by_odl"} else None,
+            "retryable": action_meta["retryable"] if status_value in {"delete_failed", "blocked_by_odl"} else False,
             "phase_timeline": phase_timeline,
             "yap": result,
         },
@@ -2133,10 +2330,15 @@ async def get_yap_mapping_preview(
         from automation_service import AutomationService
         from yap_mapping import build_yap_preview
 
-        payload = AutomationService.prepare_automation_payload(practice_id, db)
-        mapped = AutomationService.map_payload_to_management(payload)
-        pre_sync = AutomationService.pre_sync_check(payload)
-        preview = build_yap_preview(mapped, pre_sync)
+        stamp = _practice_cache_stamp(practice, db)
+        cache_key = f"{practice.id}:{stamp}"
+        preview = _cache_get(YAP_PREVIEW_CACHE, cache_key)
+        if preview is None:
+            payload = AutomationService.prepare_automation_payload(practice_id, db)
+            mapped = AutomationService.map_payload_to_management(payload)
+            pre_sync = AutomationService.pre_sync_check(payload)
+            preview = build_yap_preview(mapped, pre_sync)
+            _cache_set(YAP_PREVIEW_CACHE, cache_key, preview)
         return APIResponse(success=True, data=preview)
     except Exception as e:
         logger.error("Error building YAP preview for practice %d: %s", practice_id, e, exc_info=True)

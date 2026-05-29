@@ -672,17 +672,20 @@ function classifyAudit(fields, found) {
   const agendaPresent = agendaFields.every((field) => present.some((item) => item.field === field.field));
   let status = "sync_failed";
   let message = "Appuntamento YAP non verificato.";
+  let statusReason = "appointment_not_verified";
 
   if (agendaPresent && !missing.length && !mismatch.length) {
     status = "complete_synced";
     message = "YAP completo: agenda, note, ODL, materiali e ricambi verificati.";
+    statusReason = "strict_match_complete";
   } else if (agendaPresent) {
     status = "partial_synced";
     message = "Agenda presente, ma verifica incompleta su note/ODL/materiali/ricambi/smaltimento.";
+    statusReason = `strict_mismatch_missing_${missing.length}_mismatch_${mismatch.length}`;
   }
 
   const feedback = buildAuditFeedback(present, missing, mismatch);
-  return { status, message, present, missing, mismatch, feedback };
+  return { status, statusReason, message, present, missing, mismatch, feedback };
 }
 
 async function runAudit(mapping, args) {
@@ -753,6 +756,7 @@ async function runAudit(mapping, args) {
       mode: "readonly_yap_audit",
       quick: Boolean(args.quick),
       status: outcome.status,
+      status_reason: outcome.statusReason,
       message: outcome.message,
       expected: {
         agenda: plan.agenda,
