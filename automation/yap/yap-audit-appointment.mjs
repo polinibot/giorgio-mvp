@@ -152,6 +152,16 @@ function extractEventTimes(value) {
   return { start: matches[0] || "", end: matches[1] || "" };
 }
 
+function toMinutes(timeValue) {
+  const normalized = normalizeTimeValue(timeValue || "");
+  const match = normalized.match(/^(\d{1,2})\.(\d{2})$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return (hours * 60) + minutes;
+}
+
 function enrichAgendaEvent(event, plan, dateIso) {
   if (!event) return null;
   const times = extractEventTimes(event.time);
@@ -230,6 +240,9 @@ function eventScore(event, searchTerms, expectedTime) {
   const title = String(event?.title || "");
   const hay = normalize(title);
   const normalizedTerms = (searchTerms || []).map((term) => normalize(term)).filter(Boolean);
+  const eventStart = extractEventTimes(event?.time).start;
+  const eventMinutes = toMinutes(eventStart || event?.time || "");
+  const expectedMinutes = toMinutes(expectedTime || "");
   let score = 0;
   for (const term of normalizedTerms) {
     if (!term) continue;
@@ -237,10 +250,22 @@ function eventScore(event, searchTerms, expectedTime) {
     if (/^[a-z]{2}\d{3}[a-z]{2}$/i.test(term) && hay.includes(term)) score += 120;
     if (hay.startsWith(term)) score += 20;
   }
-  if (expectedTime && normalizeTimeValue(event?.time) === normalizeTimeValue(expectedTime)) {
-    score += 60;
+  if (expectedMinutes != null && eventMinutes != null) {
+    const diff = Math.abs(eventMinutes - expectedMinutes);
+    if (diff === 0) score += 70;
+    else if (diff <= 10) score += 55;
+    else if (diff <= 20) score += 40;
+    else if (diff <= 40) score += 20;
+    else if (diff <= 90) score += 8;
   }
   return score;
+}
+
+function rankAgendaEvents(events, searchTerms, expectedTime) {
+  const ranked = [...(events || [])]
+    .map((event) => ({ event, score: eventScore(event, searchTerms, expectedTime) }))
+    .sort((a, b) => b.score - a.score);
+  return ranked;
 }
 
 async function appointmentPopupVisible(page, timeout = 1800) {
@@ -276,17 +301,14 @@ async function clickAgendaEventRobust(page, searchTerms, expectedTime, dateIso) 
     }
 
     lastEvents = await scanAgendaEvents(page).catch(() => []);
-    const ranked = [...lastEvents]
-      .map((event) => ({ event, score: eventScore(event, searchTerms, expectedTime) }))
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score);
+    const ranked = rankAgendaEvents(lastEvents, searchTerms, expectedTime);
 
     const best = ranked[0]?.event || null;
     if (best && Number.isFinite(best.x) && Number.isFinite(best.y)) {
       await page.mouse.dblclick(best.x, best.y).catch(() => {});
       await page.waitForTimeout(800);
       if (await appointmentPopupVisible(page)) {
-        return { success: true, text: best.title, time: best.time, method: "mouse_best_event", events: lastEvents };
+        return { success: true, text: best.title, time: best.time, method: "mouse_best_event", score: ranked[0]?.score || 0, events: lastEvents };
       }
     }
 
@@ -716,10 +738,8 @@ async function runAudit(mapping, args) {
       await page.screenshot({ path: screenshot, fullPage: true }).catch(() => {});
     }
 
-    const rankedEvents = events
-      .map((ev) => ({ ev, score: eventScore(ev, searchTerms, plan.agenda.dalle) }))
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score);
+    const rankedEvents = rankAgendaEvents(events, searchTerms, plan.agenda.dalle)
+      .map((item) => ({ ev: item.event, score: item.score }));
     const event = enrichAgendaEvent(rankedEvents[0]?.ev || null, plan, mapping.agenda.data);
     const clickEvent = click.success
       ? enrichAgendaEvent({ title: click.text, time: click.time || "" }, plan, mapping.agenda.data)
