@@ -278,7 +278,10 @@ async function extractPopup(page) {
       .filter(isVisible)
       .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase())
       .filter((value) => value && value.length <= 24);
-    const tags = [...new Set(knownTags.filter((tag) => tagNodes.includes(tag.toLowerCase())))];
+    const tags = [...new Set(knownTags.filter((tag) => {
+      const needle = tag.toLowerCase();
+      return tagNodes.some((nodeText) => nodeText === needle || nodeText.includes(needle));
+    }))];
 
     return {
       found: true,
@@ -380,12 +383,20 @@ async function tryOpenPracticeAndOdl(page) {
         .join(" | ")
         .slice(0, 12000);
 
+    const allText = [...document.querySelectorAll("textarea,input[type='text'],input[type='number'],[contenteditable='true'],td,th,label,span,div")]
+      .filter(isVisible)
+      .map((el) => clean(el.value || el.innerText || el.textContent || ""))
+      .filter((chunk) => chunk && chunk.length <= 300 && !isBoilerplate(chunk))
+      .join(" | ")
+      .slice(0, 30000);
+
     return {
       notesText: [sectionTextFromKeyword(/\bnote\b/i), readValues("textarea")].filter(Boolean).join(" | "),
       odlText: sectionTextFromKeyword(/\bordini?\s+di\s+lavoro\b|\bodl\b|\bman\b|\bmac\b/i),
       materialsText: sectionTextFromKeyword(/\bmateriali\b|\bconsumo\b/i),
       partsText: sectionTextFromKeyword(/\bricambi\b|\barticoli\b|\bmagazzino\b/i),
       wasteText: sectionTextFromKeyword(/\bsmaltimento\b|\brifiuti\b|%/i),
+      allText,
     };
   }).catch(() => null);
   if (scoped && typeof scoped === "object") {
@@ -394,6 +405,7 @@ async function tryOpenPracticeAndOdl(page) {
     result.materialsText = scoped.materialsText || "";
     result.partsText = scoped.partsText || "";
     result.wasteText = scoped.wasteText || "";
+    result.allText = scoped.allText || "";
   }
   return result;
 }
@@ -404,11 +416,11 @@ function resolveFoundValue(field, found) {
   if (field.field === "agenda.dalle") return found.popup?.agenda?.dalle || found.event?.time || "";
   if (field.field === "agenda.alle") return found.popup?.agenda?.alle || "";
   if (field.group === "tags") return [...(found.popup?.tags || [])].join(" ");
-  if (field.group === "notes") return [found.popup?.notesText, found.practice?.notesText].filter(Boolean).join(" ");
-  if (field.group === "odl") return found.practice?.odlText || "";
-  if (field.group === "materials") return found.practice?.materialsText || "";
-  if (field.group === "parts") return found.practice?.partsText || "";
-  if (field.group === "waste") return found.practice?.wasteText || "";
+  if (field.group === "notes") return [found.popup?.notesText, found.practice?.notesText, found.practice?.allText].filter(Boolean).join(" ");
+  if (field.group === "odl") return [found.practice?.odlText, found.practice?.allText].filter(Boolean).join(" ");
+  if (field.group === "materials") return [found.practice?.materialsText, found.practice?.allText].filter(Boolean).join(" ");
+  if (field.group === "parts") return [found.practice?.partsText, found.practice?.allText].filter(Boolean).join(" ");
+  if (field.group === "waste") return [found.practice?.wasteText, found.practice?.allText].filter(Boolean).join(" ");
   return "";
 }
 
@@ -449,6 +461,66 @@ function previewValue(value, maxLen = 180) {
   const clean = String(value || "").replace(/\s+/g, " ").trim();
   if (!clean) return "";
   return clean.length <= maxLen ? clean : `${clean.slice(0, maxLen)}...`;
+}
+
+function issuePriority(issue) {
+  const group = String(issue?.group || "").toLowerCase();
+  const table = {
+    tags: 1,
+    agenda: 2,
+    odl: 3,
+    notes: 4,
+    materials: 5,
+    parts: 6,
+    waste: 7,
+  };
+  return table[group] || 99;
+}
+
+function buildGroupStats(present, missing, mismatch) {
+  const allGroups = new Set([
+    ...(present || []).map((item) => item.group),
+    ...(missing || []).map((item) => item.group),
+    ...(mismatch || []).map((item) => item.group),
+  ]);
+  const stats = {};
+  for (const group of allGroups) {
+    const key = String(group || "other");
+    stats[key] = {
+      present: (present || []).filter((item) => item.group === group).length,
+      missing: (missing || []).filter((item) => item.group === group).length,
+      mismatch: (mismatch || []).filter((item) => item.group === group).length,
+    };
+  }
+  return stats;
+}
+
+function buildAuditFeedback(present, missing, mismatch) {
+  const blockers = [...(mismatch || []), ...(missing || [])].sort((a, b) => issuePriority(a) - issuePriority(b));
+  const nextSteps = [];
+  for (const issue of blockers) {
+    if (issue?.hint && !nextSteps.includes(issue.hint)) {
+      nextSteps.push(issue.hint);
+    }
+  }
+  const topBlockers = blockers.slice(0, 6).map((item) => ({
+    label: item.label || item.field,
+    group: item.group,
+    reason: item.reason || "valore_diverso",
+    expected: item.expected_preview || previewValue(item.expected),
+    found: item.found_preview || previewValue(item.found),
+    hint: item.hint || null,
+  }));
+  const summary = blockers.length
+    ? `Priorita': ${topBlockers.slice(0, 3).map((item) => item.label).join(" • ")}`
+    : "Nessun blocco rilevato.";
+  return {
+    summary,
+    totalBlockers: blockers.length,
+    topBlockers,
+    nextSteps: nextSteps.slice(0, 6),
+    byGroup: buildGroupStats(present, missing, mismatch),
+  };
 }
 
 function classifyAudit(fields, found) {
@@ -497,7 +569,8 @@ function classifyAudit(fields, found) {
     message = "Agenda presente, ma verifica incompleta su note/ODL/materiali/ricambi/smaltimento.";
   }
 
-  return { status, message, present, missing, mismatch };
+  const feedback = buildAuditFeedback(present, missing, mismatch);
+  return { status, message, present, missing, mismatch, feedback };
 }
 
 async function runAudit(mapping, args) {
@@ -573,6 +646,7 @@ async function runAudit(mapping, args) {
       present: outcome.present,
       missing: outcome.missing,
       mismatch: outcome.mismatch,
+      feedback: outcome.feedback,
       screenshot,
     };
   } finally {

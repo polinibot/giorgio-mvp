@@ -2186,8 +2186,16 @@ function App() {
     if (Array.isArray(safeResult.phase_timeline) && safeResult.phase_timeline.length) {
       meta.push(summarizePhaseTimeline(safeResult.phase_timeline));
     }
-    if (safeResult.write_report?.ok === false) {
-      meta.push('Write report: incompleto');
+    const writeReport = safeResult.write_report || safeResult.yap?.result?.write_report || null;
+    if (writeReport?.ok === false) {
+      const issues = [
+        writeReport.notes?.error ? `note:${writeReport.notes.error}` : null,
+        writeReport.odl?.error ? `odl:${writeReport.odl.error}` : null,
+        writeReport.materials?.error ? `materiali:${writeReport.materials.error}` : null,
+        writeReport.parts?.error ? `ricambi:${writeReport.parts.error}` : null,
+        writeReport.waste?.error ? `smaltimento:${writeReport.waste.error}` : null,
+      ].filter(Boolean);
+      meta.push(issues.length ? `Write report: incompleto (${issues.slice(0, 2).join(', ')})` : 'Write report: incompleto');
     }
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
@@ -2262,6 +2270,20 @@ function App() {
       { key: 'missing', title: 'Mancanti', items: audit.missing || [] },
       { key: 'mismatch', title: 'Diversi', items: audit.mismatch || [] },
     ];
+    const feedback = audit.feedback || {};
+    const topBlockers = Array.isArray(feedback.topBlockers) ? feedback.topBlockers : [];
+    const nextSteps = Array.isArray(feedback.nextSteps) ? feedback.nextSteps : [];
+    const byGroup = feedback.byGroup || {};
+    const groupOrder = ['tags', 'agenda', 'odl', 'notes', 'materials', 'parts', 'waste'];
+    const groupLabel = {
+      tags: 'Tag',
+      agenda: 'Agenda',
+      odl: 'ODL',
+      notes: 'Note',
+      materials: 'Materiali',
+      parts: 'Ricambi',
+      waste: 'Smaltimento',
+    };
 
     return (
       <div className="section yap-audit-section">
@@ -2272,6 +2294,32 @@ function App() {
           </span>
         </div>
         {audit.message && <div className="yap-audit-message">{audit.message}</div>}
+        {(feedback.summary || topBlockers.length || nextSteps.length) && (
+          <div className="yap-audit-message">
+            {feedback.summary && <div><strong>Priorita:</strong> {feedback.summary}</div>}
+            {topBlockers.length > 0 && (
+              <div>
+                <strong>Blocchi principali:</strong> {topBlockers.slice(0, 3).map(item => item.label).join(' | ')}
+              </div>
+            )}
+            {nextSteps.length > 0 && (
+              <div>
+                <strong>Prossimi passi:</strong> {nextSteps.slice(0, 3).join(' | ')}
+              </div>
+            )}
+          </div>
+        )}
+        {Object.keys(byGroup).length > 0 && (
+          <div className="yap-audit-message">
+            {groupOrder
+              .filter((key) => byGroup[key])
+              .map((key) => {
+                const stats = byGroup[key] || {};
+                return `${groupLabel[key] || key}: ${stats.present || 0} ok, ${stats.missing || 0} mancanti, ${stats.mismatch || 0} diversi`;
+              })
+              .join(' | ')}
+          </div>
+        )}
         <div className="yap-audit-grid">
           {groups.map(group => (
             <div key={group.key} className={`yap-audit-card yap-audit-${group.key}`}>
@@ -2287,7 +2335,24 @@ function App() {
                       {item.hint && <small>azione: {String(item.hint)}</small>}
                     </li>
                   ))}
-                  {group.items.length > 8 && <li className="yap-audit-more">+{group.items.length - 8} altri campi</li>}
+                  {group.items.length > 8 && (
+                    <li className="yap-audit-more">
+                      <details>
+                        <summary>+{group.items.length - 8} altri campi</summary>
+                        <ul className="yap-audit-list">
+                          {group.items.slice(8).map((item, index) => (
+                            <li key={`${group.key}-more-${item.field || index}`}>
+                              <span>{item.label || item.field}</span>
+                              {item.expected != null && <small>atteso: {String(item.expected)}</small>}
+                              {item.found && group.key === 'mismatch' && <small>trovato: {String(item.found_preview || item.found).slice(0, 160)}</small>}
+                              {item.reason && <small>motivo: {String(item.reason)}</small>}
+                              {item.hint && <small>azione: {String(item.hint)}</small>}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    </li>
+                  )}
                 </ul>
               ) : (
                 <div className="yap-audit-empty">Nessun campo</div>

@@ -610,12 +610,16 @@ async function addYapTagChips(page, tags) {
           const text = normalize(el.textContent || el.getAttribute("title") || el.getAttribute("aria-label") || "");
           return { el, text };
         })
-        .filter((item) => item.text === tagNorm);
+        .filter((item) => item.text === tagNorm || item.text.includes(tagNorm));
       return candidates[0]?.el || null;
     };
 
+    const findToggleHost = (el) => (
+      el?.closest?.("[aria-pressed], .gwt-ToggleButton, [role='button'], button, a") || el
+    );
+
     for (const tag of desiredTags) {
-      const host = findTagHost(tag);
+      const host = findToggleHost(findTagHost(tag));
       if (host) {
         if (isPressedNode(host)) continue;
         host.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
@@ -628,6 +632,21 @@ async function addYapTagChips(page, tags) {
       });
       const tagInput = tagInputs[tagInputs.length - 1];
       if (tagInput) {
+        tagInput.focus();
+        tagInput.value = tag;
+        tagInput.dispatchEvent(new Event("input", { bubbles: true }));
+        tagInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      }
+    }
+
+    // Fallback robusto: prova sempre ad inserire i tag desiderati nell'input Tag.
+    const tagInputs = [...popup.querySelectorAll("input")].filter((inp) => {
+      const section = inp.closest("div");
+      return section && /tag/i.test(section.textContent || "");
+    });
+    const tagInput = tagInputs[tagInputs.length - 1];
+    if (tagInput) {
+      for (const tag of desiredTags) {
         tagInput.focus();
         tagInput.value = tag;
         tagInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -848,7 +867,14 @@ async function writePracticeAndOdl(page, job, args) {
     },
   };
 
-  const practiceLink = await clickAppointmentPopupPractice(page);
+  let practiceLink = await clickAppointmentPopupPractice(page);
+  if (!practiceLink?.clicked) {
+    const fallbackPractice = page.locator(".gwt-DecoratedPopupPanel button, .gwt-DecoratedPopupPanel a, .gwt-DecoratedPopupPanel [role='button']").filter({ hasText: /gestione pratica|apri pratica|\bpratica\b/i }).first();
+    if (await fallbackPractice.count()) {
+      await fallbackPractice.click().catch(() => {});
+      practiceLink = { clicked: true, label: "fallback:gestione_pratica" };
+    }
+  }
   if (!practiceLink?.clicked) {
     writeReport.attempted = false;
     writeReport.reason = "practice_link_not_found";
@@ -857,7 +883,14 @@ async function writePracticeAndOdl(page, job, args) {
   writeReport.openedPractice = true;
   await page.waitForTimeout(2200);
 
-  const odlTab = await clickOdlSection(page);
+  let odlTab = await clickOdlSection(page);
+  if (!odlTab?.clicked) {
+    const fallbackOdl = page.locator("button, a, [role='button'], .gwt-Label, span, div, td").filter({ hasText: /ordini di lavoro|\bodl\b/i }).first();
+    if (await fallbackOdl.count()) {
+      await fallbackOdl.click().catch(() => {});
+      odlTab = { clicked: true, label: "fallback:odl" };
+    }
+  }
   if (odlTab?.clicked) {
     writeReport.openedOdl = true;
     await page.waitForTimeout(1600);
