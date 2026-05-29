@@ -2271,6 +2271,7 @@ function App() {
       { key: 'mismatch', title: 'Diversi', items: audit.mismatch || [] },
     ];
     const feedback = audit.feedback || {};
+    const lookup = audit.lookup || {};
     const topBlockers = Array.isArray(feedback.topBlockers) ? feedback.topBlockers : [];
     const nextSteps = Array.isArray(feedback.nextSteps) ? feedback.nextSteps : [];
     const byGroup = feedback.byGroup || {};
@@ -2294,6 +2295,19 @@ function App() {
           </span>
         </div>
         {audit.message && <div className="yap-audit-message">{audit.message}</div>}
+        {lookup && (lookup.method || lookup.click?.method || Number.isFinite(lookup.eventCount)) && (
+          <div className="yap-audit-message">
+            <strong>Ricerca evento:</strong> metodo {lookup.click?.method || lookup.method || '-'}
+            {Number.isFinite(lookup.eventCount) ? ` | eventi trovati ${lookup.eventCount}` : ''}
+            {lookup.expectedTime ? ` | ora attesa ${lookup.expectedTime}` : ''}
+            {lookup.bestEvent ? ` | match ${lookup.bestEvent}` : ''}
+            {Number.isFinite(lookup.bestEventScore) && lookup.bestEventScore > 0 ? ` | score ${lookup.bestEventScore}` : ''}
+            {typeof lookup.popupFound === 'boolean' ? ` | popup ${lookup.popupFound ? 'aperto' : 'non aperto'}` : ''}
+            {typeof lookup.openedPractice === 'boolean' ? ` | pratica ${lookup.openedPractice ? 'aperta' : 'non aperta'}` : ''}
+            {Array.isArray(lookup.searchTerms) && lookup.searchTerms.length ? ` | cerca ${lookup.searchTerms.join(', ')}` : ''}
+            {Array.isArray(lookup.eventTitles) && lookup.eventTitles.length ? ` | primi eventi: ${lookup.eventTitles.slice(0, 3).join(' ; ')}` : ''}
+          </div>
+        )}
         {(feedback.summary || topBlockers.length || nextSteps.length) && (
           <div className="yap-audit-message">
             {feedback.summary && <div><strong>Priorita:</strong> {feedback.summary}</div>}

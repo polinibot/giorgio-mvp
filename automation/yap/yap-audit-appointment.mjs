@@ -146,6 +146,23 @@ function normalizeTimeValue(value) {
   return `${Number(match[1])}.${match[2]}`;
 }
 
+function extractEventTimes(value) {
+  const matches = [...String(value || "").matchAll(/(\d{1,2})[\.:](\d{2})/g)]
+    .map((match) => `${String(Number(match[1])).padStart(2, "0")}.${match[2]}`);
+  return { start: matches[0] || "", end: matches[1] || "" };
+}
+
+function enrichAgendaEvent(event, plan, dateIso) {
+  if (!event) return null;
+  const times = extractEventTimes(event.time);
+  return {
+    ...event,
+    startTime: times.start || event.time || "",
+    endTime: times.end || "",
+    date: plan?.agenda?.quando || (dateIso ? toItalianDate(dateIso) : ""),
+  };
+}
+
 function normalizeDateValue(value) {
   const raw = String(value || "").trim();
   const match = raw.match(/(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})/);
@@ -207,6 +224,79 @@ async function scanAgendaEvents(page) {
       })
       .filter((event) => event.title);
   });
+}
+
+function eventScore(event, searchTerms, expectedTime) {
+  const title = String(event?.title || "");
+  const hay = normalize(title);
+  const normalizedTerms = (searchTerms || []).map((term) => normalize(term)).filter(Boolean);
+  let score = 0;
+  for (const term of normalizedTerms) {
+    if (!term) continue;
+    if (hay.includes(term)) score += term.length;
+    if (/^[a-z]{2}\d{3}[a-z]{2}$/i.test(term) && hay.includes(term)) score += 120;
+    if (hay.startsWith(term)) score += 20;
+  }
+  if (expectedTime && normalizeTimeValue(event?.time) === normalizeTimeValue(expectedTime)) {
+    score += 60;
+  }
+  return score;
+}
+
+async function appointmentPopupVisible(page, timeout = 1800) {
+  const titleVisible = await page
+    .getByText("Dettagli appuntamento")
+    .first()
+    .isVisible({ timeout })
+    .catch(() => false);
+  if (titleVisible) return true;
+  return page.waitForFunction(() => {
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const popups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")];
+    return popups.some((popup) => {
+      if (!isVisible(popup)) return false;
+      const text = (popup.textContent || "").toLowerCase();
+      const visibleControls = [...popup.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible);
+      return text.includes("dettagli appuntamento") || visibleControls.length >= 5;
+    });
+  }, null, { timeout }).then(() => true).catch(() => false);
+}
+
+async function clickAgendaEventRobust(page, searchTerms, expectedTime, dateIso) {
+  let lastEvents = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) {
+      await openAgendaInApp(page).catch(() => {});
+      await gotoAgendaDate(page, dateIso).catch(() => {});
+      await page.waitForTimeout(600);
+    }
+
+    lastEvents = await scanAgendaEvents(page).catch(() => []);
+    const ranked = [...lastEvents]
+      .map((event) => ({ event, score: eventScore(event, searchTerms, expectedTime) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    const best = ranked[0]?.event || null;
+    if (best && Number.isFinite(best.x) && Number.isFinite(best.y)) {
+      await page.mouse.dblclick(best.x, best.y).catch(() => {});
+      await page.waitForTimeout(800);
+      if (await appointmentPopupVisible(page)) {
+        return { success: true, text: best.title, time: best.time, method: "mouse_best_event", events: lastEvents };
+      }
+    }
+
+    const fallback = await clickAgendaEvent(page, searchTerms).catch(() => ({ success: false }));
+    await page.waitForTimeout(800);
+    if (fallback?.success && await appointmentPopupVisible(page)) {
+      return { ...fallback, method: "dom_term_match", events: lastEvents };
+    }
+  }
+  return { success: false, method: "not_found", events: lastEvents };
 }
 
 async function extractAgendaToolbar(page) {
@@ -412,9 +502,9 @@ async function tryOpenPracticeAndOdl(page) {
 
 function resolveFoundValue(field, found) {
   if (field.field === "agenda.cosa") return found.popup?.agenda?.cosa || found.event?.title || "";
-  if (field.field === "agenda.quando") return found.popup?.agenda?.quando || "";
-  if (field.field === "agenda.dalle") return found.popup?.agenda?.dalle || found.event?.time || "";
-  if (field.field === "agenda.alle") return found.popup?.agenda?.alle || "";
+  if (field.field === "agenda.quando") return found.popup?.agenda?.quando || found.event?.date || "";
+  if (field.field === "agenda.dalle") return found.popup?.agenda?.dalle || found.event?.startTime || found.event?.time || "";
+  if (field.field === "agenda.alle") return found.popup?.agenda?.alle || found.event?.endTime || "";
   if (field.group === "tags") return [...(found.popup?.tags || [])].join(" ");
   if (field.group === "notes") return [found.popup?.notesText, found.practice?.notesText, found.practice?.allText].filter(Boolean).join(" ");
   if (field.group === "odl") return [found.practice?.odlText, found.practice?.allText].filter(Boolean).join(" ");
@@ -611,8 +701,8 @@ async function runAudit(mapping, args) {
     await openAgendaInApp(page);
     await gotoAgendaDate(page, mapping.agenda.data);
 
-    const events = await scanAgendaEvents(page);
-    const click = await clickAgendaEvent(page, searchTerms);
+    const click = await clickAgendaEventRobust(page, searchTerms, plan.agenda.dalle, mapping.agenda.data);
+    const events = click.events?.length ? click.events : await scanAgendaEvents(page);
     await page.waitForTimeout(1800);
     const popup = await extractPopup(page);
     const toolbar = await extractAgendaToolbar(page);
@@ -626,8 +716,15 @@ async function runAudit(mapping, args) {
       await page.screenshot({ path: screenshot, fullPage: true }).catch(() => {});
     }
 
-    const event = events.find((ev) => searchTerms.some((term) => normalize(ev.title).includes(normalize(term)))) || null;
-    const found = { event: event || (click.success ? { title: click.text, time: "" } : null), popup, toolbar, practice };
+    const rankedEvents = events
+      .map((ev) => ({ ev, score: eventScore(ev, searchTerms, plan.agenda.dalle) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score);
+    const event = enrichAgendaEvent(rankedEvents[0]?.ev || null, plan, mapping.agenda.data);
+    const clickEvent = click.success
+      ? enrichAgendaEvent({ title: click.text, time: click.time || "" }, plan, mapping.agenda.data)
+      : null;
+    const found = { event: event || clickEvent, popup, toolbar, practice };
     const outcome = classifyAudit(fields, found);
 
     return {
@@ -641,6 +738,17 @@ async function runAudit(mapping, args) {
         agenda: plan.agenda,
         fieldCount: fields.length,
         fields,
+      },
+      lookup: {
+        searchTerms,
+        expectedTime: plan.agenda.dalle,
+        click,
+        popupFound: Boolean(popup.found),
+        openedPractice: Boolean(practice.openedPractice),
+        bestEventScore: rankedEvents[0]?.score || 0,
+        bestEvent: event ? [event.time, event.title].filter(Boolean).join(" ") : null,
+        eventCount: events.length,
+        eventTitles: events.map((ev) => [ev.time, ev.title].filter(Boolean).join(" ")).slice(0, 20),
       },
       found,
       present: outcome.present,
