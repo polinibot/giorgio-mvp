@@ -34,6 +34,15 @@ class AutomationService:
     def _normalize_plate(plate: Any) -> str:
         raw = AutomationService._ensure_str(plate).upper()
         return re.sub(r"[^A-Z0-9]", "", raw)
+
+    @staticmethod
+    def _date_to_iso(value: Any) -> str:
+        if not value:
+            return ""
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y-%m-%d")
+        raw = str(value).strip()
+        return raw[:10]
     
     @staticmethod
     def prepare_automation_payload(practice_id: int, db: Session) -> Dict[str, Any]:
@@ -138,6 +147,79 @@ class AutomationService:
         payload["automation_instructions"] = AutomationService._build_automation_instructions(payload)
 
         return payload
+
+    @staticmethod
+    def payload_from_form(practice_dict: Dict[str, Any], sections_list: List[Dict[str, Any]], parts_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+        practice_contexts = [
+            AutomationService._enum_value(context)
+            for context in (practice_dict.get("contexts") or [])
+        ]
+        parts_by_context: Dict[str, List[Dict[str, Any]]] = {}
+        for part in parts_list:
+            context_key = AutomationService._enum_value(part.get("context"))
+            parts_by_context.setdefault(context_key, []).append(
+                {
+                    "name": AutomationService._ensure_str(part.get("name")),
+                    "quantity": AutomationService._ensure_str(part.get("quantity")) or None,
+                }
+            )
+
+        payload = {
+            "practice_id": practice_dict.get("id"),
+            "external_id": practice_dict.get("management_external_id"),
+            "sync_status": practice_dict.get("management_sync_status"),
+            "last_sync": practice_dict.get("management_last_sync_at"),
+            "customer": {
+                "name": AutomationService._ensure_str(practice_dict.get("customer_name")),
+                "phone": AutomationService._normalize_phone(practice_dict.get("phone")),
+                "type": AutomationService._enum_value(practice_dict.get("customer_type")),
+                "billing_complete": not bool(practice_dict.get("billing_to_complete")),
+                "plate": AutomationService._normalize_plate(practice_dict.get("plate_confirmed")),
+            },
+            "appointment": {
+                "date": AutomationService._date_to_iso(practice_dict.get("appointment_date")),
+                "time": normalize_appointment_time(AutomationService._ensure_str(practice_dict.get("appointment_time"))),
+                "slot_duration": get_yap_slot_minutes(),
+                "practice_type": AutomationService._enum_value(practice_dict.get("practice_type")),
+            },
+            "contexts": practice_contexts,
+            "photos": [],
+            "sections": {},
+            "internal_notes": practice_dict.get("internal_notes"),
+            "metadata": {
+                "created_at": practice_dict.get("created_at"),
+                "updated_at": practice_dict.get("updated_at"),
+                "created_by": practice_dict.get("created_by_telegram_id"),
+                "updated_by": practice_dict.get("updated_by_telegram_id"),
+            },
+        }
+
+        for section in sections_list:
+            context_key = AutomationService._enum_value(section.get("context"))
+            payload["sections"][context_key] = {
+                "context": context_key,
+                "description_rows": [
+                    AutomationService._ensure_str(row)
+                    for row in (section.get("description_rows") or [])
+                    if AutomationService._ensure_str(row)
+                ],
+                "man_hours": section.get("man_hours"),
+                "mac_hours": section.get("mac_hours"),
+                "materials_amount": section.get("materials_amount"),
+                "waste": {
+                    "apply": section.get("waste_apply"),
+                    "percentage": section.get("waste_percentage"),
+                },
+                "parts": parts_by_context.get(context_key, []),
+            }
+
+        payload["automation_instructions"] = AutomationService._build_automation_instructions(payload)
+        return payload
+
+    @staticmethod
+    def map_form_to_management(practice_dict: Dict[str, Any], sections_list: List[Dict[str, Any]], parts_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+        payload = AutomationService.payload_from_form(practice_dict, sections_list, parts_list)
+        return AutomationService.map_payload_to_management(payload)
 
     @staticmethod
     def map_payload_to_management(payload: Dict[str, Any]) -> Dict[str, Any]:

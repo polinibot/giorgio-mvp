@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum, text, ForeignKey, Index
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum, text, ForeignKey, Index, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -18,6 +18,13 @@ else:
     engine_kwargs.update(pool_size=10, pool_recycle=3600, pool_pre_ping=True)
 
 engine = create_engine(DATABASE_URL, **engine_kwargs)
+if DATABASE_URL.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -83,6 +90,7 @@ class PracticePhoto(Base):
     practice_id = Column(Integer, ForeignKey("practices.id", ondelete="CASCADE"), nullable=False, index=True)
     telegram_file_id = Column(String(500), nullable=False)
     storage_path = Column(String(500), nullable=False)
+    cloudinary_public_id = Column(String(500), nullable=True)
     ocr_result = Column(String(20), nullable=True)
     ocr_confidence = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -308,6 +316,20 @@ def create_tables():
                     logger.info("Migrated Postgres: made columns %s nullable", notnull_cols)
     except Exception as e:
         logger.warning("Migration to nullable columns failed (may already exist): %s", e)
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT cloudinary_public_id FROM practice_photos LIMIT 1"))
+    except Exception:
+        if DATABASE_URL.startswith("sqlite"):
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE practice_photos ADD COLUMN cloudinary_public_id VARCHAR(500)"))
+                conn.commit()
+        elif "postgresql" in DATABASE_URL:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE practice_photos ADD COLUMN IF NOT EXISTS cloudinary_public_id VARCHAR(500)"))
+                conn.commit()
+        logger.info("Migrated: added cloudinary_public_id column to practice_photos")
 
     try:
         with engine.connect() as conn:

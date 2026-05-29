@@ -51,9 +51,37 @@ class OCRResult(BaseModel):
     confidence: float
 
 
+def normalize_plate_value(value: str) -> str:
+    cleaned = re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
+    if len(cleaned) < 5 or len(cleaned) > 10:
+        raise ValueError("Plate must be between 5 and 10 alphanumeric characters")
+    return cleaned
+
+
+def normalize_phone_value(value: str) -> str:
+    raw = str(value or "").strip()
+    cleaned = re.sub(r"[^0-9+]", "", raw)
+    if cleaned.count("+") > 1 or ("+" in cleaned and not cleaned.startswith("+")):
+        raise ValueError("Phone number format is invalid")
+    digits_only = re.sub(r"[^0-9]", "", cleaned)
+    if len(digits_only) < 6:
+        raise ValueError("Phone number must have at least 6 digits")
+    if cleaned.startswith("+"):
+        return f"+{digits_only}"
+    return digits_only
+
+
+def normalize_customer_name(value: str) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        raise ValueError("Customer name cannot be empty")
+    return normalized
+
+
 class PracticePhotoCreate(BaseModel):
     telegram_file_id: str
     storage_path: str
+    cloudinary_public_id: Optional[str] = None
     ocr_result: Optional[str] = None
     ocr_confidence: Optional[float] = None
 
@@ -63,6 +91,7 @@ class PracticePhoto(BaseModel):
     practice_id: int
     telegram_file_id: str
     storage_path: str
+    cloudinary_public_id: Optional[str] = None
     ocr_result: Optional[str] = None
     ocr_confidence: Optional[float] = None
     created_at: datetime
@@ -130,25 +159,17 @@ class PracticeCreate(BaseModel):
     @field_validator("plate_confirmed")
     @classmethod
     def validate_plate(cls, v: str) -> str:
-        cleaned = re.sub(r'[^A-Z0-9]', '', v.upper())
-        if len(cleaned) < 5 or len(cleaned) > 10:
-            raise ValueError("Plate must be between 5 and 10 alphanumeric characters")
-        return cleaned
+        return normalize_plate_value(v)
 
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v: str) -> str:
-        cleaned = re.sub(r'[^0-9+]', '', v)
-        if len(cleaned) < 6:
-            raise ValueError("Phone number must have at least 6 digits")
-        return v
+        return normalize_phone_value(v)
 
     @field_validator("customer_name")
     @classmethod
     def validate_customer_name(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Customer name cannot be empty")
-        return v.strip()
+        return normalize_customer_name(v)
 
 
 class PracticeUpdate(BaseModel):
@@ -162,6 +183,27 @@ class PracticeUpdate(BaseModel):
     practice_type: Optional[PracticeType] = None
     contexts: Optional[List[Context]] = None
     internal_notes: Optional[str] = None
+
+    @field_validator("plate_confirmed")
+    @classmethod
+    def validate_optional_plate(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_plate_value(v)
+
+    @field_validator("phone")
+    @classmethod
+    def validate_optional_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_phone_value(v)
+
+    @field_validator("customer_name")
+    @classmethod
+    def validate_optional_customer_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_customer_name(v)
 
 
 class Practice(BaseModel):

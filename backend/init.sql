@@ -64,6 +64,7 @@ CREATE TABLE practice_photos (
     practice_id INTEGER NOT NULL REFERENCES practices(id) ON DELETE CASCADE,
     telegram_file_id VARCHAR(500) NOT NULL,
     storage_path VARCHAR(500) NOT NULL,
+    cloudinary_public_id VARCHAR(500),
     ocr_result VARCHAR(20),
     ocr_confidence FLOAT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

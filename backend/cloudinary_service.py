@@ -5,6 +5,7 @@ import cloudinary.api
 from PIL import Image
 import io
 import os
+from urllib.parse import urlparse
 from typing import Tuple, Optional
 from config import settings
 
@@ -170,6 +171,29 @@ class CloudinaryService:
         except Exception as e:
             logger.error("Cloudinary deletion error for %s: %s", public_id, e)
             return False
+
+    def extract_public_id_from_url(self, base_url: str) -> Optional[str]:
+        try:
+            if not base_url or "/upload/" not in base_url:
+                return None
+            parsed = urlparse(base_url)
+            _, upload_tail = parsed.path.split("/upload/", 1)
+            segments = [segment for segment in upload_tail.split("/") if segment]
+
+            while segments and "," in segments[0]:
+                segments.pop(0)
+            if segments and segments[0].startswith("v") and segments[0][1:].isdigit():
+                segments.pop(0)
+            if not segments:
+                return None
+
+            public_path = "/".join(segments)
+            dot_index = public_path.rfind(".")
+            if dot_index > 0:
+                public_path = public_path[:dot_index]
+            return public_path or None
+        except Exception:
+            return None
 
     def get_storage_info(self) -> dict:
         """

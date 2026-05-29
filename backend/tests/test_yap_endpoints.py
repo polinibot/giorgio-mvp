@@ -4,6 +4,8 @@ import pytest
 
 from security import SecurityService
 
+YAP_HEADERS = {"X-Yap-Worker-Secret": "test-yap-secret"}
+
 
 @pytest.fixture
 def sample_practice(client):
@@ -53,7 +55,7 @@ class TestYapNotifyError:
             "worker": "test-worker"
         }
         
-        response = client.post("/yap/notify-error", json=error_data)
+        response = client.post("/yap/notify-error", json=error_data, headers=YAP_HEADERS)
         # Deve essere protetto o accettare la richiesta
         assert response.status_code in [200, 401, 403, 422]
 
@@ -65,7 +67,7 @@ class TestYapNotifyError:
             "worker": "test-worker"
         }
         
-        response = client.post("/yap/notify-error", json=invalid_data)
+        response = client.post("/yap/notify-error", json=invalid_data, headers=YAP_HEADERS)
         # Deve rifiutare payload invalido
         assert response.status_code in [200, 401, 403, 422]
 
@@ -287,7 +289,7 @@ class TestYapTestErrorChannel:
 
     def test_test_error_channel_endpoint(self, client):
         """Test che l'endpoint di test del canale errori esista."""
-        response = client.post("/yap/test-error-channel")
+        response = client.post("/yap/test-error-channel", headers=YAP_HEADERS)
         
         # Può fallire se il canale non è configurato, ma deve esistere
         assert response.status_code in [200, 400, 401, 403, 500]
@@ -375,3 +377,49 @@ class TestAutomationService:
     # TODO: Richiedono validazione con database
     # def test_validate_automation_readiness(self): ...
     # def test_validate_automation_readiness_incomplete(self): ...
+
+
+class TestYapPreviewFromForm:
+    def test_yap_preview_from_form_returns_preview(self, client):
+        payload = {
+            "practice": {
+                "plate_confirmed": "AB123CD",
+                "phone": "+391234567890",
+                "customer_name": "Cliente Preview",
+                "customer_type": "privato",
+                "billing_to_complete": False,
+                "appointment_date": "2026-11-15T00:00:00",
+                "appointment_time": "10:00",
+                "practice_type": "preventivo",
+                "contexts": ["officina"],
+                "internal_notes": "anteprima",
+            },
+            "sections": [
+                {
+                    "context": "officina",
+                    "description_rows": ["Tagliando completo"],
+                    "man_hours": 1.5,
+                    "mac_hours": None,
+                    "materials_amount": None,
+                    "waste_apply": False,
+                    "waste_percentage": None,
+                    "notes": "ok",
+                }
+            ],
+            "parts": [
+                {
+                    "context": "officina",
+                    "name": "Filtro olio",
+                    "quantity": "1 pz",
+                }
+            ],
+        }
+
+        response = client.post(
+            "/yap-mapping-preview/from-form?user_id=761118078",
+            json=payload,
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "AB123CD" in data["proposedYap"]["popup"]["cosa"]

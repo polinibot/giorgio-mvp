@@ -26,6 +26,7 @@ from database_sqlite import (
     create_tables,
     get_db,
 )
+from models import normalize_plate_value
 from ocr_service import OCRResult, OCRService
 from security import SecurityService
 
@@ -74,6 +75,15 @@ class TelegramBot:
 
         # Test window coerente con gli E2E di produzione.
         return datetime(2026, 11, 12)
+
+    @staticmethod
+    def _delete_cloudinary_photo_if_needed(photo: PracticePhoto) -> None:
+        public_id = photo.cloudinary_public_id or cloudinary_service.extract_public_id_from_url(photo.storage_path)
+        if not public_id:
+            return
+        deleted = cloudinary_service.delete_photo(public_id)
+        if not deleted:
+            logger.warning("Failed to delete Cloudinary photo during draft replacement: %s", public_id)
 
     @staticmethod
     def _dashboard_url(user_id: int) -> str:
@@ -226,7 +236,9 @@ class TelegramBot:
             if user_state and user_state.get("action") == "waiting_plate":
                 practice_id = user_state["practice_id"]
 
-                if len(text) < 5 or len(text) > 10:
+                try:
+                    text = normalize_plate_value(text)
+                except ValueError:
                     await message.answer("❌ Formato targa non valido. Riprova (es. AB123CD):")
                     return
 
@@ -288,20 +300,26 @@ class TelegramBot:
         db.refresh(practice)
 
         try:
-            storage_path, _ = cloudinary_service.upload_practice_photo(
+            storage_path, metadata = cloudinary_service.upload_practice_photo(
                 local_path,
                 practice.id,
                 photo_file_id,
             )
+            cloudinary_public_id = metadata.get("public_id")
         except Exception as upload_err:
             logger.warning("Cloudinary upload failed, using local path: %s", upload_err)
             storage_path = local_path
+            cloudinary_public_id = None
 
-        db.query(PracticePhoto).filter(PracticePhoto.practice_id == practice.id).delete()
+        existing_photos = db.query(PracticePhoto).filter(PracticePhoto.practice_id == practice.id).all()
+        for existing_photo in existing_photos:
+            self._delete_cloudinary_photo_if_needed(existing_photo)
+            db.delete(existing_photo)
         photo_record = PracticePhoto(
             practice_id=practice.id,
             telegram_file_id=photo_file_id,
             storage_path=storage_path,
+            cloudinary_public_id=cloudinary_public_id,
             ocr_result=ocr_result.plate,
             ocr_confidence=ocr_result.confidence,
         )
