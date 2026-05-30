@@ -2315,7 +2315,15 @@ function App() {
     if (safeResult.yap?.result?.telemetry?.saveAttempts) meta.push(`${safeResult.yap.result.telemetry.saveAttempts} tentativi`);
     if (safeResult.screenshot) meta.push('Screenshot salvato');
     if (safeResult.duplicate) meta.push('Dedup attivo');
-    if (audit) meta.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
+    if (audit) {
+      const auditCount = (audit.present?.length || 0) + (audit.missing?.length || 0) + (audit.mismatch?.length || 0);
+      const auditIncomplete = audit.completed === false || audit.technical_failure === true || audit.status_reason === 'audit_not_completed';
+      if (auditIncomplete && auditCount === 0) {
+        meta.push('Audit non completato');
+      } else {
+        meta.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
+      }
+    }
     if (Array.isArray(safeResult.phase_timeline) && safeResult.phase_timeline.length) {
       meta.push(summarizePhaseTimeline(safeResult.phase_timeline));
     }
@@ -2439,6 +2447,8 @@ function App() {
     const topBlockers = Array.isArray(feedback.topBlockers) ? feedback.topBlockers : [];
     const nextSteps = Array.isArray(feedback.nextSteps) ? feedback.nextSteps : [];
     const byGroup = feedback.byGroup || {};
+    const totalItems = groups.reduce((sum, group) => sum + group.items.length, 0);
+    const auditIncomplete = audit.completed === false || audit.technical_failure === true || audit.status_reason === 'audit_not_completed';
     const groupOrder = ['tags', 'agenda', 'odl', 'notes', 'materials', 'parts', 'waste'];
     const groupLabel = {
       tags: 'Tag',
@@ -2459,6 +2469,13 @@ function App() {
           </span>
         </div>
         {audit.message && <div className="yap-audit-message">{audit.message}</div>}
+        {auditIncomplete && totalItems === 0 && (
+          <div className="yap-audit-message">
+            <strong>Audit non completato:</strong> la scrittura su YAP e' partita, ma la verifica automatica non ha prodotto campi affidabili.
+            {audit.error_code ? ` Codice ${audit.error_code}.` : ''}
+            {audit.next_action ? ` Azione: ${audit.next_action}.` : ''}
+          </div>
+        )}
         {lookup && (lookup.method || lookup.click?.method || Number.isFinite(lookup.eventCount)) && (
           <div className="yap-audit-message">
             <strong>Ricerca evento:</strong> metodo {lookup.click?.method || lookup.method || '-'}
@@ -2498,46 +2515,48 @@ function App() {
               .join(' | ')}
           </div>
         )}
-        <div className="yap-audit-grid">
-          {groups.map(group => (
-            <div key={group.key} className={`yap-audit-card yap-audit-${group.key}`}>
-              <div className="yap-audit-card-title">{group.title} ({group.items.length})</div>
-              {group.items.length > 0 ? (
-                <ul className="yap-audit-list">
-                  {group.items.slice(0, 8).map((item, index) => (
-                    <li key={`${group.key}-${item.field || index}`}>
-                      <span>{item.label || item.field}</span>
-                      {item.expected != null && <small>atteso: {String(item.expected)}</small>}
-                      {item.found && group.key === 'mismatch' && <small>trovato: {String(item.found_preview || item.found).slice(0, 160)}</small>}
-                      {item.reason && <small>motivo: {String(item.reason)}</small>}
-                      {item.hint && <small>azione: {String(item.hint)}</small>}
-                    </li>
-                  ))}
-                  {group.items.length > 8 && (
-                    <li className="yap-audit-more">
-                      <details>
-                        <summary>+{group.items.length - 8} altri campi</summary>
-                        <ul className="yap-audit-list">
-                          {group.items.slice(8).map((item, index) => (
-                            <li key={`${group.key}-more-${item.field || index}`}>
-                              <span>{item.label || item.field}</span>
-                              {item.expected != null && <small>atteso: {String(item.expected)}</small>}
-                              {item.found && group.key === 'mismatch' && <small>trovato: {String(item.found_preview || item.found).slice(0, 160)}</small>}
-                              {item.reason && <small>motivo: {String(item.reason)}</small>}
-                              {item.hint && <small>azione: {String(item.hint)}</small>}
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    </li>
-                  )}
-                </ul>
-              ) : (
-                <div className="yap-audit-empty">Nessun campo</div>
-              )}
-            </div>
-          ))}
-        </div>
+        {!(auditIncomplete && totalItems === 0) && (
+          <div className="yap-audit-grid">
+            {groups.map(group => (
+              <div key={group.key} className={`yap-audit-card yap-audit-${group.key}`}>
+                <div className="yap-audit-card-title">{group.title} ({group.items.length})</div>
+                {group.items.length > 0 ? (
+                  <ul className="yap-audit-list">
+                    {group.items.slice(0, 8).map((item, index) => (
+                      <li key={`${group.key}-${item.field || index}`}>
+                        <span>{item.label || item.field}</span>
+                        {item.expected != null && <small>atteso: {String(item.expected)}</small>}
+                        {item.found && group.key === 'mismatch' && <small>trovato: {String(item.found_preview || item.found).slice(0, 160)}</small>}
+                        {item.reason && <small>motivo: {String(item.reason)}</small>}
+                        {item.hint && <small>azione: {String(item.hint)}</small>}
+                      </li>
+                    ))}
+                    {group.items.length > 8 && (
+                      <li className="yap-audit-more">
+                        <details>
+                          <summary>+{group.items.length - 8} altri campi</summary>
+                          <ul className="yap-audit-list">
+                            {group.items.slice(8).map((item, index) => (
+                              <li key={`${group.key}-more-${item.field || index}`}>
+                                <span>{item.label || item.field}</span>
+                                {item.expected != null && <small>atteso: {String(item.expected)}</small>}
+                                {item.found && group.key === 'mismatch' && <small>trovato: {String(item.found_preview || item.found).slice(0, 160)}</small>}
+                                {item.reason && <small>motivo: {String(item.reason)}</small>}
+                                {item.hint && <small>azione: {String(item.hint)}</small>}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      </li>
+                    )}
+                  </ul>
+                ) : (
+                  <div className="yap-audit-empty">Nessun campo</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };

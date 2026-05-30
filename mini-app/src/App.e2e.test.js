@@ -479,6 +479,98 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.querySelectorAll('.practice-card').length === 2);
   });
 
+  test('shows incomplete YAP audit as actionable partial state without empty zero-count grid', async () => {
+    const incompleteAudit = {
+      ok: false,
+      completed: false,
+      technical_failure: true,
+      status: 'partial_synced',
+      status_reason: 'audit_not_completed',
+      message: 'Appuntamento YAP scritto, ma audit non completato. Da ricontrollare: note, materiali.',
+      error_code: 'YAP_AUDIT_INCOMPLETE',
+      next_action: 'Verifica YAP',
+      action_target: 'audit',
+      present: [],
+      missing: [],
+      mismatch: [],
+      feedback: {
+        summary: 'Audit non completato: YAP ha ricevuto la scrittura, ma la verifica automatica non ha chiuso.',
+        nextSteps: ['Apri la tab YAP e premi Verifica YAP.'],
+      },
+    };
+
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 1 } } });
+      }
+      if (url.includes('/practices/1/yap-mapping-preview')) {
+        return Promise.resolve({ data: { success: true, data: { proposedYap: { fieldMapping: {} }, confidence: {} } } });
+      }
+      if (url.includes('/api/practices/1')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 1,
+                status: 'confirmed',
+                plate_confirmed: 'AB123CD',
+                phone: '3331112222',
+                customer_name: 'Mario Rossi',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-11-10T09:00:00.000Z',
+                appointment_time: '09:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                synced: false,
+                management_sync_status: 'partial_synced',
+                management_audit_result: incompleteAudit,
+              },
+              sections: [],
+              parts: [],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [{
+              id: 1,
+              plate: 'AB123CD',
+              customer_name: 'Mario Rossi',
+              contexts: ['officina'],
+              synced: false,
+              management_sync_status: 'partial_synced',
+              appointment_date: '2026-11-10T09:00:00.000Z',
+              created_at: '2026-11-10T09:00:00.000Z',
+            }],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    clickElement(document.querySelector('.practice-card'));
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+    clickElement(getButton('YAP'));
+
+    await waitFor(() => document.body.textContent.includes('Automazione YAP'));
+    await waitFor(() => document.body.textContent.includes('Completa targa'));
+    await waitFor(() => document.body.textContent.includes('Audit non completato'));
+    expect(document.body.textContent).toContain('YAP_AUDIT_INCOMPLETE');
+    expect(document.body.textContent).toContain('Azione: Verifica YAP');
+    expect(document.body.textContent).not.toContain('Presenti (0)');
+    expect(document.body.textContent).not.toContain('Mancanti (0)');
+    expect(document.body.textContent).not.toContain('Diversi (0)');
+  });
+
   test('editing an existing practice preserves section rows when updating notes only', async () => {
     axios.put.mockResolvedValueOnce({ data: { success: true, data: { id: 1 } } });
 

@@ -958,6 +958,10 @@ def _build_yap_action_from_error(reason: str) -> Dict[str, Any]:
     msg = str(reason or "").lower()
     if "timeout" in msg:
         return {"error_code": "YAP_TIMEOUT", "next_action": "Riprova sync", "action_target": "sync", "failed_phase": "write_or_audit", "retryable": True}
+    if "audit_not_completed" in msg or "audit yap non completato" in msg:
+        return {"error_code": "YAP_AUDIT_INCOMPLETE", "next_action": "Verifica YAP", "action_target": "audit", "failed_phase": "audit", "retryable": True}
+    if "appointment_not_verified" in msg:
+        return {"error_code": "APPT_NOT_VERIFIED", "next_action": "Verifica YAP", "action_target": "audit", "failed_phase": "audit", "retryable": True}
     if "ordine di lavoro" in msg or "blocked_by_odl" in msg:
         return {"error_code": "BLOCKED_BY_ODL", "next_action": "Apri pratica-ODL e scollega prima l'ODL", "action_target": "open_odl", "failed_phase": "delete", "retryable": False}
     if "popup" in msg:
@@ -965,6 +969,55 @@ def _build_yap_action_from_error(reason: str) -> Dict[str, Any]:
     if "appuntamento" in msg and "non verificato" in msg:
         return {"error_code": "APPT_NOT_VERIFIED", "next_action": "Verifica YAP", "action_target": "audit", "failed_phase": "audit", "retryable": True}
     return {"error_code": "YAP_GENERIC_ERROR", "next_action": "Riprova sync", "action_target": "sync", "failed_phase": None, "retryable": True}
+
+
+def _write_report_issue_labels(write_report: Optional[Dict[str, Any]]) -> List[str]:
+    if not isinstance(write_report, dict):
+        return []
+    labels = {
+        "notes": "note",
+        "odl": "ODL",
+        "materials": "materiali",
+        "parts": "ricambi",
+        "waste": "smaltimento",
+    }
+    issues: List[str] = []
+    for key, label in labels.items():
+        value = write_report.get(key)
+        if isinstance(value, dict) and value.get("error"):
+            issues.append(label)
+    return issues
+
+
+def _build_incomplete_post_write_audit(audit_detail: Any, write_report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    detail = audit_detail if isinstance(audit_detail, dict) else {"message": str(audit_detail or "Audit YAP non completato.")}
+    write_issues = _write_report_issue_labels(write_report)
+    message = "Appuntamento YAP scritto, ma audit non completato."
+    if write_issues:
+        message += f" Da ricontrollare: {', '.join(write_issues)}."
+    next_steps = ["Apri la tab YAP e premi Verifica YAP."]
+    if write_issues:
+        next_steps.append("Se i campi indicati sono davvero vuoti su YAP, rilancia Riprova sync.")
+    return {
+        "ok": False,
+        "completed": False,
+        "technical_failure": True,
+        "status": "partial_synced",
+        "status_reason": "audit_not_completed",
+        "message": message,
+        "error": detail,
+        "error_code": "YAP_AUDIT_INCOMPLETE",
+        "next_action": "Verifica YAP",
+        "action_target": "audit",
+        "retryable": True,
+        "present": [],
+        "missing": [],
+        "mismatch": [],
+        "feedback": {
+            "summary": "Audit non completato: YAP ha ricevuto la scrittura, ma la verifica automatica non ha chiuso.",
+            "nextSteps": next_steps,
+        },
+    }
 
 
 def _audit_status_from_result(audit_result: Dict[str, Any]) -> str:
@@ -2016,16 +2069,11 @@ async def sync_practice_to_yap(
             if body.fresh_login:
                 audit_args.append("--fresh-login")
             try:
-                audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=150, db=db)
+                audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=90, db=db)
                 close_phase("audit", "completed", "Audit YAP completato.")
             except HTTPException as audit_exc:
                 logger.warning("Audit post-sync non riuscito per pratica %d: %s", practice_id, audit_exc.detail)
-                audit_result = {
-                    "ok": False,
-                    "status": "sync_failed",
-                    "message": "Audit YAP non completato.",
-                    "error": audit_exc.detail,
-                }
+                audit_result = _build_incomplete_post_write_audit(audit_exc.detail, write_report)
                 close_phase("audit", "failed", "Audit YAP non riuscito.")
             response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
             response_message = _audit_message_for_status(response_status, audit_result)
@@ -2044,16 +2092,30 @@ async def sync_practice_to_yap(
 
         status_reason = _audit_reason_for_status(response_status, audit_result or {})
         action_meta = _build_yap_action_from_error(status_reason if response_status == "sync_failed" else response_status)
+        response_error_code = None
+        response_next_action = None
+        response_action_target = None
+        response_retryable = response_status in {"partial_synced", "not_ready", "dry_run"}
+        if isinstance(audit_result, dict) and audit_result.get("error_code"):
+            response_error_code = audit_result.get("error_code")
+            response_next_action = audit_result.get("next_action")
+            response_action_target = audit_result.get("action_target")
+            response_retryable = bool(audit_result.get("retryable", True))
+        elif response_status == "sync_failed":
+            response_error_code = action_meta["error_code"]
+            response_next_action = action_meta["next_action"]
+            response_action_target = action_meta["action_target"]
+            response_retryable = action_meta["retryable"]
         return APIResponse(
             success=True,
             data={
                 "status": response_status,
                 "message": response_message,
                 "status_reason": status_reason,
-                "error_code": action_meta["error_code"] if response_status == "sync_failed" else None,
-                "next_action": action_meta["next_action"] if response_status == "sync_failed" else None,
-                "action_target": action_meta["action_target"] if response_status == "sync_failed" else None,
-                "retryable": action_meta["retryable"] if response_status == "sync_failed" else response_status in {"partial_synced", "not_ready", "dry_run"},
+                "error_code": response_error_code,
+                "next_action": response_next_action,
+                "action_target": response_action_target,
+                "retryable": response_retryable,
                 "audit": audit_result,
                 "preSync": check,
                 "phase_timeline": phase_timeline,

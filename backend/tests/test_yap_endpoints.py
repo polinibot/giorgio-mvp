@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 import pytest
+from fastapi import HTTPException
 
 from database_sqlite import Practice
 from security import SecurityService
@@ -223,6 +224,62 @@ class TestYapSyncEndpoints:
         assert any(item.get("name") == "write" for item in data["phase_timeline"])
         assert any(item.get("name") == "audit" for item in data["phase_timeline"])
         assert isinstance(data.get("write_report"), dict)
+
+    def test_yap_sync_keeps_partial_when_post_write_audit_fails(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+        from automation_service import AutomationService
+
+        monkeypatch.setattr(
+            AutomationService,
+            "pre_sync_check",
+            staticmethod(lambda payload: {"ready": True, "score": 92, "issues": [], "warnings": []}),
+        )
+
+        async def fake_run_yap_script(script_name, *args, **kwargs):
+            if script_name == "yap-audit-appointment.mjs":
+                raise HTTPException(status_code=504, detail="Timeout automazione YAP")
+            return {
+                "result": {
+                    "saved": True,
+                    "mode": "commit",
+                    "message": "Appuntamento salvato su YAP.",
+                    "telemetry": {"saveAttempts": 1},
+                    "write_report": {
+                        "attempted": True,
+                        "ok": False,
+                        "notes": {"attempted": True, "success": False, "error": "notes_field_not_found"},
+                        "materials": {"attempted": True, "success": False, "error": "materials_field_not_found"},
+                    },
+                },
+                "stdout": "",
+                "stderr": "",
+            }
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/sync?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "partial_synced"
+        assert data["status_reason"] == "audit_not_completed"
+        assert data["error_code"] == "YAP_AUDIT_INCOMPLETE"
+        assert data["action_target"] == "audit"
+        assert data["next_action"] == "Verifica YAP"
+        assert data["practice"]["management_sync_status"] == "partial_synced"
+        assert data["practice"]["synced"] is False
+        assert data["audit"]["completed"] is False
+        assert data["audit"]["present"] == []
+        assert data["audit"]["missing"] == []
+        assert data["audit"]["mismatch"] == []
+        assert any(item.get("name") == "audit" and item.get("status") == "failed" for item in data["phase_timeline"])
+        assert data["write_report"]["notes"]["error"] == "notes_field_not_found"
 
     @pytest.mark.parametrize(
         "audit_status,expected_synced",
