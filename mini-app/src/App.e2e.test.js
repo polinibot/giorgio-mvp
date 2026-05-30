@@ -214,7 +214,7 @@ const DEFAULT_YAP_SYNC_RESPONSE = {
         message: 'Appuntamento salvato su YAP.',
       },
       practice: {
-        synced: true,
+        synced: false,
         management_sync_status: 'partial_synced',
         management_last_sync_at: '2026-11-15T10:05:00.000Z',
         management_external_id: null,
@@ -923,10 +923,44 @@ describe('Mini App user-simulation suite', () => {
     ]);
   });
 
-  test('starts from bot flow and ends on the success screen with a valid new practice', async () => {
+  test('starts from bot flow and ends on YAP detail with a valid new practice', async () => {
     axios.get.mockImplementation((url) => {
       if (url.includes('/api/practices/stats')) {
         return Promise.resolve({ data: { success: true, data: { total: 0, this_month: 0, pending_sync: 0 } } });
+      }
+      if (url.includes('/practices/99/yap-mapping-preview')) {
+        return Promise.resolve({ data: { success: true, data: { proposedYap: { fieldMapping: {} }, confidence: {} } } });
+      }
+      if (url.includes('/api/practices/99')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 99,
+                status: 'confirmed',
+                plate_confirmed: 'AB123CD',
+                phone: '3331234567',
+                customer_name: 'Mario Rossi',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-11-20T00:00:00.000Z',
+                appointment_time: '10:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                internal_notes: null,
+                synced: false,
+                management_sync_status: 'partial_synced',
+                management_audit_result: DEFAULT_YAP_SYNC_RESPONSE.data.data.audit,
+              },
+              sections: [
+                { context: 'officina', description_rows: ['Tagliando completo'], man_hours: null, mac_hours: null, materials_amount: null, waste_apply: false, waste_percentage: null, notes: null },
+              ],
+              parts: [],
+              photos: [],
+            },
+          },
+        });
       }
       if (url.includes('/api/practices')) {
         return Promise.resolve({ data: { success: true, data: [] } });
@@ -952,12 +986,17 @@ describe('Mini App user-simulation suite', () => {
     setValueWithin(getSection('Officina'), 'input[placeholder="Descrizione lavoro..."]', 'Tagliando completo');
 
     clickElement(getButton('Salva'));
-    await waitFor(() => document.body.textContent.includes('Pratica salvata!'));
-    expect(document.body.textContent).toContain('Pratica salvata!');
+    await waitFor(() => axios.post.mock.calls.length === 2);
+    await waitFor(() => document.body.textContent.includes('Automazione YAP'));
+    expect(document.body.textContent).not.toContain('Pratica salvata!');
+    expect(document.body.textContent).toContain('YAP parziale');
+    expect(document.body.textContent).toContain('Sincronizza con YAP');
+    expect(document.body.textContent).toContain('Verifica YAP');
+    expect(axios.post.mock.calls[0][0]).toContain('/practices/full');
+    expect(axios.post.mock.calls[1][0]).toContain('/yap/sync');
 
-    clickElement(getButton('📋 Vai alla Dashboard'));
-    await waitFor(() => document.querySelector('.empty-state'));
-    expect(document.body.textContent).toContain('Nessuna pratica trovata');
+    await waitFor(() => document.body.textContent.includes('Automazione YAP'));
+    expect(document.body.textContent).not.toContain('Nessuna pratica trovata');
   });
 
   test('loads an existing practice and sends updates through PUT', async () => {

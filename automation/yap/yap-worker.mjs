@@ -256,21 +256,6 @@ async function readPracticeFromApi(args) {
   return normalizeJob(mapping, args);
 }
 
-async function updatePracticeSynced(args, job) {
-  if (!args.practiceId && !job.practiceId) return;
-  const apiBaseUrl = args.apiBaseUrl || process.env.API_BASE_URL;
-  const telegramUserId = args.telegramUserId || process.env.GIORGIO_TELEGRAM_USER_ID;
-  if (!apiBaseUrl || !telegramUserId) return;
-
-  const practiceId = args.practiceId || job.practiceId;
-  const url = withUserId(`${apiBaseUrl.replace(/\/$/, "")}/api/practices/${practiceId}/sync`, telegramUserId);
-  await fetch(url, {
-    method: "PATCH",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ synced: true }),
-  });
-}
-
 async function openAgenda(page, isoDate) {
   await openAgendaInApp(page);
   if (isoDate) {
@@ -1393,7 +1378,6 @@ async function runYapAutomation(job, args) {
           error: error.message,
         }));
       }
-      await updatePracticeSynced(args, job).catch(() => {});
       return {
         saved: true,
         mode: "commit-upsert-duplicate",
@@ -1450,8 +1434,6 @@ async function runYapAutomation(job, args) {
         error: error.message,
       }));
     }
-    await updatePracticeSynced(args, job).catch(() => {});
-
     return {
       saved: true,
       mode: "commit",

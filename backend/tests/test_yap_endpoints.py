@@ -1,7 +1,10 @@
 """Test reali per YAP Endpoints - sync, notify-error, status."""
 
+from datetime import datetime, timezone
+
 import pytest
 
+from database_sqlite import Practice
 from security import SecurityService
 
 YAP_HEADERS = {"X-Yap-Worker-Secret": "test-yap-secret"}
@@ -26,6 +29,15 @@ def sample_practice(client):
     response = client.post("/practices?user_id=761118078", json=practice_data)
     assert response.status_code == 200
     return response.json()["data"]
+
+
+def mark_practice_yap_touched(db_session, practice_id, sync_status="partial_synced"):
+    practice = db_session.query(Practice).filter(Practice.id == practice_id).first()
+    assert practice is not None
+    practice.management_sync_status = sync_status
+    practice.management_last_sync_at = datetime.now(timezone.utc)
+    practice.synced = sync_status == "complete_synced"
+    db_session.commit()
 
 
 class TestYapErrorChannelStatus:
@@ -100,7 +112,7 @@ class TestYapSyncEndpoints:
         assert "Configurazione YAP mancante" in data["detail"]["message"]
         assert called["value"] is False
 
-    def test_practice_delete_rejects_missing_credentials(self, client, sample_practice, monkeypatch):
+    def test_practice_delete_rejects_missing_credentials(self, client, sample_practice, db_session, monkeypatch):
         monkeypatch.delenv("YAP_USERNAME", raising=False)
         monkeypatch.delenv("YAP_PASSWORD", raising=False)
 
@@ -114,11 +126,7 @@ class TestYapSyncEndpoints:
 
         monkeypatch.setattr(main, "_run_yap_script", fail_if_called)
 
-        mark_synced = client.patch(
-            f"/api/practices/{sample_practice['id']}/sync?user_id=761118078",
-            json={"synced": True},
-        )
-        assert mark_synced.status_code == 200
+        mark_practice_yap_touched(db_session, sample_practice["id"])
 
         response = client.delete(
             f"/practices/{sample_practice['id']}?user_id=761118078",
@@ -254,7 +262,7 @@ class TestYapSyncEndpoints:
         assert data["practice"]["management_sync_status"] == audit_status
         assert data["practice"]["synced"] is expected_synced
 
-    def test_practice_delete_allows_local_delete_when_yap_not_found(self, client, sample_practice, monkeypatch):
+    def test_practice_delete_allows_local_delete_when_yap_not_found(self, client, sample_practice, db_session, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
@@ -269,11 +277,7 @@ class TestYapSyncEndpoints:
 
         monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
 
-        mark_synced = client.patch(
-            f"/api/practices/{sample_practice['id']}/sync?user_id=761118078",
-            json={"synced": True},
-        )
-        assert mark_synced.status_code == 200
+        mark_practice_yap_touched(db_session, sample_practice["id"])
 
         response = client.delete(
             f"/practices/{sample_practice['id']}?user_id=761118078",

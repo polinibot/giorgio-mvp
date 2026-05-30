@@ -1158,7 +1158,7 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [practice, setPractice] = useState(null);
   const [error, setError] = useState('');
-  const [successDone, setSuccessDone] = useState(false);
+  const [submitInProgress, setSubmitInProgress] = useState(false);
   const [saveProgress, setSaveProgress] = useState(null);
 
   const [showDraftBanner, setShowDraftBanner] = useState(false);
@@ -1192,7 +1192,7 @@ function App() {
   // --- Draft persistence ---
   const persistDraft = useCallback(() => {
     try {
-      if (saving || successDone) return false;
+      if (saving || submitInProgress) return false;
       const data = getValues();
       const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now(), practiceId: practice?.id || null };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
@@ -1200,10 +1200,10 @@ function App() {
     } catch (_) {
       return false;
     }
-  }, [getValues, selectedContexts, sections, parts, practice, saving, successDone]);
+  }, [getValues, selectedContexts, sections, parts, practice, saving, submitInProgress]);
 
   const hasMeaningfulDraft = useCallback(() => {
-    if (saving || successDone) return false;
+    if (saving || submitInProgress) return false;
     const data = getValues();
     const formHasValue = Object.values(data || {}).some((value) => !isEmptyFormValue(value));
     const contextsHasValue = (selectedContexts || []).length > 0;
@@ -1224,7 +1224,7 @@ function App() {
       return !isEmptyFormValue(item.name) || !isEmptyFormValue(item.quantity);
     })); 
     return formHasValue || contextsHasValue || sectionsHasValue || partsHasValue;
-  }, [getValues, selectedContexts, sections, parts, saving, successDone]);
+  }, [getValues, selectedContexts, sections, parts, saving, submitInProgress]);
 
   const stopSaveProgressTimers = useCallback(() => {
     if (saveProgressTimerRef.current) {
@@ -1416,7 +1416,7 @@ function App() {
   }, [setValue]);
 
   useEffect(() => {
-    if (currentView !== 'form' || loading || successDone) return undefined;
+    if (currentView !== 'form' || loading || submitInProgress) return undefined;
 
     const persistDraftOnLeave = () => {
       if (hasMeaningfulDraft()) persistDraft();
@@ -1438,7 +1438,7 @@ function App() {
       window.removeEventListener('pagehide', persistDraftOnLeave);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [watchedValues, currentView, loading, successDone, selectedContexts, sections, parts, persistDraft, hasMeaningfulDraft, stopSaveProgressTimers]);
+  }, [watchedValues, currentView, loading, submitInProgress, selectedContexts, sections, parts, persistDraft, hasMeaningfulDraft, stopSaveProgressTimers]);
 
   useEffect(() => () => {
     stopSaveProgressTimers();
@@ -1560,7 +1560,7 @@ function App() {
   }, [navigationStack, currentView, persistDraft]);
 
   const openDashboard = useCallback(() => {
-    if (currentView === 'form' && !successDone && hasMeaningfulDraft()) {
+    if (currentView === 'form' && !submitInProgress && hasMeaningfulDraft()) {
       persistDraft();
     }
     setCurrentView('dashboard');
@@ -1569,7 +1569,7 @@ function App() {
     setEditingPractice(null);
     setDetailData(null);
     setLoading(false);
-  }, [persistDraft, currentView, successDone, hasMeaningfulDraft]);
+  }, [persistDraft, currentView, submitInProgress, hasMeaningfulDraft]);
 
   // --- Telegram BackButton ---
   useEffect(() => {
@@ -1619,7 +1619,7 @@ function App() {
     setPractice(null);
     setEditingPractice(null);
     setStartedFromBot(false);
-    setSuccessDone(false);
+    setSubmitInProgress(false);
     setYapLastPracticeId(null);
     setYapLastResult(null);
     setError('');
@@ -1816,10 +1816,9 @@ function App() {
   const loadDetail = useCallback(async (id) => {
     if (!id) return;
     const cachedDetail = getCacheValue(detailCacheRef, id);
-    const cachedPreview = getCacheValue(yapPreviewCacheRef, id);
     if (cachedDetail) {
       setDetailData(cachedDetail);
-      setYapPreview(cachedPreview || null);
+      setYapPreview(getCacheValue(yapPreviewCacheRef, id) || null);
       setDetailLoading(false);
       return;
     }
@@ -1847,22 +1846,6 @@ function App() {
       setDetailData(detailPayload);
       setCacheValue(detailCacheRef, id, detailPayload);
       rememberResponse('practice.detail');
-      setYapPreviewLoading(true);
-      try {
-        rememberRequest('yap.preview', { method: 'GET', url: `${API_BASE_URL}/practices/${id}/yap-mapping-preview`, params: getAuthParams(), headers: getHeaders() });
-        const yapRes = await fetchWithRetry(() =>
-          axios.get(`${API_BASE_URL}/practices/${id}/yap-mapping-preview`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 })
-        );
-        const previewPayload = yapRes.data?.data || yapRes.data;
-        setYapPreview(previewPayload);
-        setCacheValue(yapPreviewCacheRef, id, previewPayload);
-        rememberResponse('yap.preview');
-      } catch (yapErr) {
-        rememberError('yap.preview', yapErr);
-        setYapPreview(null);
-      } finally {
-        setYapPreviewLoading(false);
-      }
     } catch (err) {
       rememberError('practice.detail', err);
       addToast(classifyError(err), 'error');
@@ -1872,12 +1855,47 @@ function App() {
     }
   }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, navigateBack, getCacheValue, setCacheValue]);
 
+  const loadYapPreview = useCallback(async (id) => {
+    if (!id || browserPreviewMode) return;
+    const cachedPreview = getCacheValue(yapPreviewCacheRef, id);
+    if (cachedPreview) {
+      setYapPreview(cachedPreview);
+      setYapPreviewLoading(false);
+      return;
+    }
+    setYapPreviewLoading(true);
+    try {
+      rememberRequest('yap.preview', { method: 'GET', url: `${API_BASE_URL}/practices/${id}/yap-mapping-preview`, params: getAuthParams(), headers: getHeaders() });
+      const yapRes = await fetchWithRetry(() =>
+        axios.get(`${API_BASE_URL}/practices/${id}/yap-mapping-preview`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 })
+      );
+      const previewPayload = yapRes.data?.data || yapRes.data;
+      setYapPreview(previewPayload);
+      setCacheValue(yapPreviewCacheRef, id, previewPayload);
+      rememberResponse('yap.preview');
+    } catch (yapErr) {
+      rememberError('yap.preview', yapErr);
+      setYapPreview(null);
+    } finally {
+      setYapPreviewLoading(false);
+    }
+  }, [browserPreviewMode, getAuthParams, getHeaders, getCacheValue, setCacheValue]);
+
   useEffect(() => {
     if (currentView === 'detail' && selectedPracticeId) {
-      setDetailTab('overview');
+      const keepYapTab = detailTab === 'yap' && String(yapLastPracticeId || '') === String(selectedPracticeId);
+      if (!keepYapTab) {
+        setDetailTab('overview');
+      }
       loadDetail(selectedPracticeId);
     }
   }, [currentView, selectedPracticeId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (currentView === 'detail' && detailTab === 'yap' && selectedPracticeId) {
+      loadYapPreview(selectedPracticeId);
+    }
+  }, [currentView, detailTab, selectedPracticeId, loadYapPreview]);
 
   // --- Form photo queue ---
   const addFormPhotos = useCallback((files) => {
@@ -1988,38 +2006,6 @@ function App() {
     formPhotos.forEach(p => URL.revokeObjectURL(p.preview));
     setFormPhotos([]);
   }, [formPhotos, initData, telegramUserId, addToast]);
-
-  // --- Toggle sync ---
-  const toggleSync = useCallback(async (id, currentSynced) => {
-    if (browserPreviewMode) {
-      const nextSynced = !currentSynced;
-      setPreviewPractices(prev => prev.map(p => String(p.id) === String(id) ? { ...p, synced: nextSynced } : p));
-      setPractices(prev => prev.map(p => String(p.id) === String(id) ? { ...p, synced: nextSynced } : p));
-      setDetailData(prev => {
-        if (!prev) return prev;
-        const practiceData = prev.practice || prev;
-        if (String(practiceData.id) !== String(id)) return prev;
-        return { ...prev, practice: { ...practiceData, synced: nextSynced } };
-      });
-      addToast(nextSynced ? 'Pratica segnata come completata' : 'Pratica riaperta', 'success');
-      return;
-    }
-
-    try {
-      rememberRequest('practice.sync', { method: 'PATCH', url: `${API_BASE_URL}/api/practices/${id}/sync`, params: getAuthParams(), headers: getHeaders() });
-      await fetchWithRetry(() =>
-        axios.patch(`${API_BASE_URL}/api/practices/${id}/sync`, { synced: !currentSynced }, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 })
-      );
-      invalidatePracticeCaches(id);
-      setDetailData(prev => prev ? { ...prev, synced: !currentSynced } : prev);
-      setPractices(prev => prev.map(p => p.id === id ? { ...p, synced: !currentSynced } : p));
-      rememberResponse('practice.sync');
-      addToast(currentSynced ? 'Pratica segnata come non sincronizzata' : 'Pratica segnata come sincronizzata', 'success');
-    } catch (err) {
-      rememberError('practice.sync', err);
-      addToast(classifyError(err), 'error');
-    }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, invalidatePracticeCaches]);
 
   // --- YAP Automation ---
   const [yapSyncLoading, setYapSyncLoading] = useState(false);
@@ -2287,6 +2273,9 @@ function App() {
       && ['sync', 'audit', 'delete'].includes(actionTarget)
       && ['sync_failed', 'partial_synced', 'blocked_by_odl', 'delete_failed', 'not_ready'].includes(status)
     );
+    const showSyncHint = canActionHint && actionTarget === 'sync' && !canRetry;
+    const showAuditHint = canActionHint && actionTarget === 'audit' && !canAudit;
+    const showDeleteHint = canActionHint && actionTarget === 'delete' && !canDelete;
 
     return (
       <div className={`yap-result-banner ${toneClass}`}>
@@ -2297,7 +2286,7 @@ function App() {
             {meta.length > 0 && <div className="yap-result-meta">{meta.join(' • ')}</div>}
           </div>
         </div>
-        {(canRetry || canAudit || canDelete) && (
+        {(canRetry || canAudit || canDelete || showSyncHint || showAuditHint || showDeleteHint) && (
           <div className="yap-result-actions">
             {canRetry && (
               <button
@@ -2329,7 +2318,7 @@ function App() {
                 Elimina YAP
               </button>
             )}
-            {canActionHint && actionTarget === 'sync' && (
+            {showSyncHint && (
               <button
                 type="button"
                 className="yap-result-action"
@@ -2339,7 +2328,7 @@ function App() {
                 {safeResult.action_label || 'Riprova sync'}
               </button>
             )}
-            {canActionHint && actionTarget === 'audit' && (
+            {showAuditHint && (
               <button
                 type="button"
                 className="yap-result-action"
@@ -2349,7 +2338,7 @@ function App() {
                 {safeResult.action_label || 'Verifica YAP'}
               </button>
             )}
-            {canActionHint && actionTarget === 'delete' && (
+            {showDeleteHint && (
               <button
                 type="button"
                 className="yap-result-action yap-result-action-danger"
@@ -3181,6 +3170,7 @@ function App() {
     }
     setFieldErrors({});
     setSaving(true);
+    setSubmitInProgress(true);
     setError('');
     startSlowTimer();
     startSaveProgress('Verifica dati e salvataggio in corso...', 'validate');
@@ -3254,19 +3244,18 @@ function App() {
         clearDraft();
         addToast(practice ? 'Pratica aggiornata' : 'Pratica creata', 'success');
 
-        if (selectedPracticeId) {
-          setSelectedPracticeId(previewId);
-          setDetailData(buildPreviewDetail(previewItem));
-          setCurrentView('detail');
-          setNavigationStack(['dashboard']);
-        } else {
-          setCurrentView('dashboard');
-          setNavigationStack([]);
-        }
+        setSelectedPracticeId(previewId);
+        setYapLastPracticeId(previewId);
+        setYapLastResult({ status: 'dry_run', simulated: true, message: 'Anteprima: nessuna scrittura reale su YAP.' });
+        setDetailData(buildPreviewDetail(previewItem));
+        setDetailTab('yap');
+        setCurrentView('detail');
+        setNavigationStack(['dashboard']);
         setEditingPractice(null);
         setPractice(null);
         setFormPhotos([]);
         setExistingPhotos(previewPhotos);
+        finishSaveProgress(practice ? 'Pratica aggiornata in anteprima.' : 'Pratica creata in anteprima.', 'success', 800);
         return;
       }
 
@@ -3290,7 +3279,6 @@ function App() {
         if (practiceId) invalidatePracticeCaches(practiceId);
 
         // Evita la ricreazione automatica della bozza mentre la sync è ancora in corso.
-        setSuccessDone(true);
         clearDraft();
         updateSaveProgress({
           label: formPhotos.length > 0 ? `Caricamento ${formPhotos.length} foto...` : 'Preparazione sincronizzazione YAP...',
@@ -3312,38 +3300,34 @@ function App() {
         });
         addToast('Salvataggio completato. Sincronizzazione YAP in corso...', 'info');
 
-        // Keep YAP aligned automatically after a successful save, without showing a final result early.
+        // Keep YAP aligned automatically after a successful save.
         if (practiceId) {
-          void (async () => {
-            const syncResult = await syncToYap(practiceId, { dry_run: false, silent: true });
-            const actionLabel = practice ? 'aggiornata' : 'creata';
-            const finalMessage = syncResult.status === 'complete_synced'
-              ? `Pratica ${actionLabel}. YAP completo verificato.`
-              : ['partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(syncResult.status)
-                ? `Pratica ${actionLabel}. ${syncResult.message || 'YAP verificato parzialmente.'}`
-              : syncResult.status === 'dry_run'
-                ? `Pratica ${actionLabel}. Dry-run YAP completato.`
-                : syncResult.status === 'not_ready'
-                  ? `Pratica ${actionLabel}, ma non pronta per YAP.`
-                  : `Pratica ${actionLabel}, ma sync YAP fallita: ${syncResult.message || 'errore sconosciuto'}`;
-            const finalSyncResult = { ...syncResult, message: finalMessage };
-            setYapLastResult(finalSyncResult);
-            finishSaveProgress(finalMessage, syncResult.status === 'sync_failed' ? 'error' : 'success', syncResult.status === 'sync_failed' ? 0 : 1400);
-            if (startedFromBot && !practice) {
-              setSuccessDone(true);
-            } else if (selectedPracticeId) {
-              setSelectedPracticeId(practiceId);
-              setCurrentView('detail');
-              setNavigationStack(['dashboard']);
-            } else {
-              setCurrentView('dashboard');
-              setNavigationStack([]);
-            }
-            const toastTone = syncResult.status === 'sync_failed'
-              ? 'error'
-              : (['partial_synced', 'agenda_synced', 'not_ready', 'dry_run'].includes(syncResult.status) ? 'warning' : 'success');
-            addToast(finalMessage, toastTone);
-          })();
+          const syncResult = await syncToYap(practiceId, { dry_run: false, silent: true });
+          const actionLabel = practice ? 'aggiornata' : 'creata';
+          const finalMessage = syncResult.status === 'complete_synced'
+            ? `Pratica ${actionLabel}. YAP completo verificato.`
+            : ['partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(syncResult.status)
+              ? `Pratica ${actionLabel}. ${syncResult.message || 'YAP verificato parzialmente.'}`
+            : syncResult.status === 'dry_run'
+              ? `Pratica ${actionLabel}. Dry-run YAP completato.`
+              : syncResult.status === 'not_ready'
+                ? `Pratica ${actionLabel}, ma non pronta per YAP.`
+                : `Pratica ${actionLabel}, ma sync YAP fallita: ${syncResult.message || 'errore sconosciuto'}`;
+          const finalSyncResult = { ...syncResult, message: finalMessage };
+          setYapLastResult(finalSyncResult);
+          finishSaveProgress(finalMessage, syncResult.status === 'sync_failed' ? 'error' : 'success', syncResult.status === 'sync_failed' ? 0 : 1400);
+          setSelectedPracticeId(practiceId);
+          setDetailTab('yap');
+          setCurrentView('detail');
+          setNavigationStack(['dashboard']);
+          const toastTone = syncResult.status === 'sync_failed'
+            ? 'error'
+            : (['partial_synced', 'agenda_synced', 'not_ready', 'dry_run'].includes(syncResult.status) ? 'warning' : 'success');
+          addToast(finalMessage, toastTone);
+        } else {
+          const missingIdMessage = 'Salvataggio completato, ma ID pratica non disponibile.';
+          finishSaveProgress(missingIdMessage, 'error', 0);
+          addToast(missingIdMessage, 'error');
         }
 
         setEditingPractice(null);
@@ -3362,6 +3346,7 @@ function App() {
     } finally {
       clearSlowTimer();
       setSaving(false);
+      setSubmitInProgress(false);
     }
   };
 
@@ -3380,7 +3365,7 @@ function App() {
     setParts({});
     setError('');
     setFieldErrors({});
-    setSuccessDone(false);
+    setSubmitInProgress(false);
     setValue('contexts', []);
     setValue('plate_confirmed', '');
     setValue('phone', '');
@@ -3874,12 +3859,13 @@ function App() {
           {/* Sync status */}
           {detailTab === 'overview' && (
             <>
-              <div className="section detail-sync-section" onClick={() => toggleSync(practice.id, practice.synced)}>
+              <div className="section detail-sync-section">
                 <div className="detail-sync-label">Stato sincronizzazione</div>
                 <div className={`detail-sync-toggle ${practice.synced ? 'synced' : 'not-synced'}`}>
                   <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
                   {formatYapPracticeStatus(practice)}
                 </div>
+                <div className="detail-sync-help">Gestione sincronizzazione disponibile nella tab YAP.</div>
               </div>
               <div className="section detail-overview-section">
                 {practice.internal_notes && (
@@ -4033,30 +4019,6 @@ function App() {
 
   // --- Form View ---
   const renderForm = () => {
-    if (successDone) {
-      return (
-        <div className="view-form view-enter">
-          <div className="container">
-            <div className="success-screen">
-              <div className="success-icon">✅</div>
-              <h2>Pratica salvata!</h2>
-              <p>La pratica è stata salvata con successo.</p>
-              <button className="button-submit" onClick={() => { openDashboard(); setSuccessDone(false); }} type="button">
-                📋 Vai alla Dashboard
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => { if (window.Telegram?.WebApp) window.Telegram.WebApp.close(); }}
-                type="button"
-              >
-                Chiudi Mini App
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="view-form view-enter">
         <div className="container">
