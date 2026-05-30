@@ -460,6 +460,9 @@ describe('Mini App user-simulation suite', () => {
     expect(document.body.textContent).toContain('AB123CD');
     expect(document.body.textContent).toContain('Mario Rossi');
     expect(document.body.textContent).toContain('Filtro olio');
+    expect(document.body.textContent).toContain('Riprova sync YAP');
+    expect(document.body.textContent).toContain('Verifica YAP');
+    expect(document.body.textContent).toContain('Apri tab YAP');
 
     clickElement(getButton('✏️ Modifica'));
     await waitFor(() => document.querySelector('form'));

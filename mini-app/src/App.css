@@ -725,6 +725,47 @@ h2 {
   margin-top: 8px;
   font-size: 12px;
   color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.detail-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.detail-sync-action {
+  min-height: 40px;
+  padding: 9px 13px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color var(--transition), border-color var(--transition), opacity var(--transition);
+}
+
+.detail-sync-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.detail-sync-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.detail-sync-action-primary {
+  background: rgba(79, 140, 255, 0.14);
+  border-color: rgba(79, 140, 255, 0.35);
+  color: #bfdbfe;
+}
+
+.detail-sync-action-secondary {
+  color: var(--text-secondary);
 }
 
 .detail-sync-toggle {

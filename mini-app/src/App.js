@@ -167,6 +167,42 @@ function summarizePhaseTimeline(phaseTimeline, fallback = '') {
   return `${done}/${phases.length} fasi completate (${Math.round(totalMs / 1000)}s)`;
 }
 
+function formatProgressElapsed(startedAt) {
+  const elapsedMs = Date.now() - (Number(startedAt) || Date.now());
+  return Math.max(0, Math.round(elapsedMs / 1000));
+}
+
+function getYapProgressLabel(action, startedAt, fallback = '') {
+  const elapsed = formatProgressElapsed(startedAt);
+  const hints = {
+    sync: [
+      [0, 'YAP: precheck e avvio sincronizzazione...'],
+      [12, 'YAP: scrittura appuntamento e pratica in corso...'],
+      [30, 'YAP: salvataggio agenda/popup in verifica...'],
+      [55, 'YAP: audit post-sync su campi e tag in corso...'],
+      [85, 'YAP: fase lunga, possibile attesa del portale. Non chiudere.'],
+      [120, 'YAP: ancora in risposta. Se fallisce mostro codice errore e prossima azione.'],
+    ],
+    audit: [
+      [0, 'YAP: verifica appuntamento avviata...'],
+      [15, 'YAP: lettura campi appuntamento e tag...'],
+      [35, 'YAP: confronto audit strict in corso...'],
+      [60, 'YAP: verifica lenta, attendo risposta del portale...'],
+    ],
+    delete: [
+      [0, 'YAP: ricerca appuntamento da eliminare...'],
+      [15, 'YAP: eliminazione appuntamento in corso...'],
+      [35, 'YAP: conferma eliminazione e cleanup locale...'],
+      [60, 'YAP: eliminazione lenta, attendo risposta del portale...'],
+    ],
+  };
+  const actionHints = hints[action] || [];
+  const picked = actionHints.reduce((label, [threshold, text]) => (
+    elapsed >= threshold ? text : label
+  ), fallback || 'Operazione YAP in corso...');
+  return elapsed >= 10 ? `${picked} (${elapsed}s)` : picked;
+}
+
 function getYapSyncScope(result) {
   return result?.syncScope || result?.practice?.management_sync_scope || null;
 }
@@ -1239,11 +1275,14 @@ function App() {
 
   const startSaveProgress = useCallback((label, stage = 'save') => {
     stopSaveProgressTimers();
+    const now = Date.now();
     setSaveProgress({
       label,
       stage,
       status: 'running',
       percent: 8,
+      startedAt: now,
+      stageStartedAt: now,
     });
     saveProgressTimerRef.current = setInterval(() => {
       setSaveProgress((current) => {
@@ -1257,14 +1296,25 @@ function App() {
         const cap = caps[current.stage] ?? 92;
         const increment = current.percent < 20 ? 3.5 : current.percent < 60 ? 1.6 : 0.6;
         const nextPercent = Math.min(cap, Number((current.percent + increment).toFixed(1)));
-        if (nextPercent === current.percent) return current;
-        return { ...current, percent: nextPercent };
+        const nextLabel = current.stage === 'sync'
+          ? getYapProgressLabel('sync', current.stageStartedAt || current.startedAt, current.label)
+          : current.label;
+        if (nextPercent === current.percent && nextLabel === current.label) return current;
+        return { ...current, percent: nextPercent, label: nextLabel };
       });
     }, 340);
   }, [stopSaveProgressTimers]);
 
   const updateSaveProgress = useCallback((patch) => {
-    setSaveProgress((current) => (current ? { ...current, ...patch } : current));
+    setSaveProgress((current) => {
+      if (!current) return current;
+      const stageChanged = patch.stage && patch.stage !== current.stage;
+      return {
+        ...current,
+        ...patch,
+        stageStartedAt: stageChanged ? Date.now() : current.stageStartedAt,
+      };
+    });
   }, []);
 
   const finishSaveProgress = useCallback((label, status = 'success', clearDelay = 1400) => {
@@ -1301,12 +1351,14 @@ function App() {
 
   const startYapActionProgress = useCallback((action, practiceId, label) => {
     stopYapActionProgressTimers();
+    const now = Date.now();
     setYapActionProgress({
       action,
       practiceId,
       label,
       status: 'running',
       percent: 6,
+      startedAt: now,
     });
     yapActionProgressTimerRef.current = setInterval(() => {
       setYapActionProgress((current) => {
@@ -1315,8 +1367,9 @@ function App() {
         const cap = caps[current.action] ?? 88;
         const increment = current.percent < 20 ? 4 : current.percent < 60 ? 1.9 : 0.7;
         const nextPercent = Math.min(cap, Number((current.percent + increment).toFixed(1)));
-        if (nextPercent === current.percent) return current;
-        return { ...current, percent: nextPercent };
+        const nextLabel = getYapProgressLabel(current.action, current.startedAt, current.label);
+        if (nextPercent === current.percent && nextLabel === current.label) return current;
+        return { ...current, percent: nextPercent, label: nextLabel };
       });
     }, 320);
   }, [stopYapActionProgressTimers]);
@@ -2025,8 +2078,8 @@ function App() {
       return { status: 'synced', simulated: true };
     }
     if (!silent) {
-      startYapActionProgress('sync', id, 'Sincronizzazione YAP in corso...');
-      updateYapActionProgress({ percent: 12, label: 'Precheck e avvio sincronizzazione YAP...' });
+      startYapActionProgress('sync', id, 'YAP: precheck e avvio sincronizzazione...');
+      updateYapActionProgress({ percent: 12, label: 'YAP: precheck e avvio sincronizzazione...' });
     }
     setYapSyncLoading(true);
     setYapLastResult(null);
@@ -2034,7 +2087,7 @@ function App() {
     try {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
       if (!silent) {
-        updateYapActionProgress({ percent: 30, label: 'Scrittura agenda/pratica su YAP...' });
+        updateYapActionProgress({ percent: 30, label: 'YAP: scrittura appuntamento e pratica in corso...' });
       }
       const res = await fetchWithRetry(() =>
         axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
@@ -2188,6 +2241,25 @@ function App() {
       setYapAuditLoading(false);
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapOutcome, invalidatePracticeCaches]);
+
+  const renderYapActionProgressBar = (practiceId) => {
+    if (!yapActionProgress || String(yapActionProgress.practiceId) !== String(practiceId)) return null;
+    return (
+      <div className={`yap-action-progress ${yapActionProgress.status === 'error' ? 'save-progress-error' : yapActionProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
+        <div className="save-progress-header">
+          {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
+          <span className="save-progress-label">{yapActionProgress.label}</span>
+          <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
+        </div>
+        <div className="upload-progress-bar" aria-hidden="true">
+          <div
+            className="upload-progress-bar-fill"
+            style={{ width: `${Math.max(0, Math.min(100, yapActionProgress.percent))}%` }}
+          />
+        </div>
+      </div>
+    );
+  };
 
   const renderYapResultBanner = (result, { practiceId = null, showRetry = false, showDelete = false } = {}) => {
     const resolvedPracticeId = practiceId || yapLastPracticeId;
@@ -2350,21 +2422,7 @@ function App() {
             )}
           </div>
         )}
-        {showActionProgress && (
-          <div className={`yap-action-progress ${yapActionProgress.status === 'error' ? 'save-progress-error' : yapActionProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
-            <div className="save-progress-header">
-              {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
-              <span className="save-progress-label">{yapActionProgress.label}</span>
-              <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
-            </div>
-            <div className="upload-progress-bar" aria-hidden="true">
-              <div
-                className="upload-progress-bar-fill"
-                style={{ width: `${Math.max(0, Math.min(100, yapActionProgress.percent))}%` }}
-              />
-            </div>
-          </div>
-        )}
+        {showActionProgress && renderYapActionProgressBar(resolvedPracticeId)}
       </div>
     );
   };
@@ -3174,6 +3232,7 @@ function App() {
     setError('');
     startSlowTimer();
     startSaveProgress('Verifica dati e salvataggio in corso...', 'validate');
+    const saveHintTimers = [];
 
     try {
       const practicePayload = {
@@ -3292,13 +3351,30 @@ function App() {
           await uploadQueuedPhotos(practiceId, (patch) => updateSaveProgress(patch));
         }
 
+        const syncStageStartedAt = Date.now();
         updateSaveProgress({
-          label: 'Sincronizzazione YAP in corso...',
+          label: getYapProgressLabel('sync', syncStageStartedAt, 'YAP: precheck e avvio sincronizzazione...'),
           stage: 'sync',
           percent: 72,
           status: 'running',
         });
-        addToast('Salvataggio completato. Sincronizzazione YAP in corso...', 'info');
+        [
+          [12000, 82],
+          [30000, 88],
+          [55000, 91],
+          [85000, 92],
+          [120000, 92],
+        ].forEach(([delay, percent]) => {
+          saveHintTimers.push(setTimeout(() => {
+            updateSaveProgress({
+              label: getYapProgressLabel('sync', syncStageStartedAt, 'YAP: sync in corso...'),
+              stage: 'sync',
+              percent,
+              status: 'running',
+            });
+          }, delay));
+        });
+        addToast('Salvataggio completato. Sync YAP avviata...', 'info');
 
         // Keep YAP aligned automatically after a successful save.
         if (practiceId) {
@@ -3344,6 +3420,7 @@ function App() {
       finishSaveProgress(classifyError(err), 'error', 0);
       addToast(classifyError(err), 'error');
     } finally {
+      saveHintTimers.forEach((timerId) => clearTimeout(timerId));
       clearSlowTimer();
       setSaving(false);
       setSubmitInProgress(false);
@@ -3726,6 +3803,16 @@ function App() {
       acc[ctx].push(part);
       return acc;
     }, {});
+    const yapBusy = yapSyncLoading || yapAuditLoading || yapDeleteLoading;
+    const openYapTab = () => setDetailTab('yap');
+    const runOverviewSync = () => {
+      setDetailTab('yap');
+      syncToYap(practice.id, { dry_run: false });
+    };
+    const runOverviewAudit = () => {
+      setDetailTab('yap');
+      auditYapAppointment(practice.id, { debug: false });
+    };
 
     return (
       <div className="view-detail view-enter">
@@ -3836,21 +3923,6 @@ function App() {
                   {yapDeleteLoading ? 'Eliminazione...' : 'Elimina appuntamento YAP'}
                 </button>
               </div>
-              {yapActionProgress && String(yapActionProgress.practiceId) === String(practice.id) && (
-                <div className={`yap-action-progress ${yapActionProgress.status === 'error' ? 'save-progress-error' : yapActionProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
-                  <div className="save-progress-header">
-                    {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
-                    <span className="save-progress-label">{yapActionProgress.label}</span>
-                    <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
-                  </div>
-                  <div className="upload-progress-bar" aria-hidden="true">
-                    <div
-                      className="upload-progress-bar-fill"
-                      style={{ width: `${Math.max(0, Math.min(100, yapActionProgress.percent))}%` }}
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           )}
             </>
@@ -3865,7 +3937,35 @@ function App() {
                   <span className={`sync-dot ${practice.synced ? 'sync-dot-green' : 'sync-dot-red'}`} />
                   {formatYapPracticeStatus(practice)}
                 </div>
-                <div className="detail-sync-help">Gestione sincronizzazione disponibile nella tab YAP.</div>
+                <div className="detail-sync-help">
+                  Da qui puoi rilanciare subito la sync. La tab YAP resta il pannello completo con audit, errori e dettagli.
+                </div>
+                <div className="detail-sync-actions">
+                  <button
+                    type="button"
+                    className="detail-sync-action detail-sync-action-primary"
+                    onClick={runOverviewSync}
+                    disabled={yapBusy}
+                  >
+                    {yapSyncLoading ? 'Sync in corso...' : (practice.synced ? 'Risincronizza YAP' : 'Riprova sync YAP')}
+                  </button>
+                  <button
+                    type="button"
+                    className="detail-sync-action"
+                    onClick={runOverviewAudit}
+                    disabled={yapBusy}
+                  >
+                    {yapAuditLoading ? 'Verifica...' : 'Verifica YAP'}
+                  </button>
+                  <button
+                    type="button"
+                    className="detail-sync-action detail-sync-action-secondary"
+                    onClick={openYapTab}
+                  >
+                    Apri tab YAP
+                  </button>
+                </div>
+                {renderYapActionProgressBar(practice.id)}
               </div>
               <div className="section detail-overview-section">
                 {practice.internal_notes && (
@@ -4061,7 +4161,7 @@ function App() {
           {error && <div className="error">{error}</div>}
 
           {slowRequest && (
-            <div className="slow-request-warning">⏳ La richiesta sta impiegando più del previsto...</div>
+            <div className="slow-request-warning">Richiesta lenta: se e' una sync YAP, guarda la barra progresso per la fase corrente.</div>
           )}
 
           <form ref={formRef} onSubmit={handleSubmit(onSubmit)} className="form" noValidate>
@@ -4516,7 +4616,7 @@ function App() {
     return (
       <div className="App">
         <SkeletonLoader />
-        {slowRequest && <div className="slow-request-warning">⏳ La richiesta sta impiegando più del previsto...</div>}
+        {slowRequest && <div className="slow-request-warning">Richiesta lenta: se e' una sync YAP, guarda la barra progresso per la fase corrente.</div>}
       </div>
     );
   }
