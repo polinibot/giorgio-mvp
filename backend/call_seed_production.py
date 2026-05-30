@@ -2,13 +2,19 @@
 """
 Script per chiamare l'endpoint admin di seeding su produzione.
 """
+import os
+import sys
+
 import requests
 
-PRODUCTION_API_URL = "https://giorgio-mvp-production.up.railway.app"
-ADMIN_SECRET = "giorgio-seed-2026"
+PRODUCTION_API_URL = os.getenv("PRODUCTION_API_URL", "https://giorgio-mvp-production.up.railway.app")
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "")
 
 def call_seed_endpoint():
     """Chiama l'endpoint admin per seeding."""
+    if not ADMIN_SECRET:
+        print("❌ ADMIN_SECRET non impostato. Esporta ADMIN_SECRET nell'ambiente prima di eseguire.")
+        sys.exit(1)
     url = f"{PRODUCTION_API_URL}/admin/seed-test-practices"
     headers = {
         "Content-Type": "application/json",

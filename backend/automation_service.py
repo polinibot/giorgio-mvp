@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 import re
@@ -5,6 +6,8 @@ from sqlalchemy.orm import Session
 from database_sqlite import Practice, PracticeSection, PracticePart, PracticePhoto
 from telegram_utils import _parse_description_rows
 from appointment_time import validate_appointment_time, normalize_appointment_time, get_yap_slot_minutes
+
+logger = logging.getLogger(__name__)
 
 
 class AutomationService:
@@ -26,7 +29,8 @@ class AutomationService:
         cleaned = re.sub(r"[^\d+]", "", raw)
         if cleaned.startswith("00"):
             cleaned = f"+{cleaned[2:]}"
-        if cleaned.startswith("3") and len(cleaned) in {9, 10}:
+        # Italian mobile numbers are 10 digits starting with 3; only prefix +39 for those.
+        if cleaned.startswith("3") and len(cleaned) == 10:
             cleaned = f"+39{cleaned}"
         return cleaned
 
@@ -362,7 +366,7 @@ class AutomationService:
                 payload = AutomationService.prepare_automation_payload(practice.id, db)
                 automation_payloads.append(payload)
             except Exception as e:
-                print(f"Errore preparazione pratica {practice.id}: {e}")
+                logger.warning("Errore preparazione pratica %s: %s", practice.id, e)
                 continue
         
         return automation_payloads

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     ocr_confidence_threshold: float = 0.6
     secret_key: str = ""
     practice_access_token_ttl_seconds: int = 86400
-    telegram_init_data_max_age_seconds: int = 86400
+    telegram_init_data_max_age_seconds: int = 3600  # 1h: limit initData replay window
     yap_worker_secret: str = ""
 
     # Cloudinary settings
@@ -107,6 +107,16 @@ ERROR_CHANNEL_ID = settings.telegram_error_channel_id
 DEBUG = settings.debug
 ALLOWED_ORIGINS = settings.allowed_origins
 LOCAL_DEV_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+RUNNING_IN_PRODUCTION = any(
+    os.getenv(name)
+    for name in (
+        "RAILWAY_ENVIRONMENT",
+        "RAILWAY_SERVICE_NAME",
+        "RAILWAY_PROJECT_ID",
+        "RENDER",
+        "FLY_APP_NAME",
+    )
+) or os.getenv("APP_ENV", "").lower() == "production"
 
 _missing = []
 if not settings.telegram_bot_token:
@@ -123,9 +133,25 @@ if _missing:
 else:
     logger.info("All critical configuration validated successfully.")
 
+if DEBUG and RUNNING_IN_PRODUCTION:
+    raise RuntimeError("DEBUG=True is not allowed in production environments")
+
 if DEBUG:
     logger.info("Running in DEBUG mode.")
-elif not settings.secret_key:
-    logger.warning(
-        "SECRET_KEY is empty while DEBUG=False. Practice access tokens require SECRET_KEY in production."
-    )
+else:
+    # Fail fast in production: missing critical secrets must stop startup rather
+    # than surface as request-time 500s or insecure fallbacks.
+    _fatal = []
+    if not settings.secret_key:
+        _fatal.append("SECRET_KEY")
+    if not settings.telegram_bot_token:
+        _fatal.append("TELEGRAM_BOT_TOKEN")
+    if RUNNING_IN_PRODUCTION and settings.database_url.startswith("sqlite"):
+        _fatal.append("DATABASE_URL (must be non-SQLite in production)")
+    if RUNNING_IN_PRODUCTION and not settings.whitelist_telegram_ids:
+        _fatal.append("WHITELIST_TELEGRAM_IDS")
+    if _fatal:
+        raise RuntimeError(
+            "Missing required configuration in production (DEBUG=False): "
+            + ", ".join(_fatal)
+        )

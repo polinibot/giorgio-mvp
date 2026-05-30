@@ -24,8 +24,8 @@ import {
 } from "./lib/yap-shared.mjs";
 import { buildManagementPlan, normalizeMappingInput } from "./lib/yap-mapping.mjs";
 
-const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
-const { chromium } = requireFromMiniApp("@playwright/test");
+const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
+const { chromium } = requireFromYap("playwright");
 
 const DEFAULT_ARTIFACT_DIR = path.join(ROOT_DIR, "automation", "artifacts", "yap-audit");
 const KNOWN_TAGS = ["officina", "pneumatici", "preventivo", "revisione", "comunicato", "carrozzeria"];
@@ -715,7 +715,7 @@ async function runAudit(mapping, args) {
       headless: !args.headed,
       args: launchArgs,
     },
-    { resolveModule: requireFromMiniApp.resolve.bind(requireFromMiniApp), cwd: ROOT_DIR },
+    { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
   );
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();

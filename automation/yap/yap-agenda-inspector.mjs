@@ -21,8 +21,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { loginYap, openAgendaInApp, gotoAgendaDate } from "./lib/yap-shared.mjs";
 
-const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
-const { chromium } = requireFromMiniApp("playwright");
+const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
+const { chromium } = requireFromYap("playwright");
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DEFAULT_ARTIFACT_DIR = path.join(ROOT_DIR, "automation", "artifacts", "yap-inspector");

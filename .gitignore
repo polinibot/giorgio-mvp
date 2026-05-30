@@ -85,4 +85,5 @@ Thumbs.db
 storage/photos/
 
 # Railway
-railway.toml
+# NOTE: railway.toml IS tracked (it holds deploy config with ${...} placeholders only,
+# no secrets). Do not ignore it; keep real secrets in Railway env vars, never here.

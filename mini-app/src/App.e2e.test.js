@@ -293,6 +293,7 @@ beforeEach(() => {
     return Promise.reject(new Error(`Unexpected request: ${url}`));
   });
   localStorage.clear();
+  sessionStorage.clear();
   document.body.innerHTML = '';
 });
 
@@ -716,6 +717,7 @@ describe('Mini App user-simulation suite', () => {
     'draft restore preserves context combination %s without losing section rows',
     async (combo) => {
       localStorage.clear();
+      sessionStorage.clear();
 
       mount(`?plate=AB123CD&matrix=${combo.join('-')}`);
       await waitFor(() => document.querySelector('form'));
@@ -761,6 +763,7 @@ describe('Mini App user-simulation suite', () => {
 
       await unmountCurrentRoot();
       localStorage.clear();
+      sessionStorage.clear();
     }
   );
 

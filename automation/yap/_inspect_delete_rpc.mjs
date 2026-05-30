@@ -1,6 +1,6 @@
 import { loginYap, openAgendaInApp, gotoAgendaDate } from "./lib/yap-shared.mjs";
 import { createRequire } from "module";
-const req = createRequire(new URL("file:///c:/Users/Anas/giorgio/mini-app/package.json"));
+const req = createRequire(new URL("./package.json", import.meta.url));
 const { chromium } = req("playwright");
 
 const browser = await chromium.launch({ headless: true });

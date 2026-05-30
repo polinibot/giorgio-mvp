@@ -86,6 +86,12 @@ class SecurityService:
                 logger.warning("validate_telegram_init_data: initData is empty")
                 return False
 
+            if not settings.telegram_bot_token:
+                # Without a bot token the HMAC key would be empty, allowing a crafted
+                # initData to validate. Refuse outright.
+                logger.warning("validate_telegram_init_data: telegram_bot_token is not configured")
+                return False
+
             pairs = SecurityService._parse_init_data_pairs(init_data)
             hash_value = next((v for k, v in pairs if k == "hash"), None)
             if not hash_value:

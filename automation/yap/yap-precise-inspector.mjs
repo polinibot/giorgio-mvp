@@ -11,8 +11,8 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
-const { chromium } = requireFromMiniApp("playwright");
+const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
+const { chromium } = requireFromYap("playwright");
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ARTIFACTS = path.join(ROOT, "automation", "artifacts", "yap-precise");

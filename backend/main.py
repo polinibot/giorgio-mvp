@@ -5,6 +5,7 @@ import shutil
 import shutil as _shutil
 import json as _json
 import asyncio
+import base64
 import hmac
 import time
 import traceback
@@ -20,12 +21,17 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func, extract
+from cryptography.fernet import Fernet, InvalidToken
 
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
+
+    _SLOWAPI_AVAILABLE = True
 except ModuleNotFoundError:  # pragma: no cover - fallback for dev/test environments without slowapi
+    _SLOWAPI_AVAILABLE = False
+
     class RateLimitExceeded(Exception):
         pass
 
@@ -47,6 +53,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for dev/test environm
 from config import settings, DEBUG, ALLOWED_ORIGINS, LOCAL_DEV_ORIGIN_REGEX
 from database_sqlite import (
     get_db, create_tables, Practice, PracticePhoto, PracticeSection, PracticePart, SystemSetting,
+    SessionLocal,
 )
 from models import (
     PracticeStatus, PracticeType, CustomerType, Context,
@@ -65,6 +72,12 @@ from yap_field_map import build_full_field_mapping
 
 logger = logging.getLogger(__name__)
 
+if not _SLOWAPI_AVAILABLE:
+    logger.warning(
+        "slowapi is not installed: rate limiting is DISABLED (no-op limiter in use). "
+        "Install slowapi for production rate limiting."
+    )
+
 # Create storage directory
 os.makedirs("storage/photos", exist_ok=True)
 
@@ -72,6 +85,7 @@ os.makedirs("storage/photos", exist_ok=True)
 limiter = Limiter(key_func=get_remote_address)
 YAP_RUN_LOCK: Optional[asyncio.Lock] = None
 YAP_PRECHECK_CACHE_TTL_SECONDS = 30
+YAP_CACHE_MAX_ENTRIES = 500
 YAP_PRECHECK_CACHE: Dict[str, Dict[str, Any]] = {}
 YAP_PREVIEW_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -91,20 +105,29 @@ app.state.limiter = limiter
 
 
 def _initialize_database() -> None:
+    if os.getenv("GIORGIO_SKIP_MIGRATIONS"):
+        # Migrations were already run by the process supervisor; avoid concurrent DDL.
+        logger.info("Skipping database initialization (GIORGIO_SKIP_MIGRATIONS set)")
+        return
     try:
         create_tables()
         logger.info("Database initialization completed")
     except Exception as exc:
+        # Fail fast: a broken schema/migration must not be masked behind a running
+        # app that then serves 500s on every request.
         logger.exception("Database initialization failed: %s", exc)
+        raise
 
 # --- CORS ---
+# The localhost/127.0.0.1 origin regex is only enabled in DEBUG so it is never
+# accepted in production.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=LOCAL_DEV_ORIGIN_REGEX,
+    allow_origin_regex=LOCAL_DEV_ORIGIN_REGEX if DEBUG else None,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Telegram-Init-Data", "X-Telegram-User-Id", "X-Yap-Worker-Secret"],
 )
 
 
@@ -149,12 +172,68 @@ def serialize(obj) -> dict:
 
     Converts enums to their value, datetimes to ISO strings, and handles
     special fields like description_rows (JSON text) and contexts (CSV).
-    Includes the synced field for Practice objects.
+    Known ORM models use explicit allow-lists so new internal/sensitive columns
+    are not accidentally reflected into API responses.
     """
+    allowed_fields = {
+        Practice: (
+            "id",
+            "created_at",
+            "updated_at",
+            "status",
+            "plate_detected",
+            "plate_confirmed",
+            "phone",
+            "customer_name",
+            "customer_type",
+            "billing_to_complete",
+            "appointment_date",
+            "appointment_time",
+            "practice_type",
+            "contexts",
+            "internal_notes",
+            "management_external_id",
+            "management_sync_status",
+            "management_last_sync_at",
+            "management_audit_result",
+            "synced",
+        ),
+        PracticePhoto: (
+            "id",
+            "practice_id",
+            "storage_path",
+            "cloudinary_public_id",
+            "ocr_result",
+            "ocr_confidence",
+            "created_at",
+        ),
+        PracticeSection: (
+            "id",
+            "practice_id",
+            "context",
+            "description_rows",
+            "man_hours",
+            "mac_hours",
+            "materials_amount",
+            "waste_apply",
+            "waste_percentage",
+            "notes",
+        ),
+        PracticePart: (
+            "id",
+            "practice_id",
+            "context",
+            "name",
+            "quantity",
+        ),
+    }.get(type(obj))
+
     result = {}
-    for k, v in obj.__dict__.items():
-        if k.startswith("_"):
+    field_names = allowed_fields or [k for k in obj.__dict__ if not k.startswith("_")]
+    for k in field_names:
+        if not hasattr(obj, k):
             continue
+        v = getattr(obj, k)
         if isinstance(v, Enum):
             result[k] = v.value
         elif isinstance(v, datetime):
@@ -223,6 +302,37 @@ def _can_access_practice(practice: Practice, user_data: dict, access_token: Opti
     return SecurityService.validate_practice_access_token(practice.id, user_data["id"], access_token)
 
 
+def _supports_row_locks(db: Session) -> bool:
+    try:
+        return db.get_bind().dialect.name not in {"sqlite"}
+    except Exception:
+        return False
+
+
+def _practice_by_id(db: Session, practice_id: int, *, for_update: bool = False) -> Optional[Practice]:
+    query = db.query(Practice).filter(Practice.id == practice_id)
+    if for_update and _supports_row_locks(db):
+        query = query.with_for_update()
+    return query.first()
+
+
+def _owned_active_practice(
+    db: Session,
+    practice_id: int,
+    user_id: int,
+    *,
+    for_update: bool = False,
+) -> Optional[Practice]:
+    query = db.query(Practice).filter(
+        Practice.id == practice_id,
+        Practice.created_by_telegram_id == user_id,
+        Practice.status != PracticeStatus.DELETED,
+    )
+    if for_update and _supports_row_locks(db):
+        query = query.with_for_update()
+    return query.first()
+
+
 def _get_yap_run_lock() -> asyncio.Lock:
     global YAP_RUN_LOCK
     if YAP_RUN_LOCK is None:
@@ -246,27 +356,6 @@ def _repair_practice_owner_if_needed(db: Session, practice: Practice, user_data:
             user_data["id"],
         )
 
-
-def _can_access_draft_via_plate_compat(practice: Practice, plate_confirmed: Optional[str]) -> bool:
-    if practice.status != PracticeStatus.DRAFT:
-        return False
-    if not plate_confirmed or not practice.plate_confirmed:
-        return False
-    return practice.plate_confirmed.strip().upper() == plate_confirmed.strip().upper()
-
-
-def _repair_practice_owner_via_plate_compat(db: Session, practice: Practice, user_data: dict) -> None:
-    previous_owner = practice.created_by_telegram_id
-    practice.created_by_telegram_id = user_data["id"]
-    practice.updated_by_telegram_id = user_data["id"]
-    db.commit()
-    db.refresh(practice)
-    logger.warning(
-        "Practice owner repaired via draft+plate compatibility for practice %d: %s -> %s",
-        practice.id,
-        previous_owner,
-        user_data["id"],
-    )
 
 def validate_telegram_init_data(
     request: Request,
@@ -360,8 +449,13 @@ def _enforce_whitelist(user_data: dict) -> dict:
 
     whitelist = getattr(settings, "whitelist_telegram_ids", None) or []
     if not whitelist:
-        logger.warning("Telegram whitelist is empty - all users allowed")
-        return user_data
+        # Fail closed in production: an empty/misconfigured whitelist must not
+        # silently authorize every authenticated Telegram user.
+        logger.error("Telegram whitelist is empty while DEBUG=False - denying access (fail closed)")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Servizio non configurato: whitelist utenti mancante",
+        )
     uid = user_data.get("id")
     if uid not in whitelist:
         logger.warning("User %s not in whitelist, access denied", uid)
@@ -780,7 +874,7 @@ async def get_practice_detail(
     db: Session = Depends(get_db),
 ):
     """Get full practice details including photos, sections, parts, and synced status."""
-    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    practice = _practice_by_id(db, practice_id)
 
     if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
@@ -843,6 +937,41 @@ def _practice_date_iso(practice: Practice) -> str:
     if hasattr(value, "date"):
         return value.date().isoformat()
     return str(value or "")[:10]
+
+
+def _safe_search_arg(value: Any) -> str:
+    """Normalize a user-controlled YAP search value before passing it with the
+    `--search=value` argv form, so leading dashes remain data instead of flags."""
+    return str(value or "").strip()
+
+
+def _yap_session_fernet() -> Fernet:
+    secret = settings.secret_key or settings.telegram_bot_token or "dev-yap-session-state-key"
+    digest = hashlib.sha256(f"giorgio:yap-session-state:{secret}".encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def _encrypt_yap_session_state(raw_state: str) -> str:
+    token = _yap_session_fernet().encrypt(raw_state.encode("utf-8")).decode("ascii")
+    return f"fernet:{token}"
+
+
+def _decrypt_yap_session_state(stored_state: str) -> str:
+    value = str(stored_state or "")
+    if not value.startswith("fernet:"):
+        return value
+    try:
+        return _yap_session_fernet().decrypt(value[len("fernet:"):].encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError) as exc:
+        logger.warning("Impossibile decifrare lo stato sessione YAP: %s", exc)
+        return ""
+
+
+def _chmod_owner_only(path: str) -> None:
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        logger.debug("Unable to restrict permissions for %s", path, exc_info=True)
 
 
 def _ensure_yap_credentials(action: str) -> None:
@@ -940,9 +1069,17 @@ def _cache_get(cache: Dict[str, Dict[str, Any]], key: str) -> Optional[Any]:
 
 
 def _cache_set(cache: Dict[str, Dict[str, Any]], key: str, value: Any, ttl_seconds: int = YAP_PRECHECK_CACHE_TTL_SECONDS) -> None:
+    now = time.time()
+    # Bound memory: drop already-expired entries, then evict oldest if still over cap.
+    if len(cache) >= YAP_CACHE_MAX_ENTRIES:
+        for expired_key in [k for k, v in cache.items() if v.get("expires_at", 0) < now]:
+            cache.pop(expired_key, None)
+        while len(cache) >= YAP_CACHE_MAX_ENTRIES:
+            oldest_key = min(cache, key=lambda k: cache[k].get("expires_at", 0))
+            cache.pop(oldest_key, None)
     cache[key] = {
         "value": value,
-        "expires_at": time.time() + max(1, ttl_seconds),
+        "expires_at": now + max(1, ttl_seconds),
     }
 
 
@@ -1186,17 +1323,25 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
         script_path = os.path.join(root, "automation", "yap", script_name)
 
         # Serializziamo l'accesso al session-state condiviso.
+        # NB: usiamo una sessione DB dedicata (non quella della request) così che il
+        # commit dello stato di sessione non persista per sbaglio modifiche ORM in sospeso.
+        persist_session_state = db is not None
         session_file_path = os.path.join(root, "automation", "artifacts", "yap", "session-state.json")
-        if db:
+        if persist_session_state:
+            state_db = SessionLocal()
             try:
-                setting = db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
+                setting = state_db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
                 if setting and setting.value:
+                    restored_state = _decrypt_yap_session_state(setting.value)
                     os.makedirs(os.path.dirname(session_file_path), exist_ok=True)
                     with open(session_file_path, "w", encoding="utf-8") as f:
-                        f.write(setting.value)
+                        f.write(restored_state)
+                    _chmod_owner_only(session_file_path)
                     logger.info("Session state YAP ripristinato dal database")
             except Exception as e:
                 logger.warning("Impossibile ripristinare la sessione YAP dal database: %s", e)
+            finally:
+                state_db.close()
 
         async def _run_once(extra_env: Optional[Dict[str, str]] = None) -> tuple[int, str, str]:
             node_bin = os.getenv("NODE_BINARY") or (_shutil.which("node") or _shutil.which("nodejs") or "node")
@@ -1224,22 +1369,32 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
 
         returncode, out, err = await _run_once()
 
-        if db and os.path.exists(session_file_path):
+        if persist_session_state and os.path.exists(session_file_path):
+            state_db = SessionLocal()
             try:
                 with open(session_file_path, "r", encoding="utf-8") as f:
                     session_data = f.read()
                 if session_data.strip():
-                    setting = db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
+                    encrypted_session_data = _encrypt_yap_session_state(session_data)
+                    setting = state_db.query(SystemSetting).filter(SystemSetting.key == "yap_session_state").first()
                     if not setting:
-                        setting = SystemSetting(key="yap_session_state", value=session_data)
-                        db.add(setting)
+                        setting = SystemSetting(key="yap_session_state", value=encrypted_session_data)
+                        state_db.add(setting)
                     else:
-                        setting.value = session_data
-                    db.commit()
-                    logger.info("Session state YAP salvato nel database")
+                        setting.value = encrypted_session_data
+                    state_db.commit()
+                    logger.info("Session state YAP salvato nel database (encrypted)")
             except Exception as e:
-                db.rollback()
+                state_db.rollback()
                 logger.warning("Impossibile salvare la sessione YAP nel database: %s", e)
+            finally:
+                state_db.close()
+                try:
+                    os.remove(session_file_path)
+                except FileNotFoundError:
+                    pass
+                except OSError as cleanup_exc:
+                    logger.warning("Impossibile rimuovere session state YAP temporaneo: %s", cleanup_exc)
 
         if returncode != 0:
             failure_detail = _build_yap_failure_detail(out, err)
@@ -1296,7 +1451,7 @@ async def toggle_practice_sync(
     db: Session = Depends(get_db),
 ):
     """Toggle the synced status of a practice."""
-    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    practice = _practice_by_id(db, practice_id, for_update=True)
 
     if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
@@ -1337,7 +1492,7 @@ async def upload_practice_photo(
 ):
     """Upload a photo for a practice via multipart form."""
     # Validate practice ownership
-    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    practice = _practice_by_id(db, practice_id, for_update=True)
     if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
     _repair_practice_owner_if_needed(db, practice, user_data, access_token)
@@ -1359,7 +1514,10 @@ async def upload_practice_photo(
 
     # Generate unique file ID
     generated_file_id = str(uuid.uuid4())
-    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "jpg"
+    # Never trust the client filename for the on-disk extension: derive it from the
+    # validated content type and whitelist it to avoid path traversal via filename.
+    _CONTENT_TYPE_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+    ext = _CONTENT_TYPE_EXT.get(file.content_type, "jpg")
     temp_filename = f"{generated_file_id}.{ext}"
     temp_path = os.path.join("storage", "photos", temp_filename)
 
@@ -1425,7 +1583,7 @@ async def delete_practice_photo(
 ):
     """Delete a photo from a practice."""
     # Validate practice ownership
-    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    practice = _practice_by_id(db, practice_id, for_update=True)
     if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
     _repair_practice_owner_if_needed(db, practice, user_data, access_token)
@@ -1467,15 +1625,16 @@ async def get_mini_app_data(
 ):
     """Return data for the Telegram Mini App."""
     if practice_id:
-        practice = db.query(Practice).filter(Practice.id == practice_id).first()
+        practice = _practice_by_id(db, practice_id)
 
         if not practice:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
 
+        # Access requires ownership or a valid signed access token. Plate-based
+        # ownership "repair" was removed: plates are low-entropy and guessable,
+        # so it allowed taking over another user's draft (IDOR).
         if _can_access_practice(practice, user_data, access_token):
             _repair_practice_owner_if_needed(db, practice, user_data, access_token)
-        elif _can_access_draft_via_plate_compat(practice, plate_confirmed):
-            _repair_practice_owner_via_plate_compat(db, practice, user_data)
         else:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
 
@@ -1538,7 +1697,7 @@ async def update_practice_full(
 ):
     """Update a practice with sections and parts in one transaction."""
     _validate_full_payload(body)
-    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    practice = _practice_by_id(db, practice_id, for_update=True)
     if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
     _repair_practice_owner_if_needed(db, practice, user_data, access_token)
@@ -1641,7 +1800,7 @@ async def update_practice(
     db: Session = Depends(get_db),
 ):
     """Update an existing practice."""
-    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    practice = _practice_by_id(db, practice_id, for_update=True)
 
     if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
@@ -1690,7 +1849,7 @@ async def delete_practice(
     db: Session = Depends(get_db),
 ):
     """Soft-delete a practice."""
-    practice = db.query(Practice).filter(Practice.id == practice_id).first()
+    practice = _practice_by_id(db, practice_id, for_update=True)
 
     if not practice or not _can_access_practice(practice, user_data, access_token):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
@@ -1714,11 +1873,11 @@ async def delete_practice(
     try:
         _ensure_yap_credentials("eliminare l'appuntamento su YAP")
         date_iso = _practice_date_iso(practice)
-        search = practice.plate_confirmed or practice.customer_name
+        search = _safe_search_arg(practice.plate_confirmed or practice.customer_name)
         if date_iso and search:
             result = await _run_yap_script(
                 "yap-delete-appointment.mjs",
-                ["--date", date_iso, "--search", str(search)],
+                ["--date", date_iso, f"--search={search}"],
                 db=db,
             )
             if not result.get("deleted"):
@@ -1784,11 +1943,7 @@ async def get_automation_payload(
     db: Session = Depends(get_db),
 ):
     """Export a practice payload ready for the future management automation."""
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-        Practice.status != PracticeStatus.DELETED,
-    ).first()
+    practice = _owned_active_practice(db, practice_id, user_data["id"])
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
 
@@ -1812,11 +1967,7 @@ async def pre_sync_check(
     db: Session = Depends(get_db),
 ):
     """Controllo pre-sync con score/priorita errori per UI."""
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-        Practice.status != PracticeStatus.DELETED,
-    ).first()
+    practice = _owned_active_practice(db, practice_id, user_data["id"], for_update=True)
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
 
@@ -2137,11 +2288,7 @@ async def sync_practice_to_yap(
         db.rollback()
         close_phase("finalize", "failed", "Errore tecnico durante sync.")
         try:
-            failed_practice = db.query(Practice).filter(
-                Practice.id == practice_id,
-                Practice.created_by_telegram_id == user_data["id"],
-                Practice.status != PracticeStatus.DELETED,
-            ).first()
+            failed_practice = _owned_active_practice(db, practice_id, user_data["id"], for_update=True)
             if failed_practice:
                 failed_practice.management_sync_status = "sync_failed"
                 failed_practice.management_last_sync_at = datetime.now(timezone.utc)
@@ -2176,11 +2323,7 @@ async def audit_practice_yap(
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-        Practice.status != PracticeStatus.DELETED,
-    ).first()
+    practice = _owned_active_practice(db, practice_id, user_data["id"], for_update=body.persist)
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
     _ensure_yap_credentials("verificare l'appuntamento su YAP")
@@ -2268,11 +2411,7 @@ async def delete_practice_yap_appointment(
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
-    practice = db.query(Practice).filter(
-        Practice.id == practice_id,
-        Practice.created_by_telegram_id == user_data["id"],
-        Practice.status != PracticeStatus.DELETED,
-    ).first()
+    practice = _owned_active_practice(db, practice_id, user_data["id"], for_update=True)
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
     _ensure_yap_credentials("eliminare l'appuntamento su YAP")
@@ -2294,12 +2433,12 @@ async def delete_practice_yap_appointment(
         phase_started_at = now
 
     date_iso = body.date or _practice_date_iso(practice)
-    search = body.search or practice.plate_confirmed or practice.customer_name
+    search = _safe_search_arg(body.search or practice.plate_confirmed or practice.customer_name)
     if not date_iso or not search:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data o testo ricerca YAP mancante")
     close_phase("precheck", "completed", "Parametri eliminazione validati.")
 
-    args = ["--date", date_iso, "--search", str(search)]
+    args = ["--date", str(date_iso), f"--search={search}"]
     if body.dry_run:
         args.append("--dry-run")
     if body.debug:
@@ -2343,16 +2482,20 @@ async def delete_practice_yap_appointment(
 async def manual_delete_yap_appointment(
     request: Request,
     body: YapManualDeleteRequest,
-    user_data: dict = Depends(require_whitelisted_user),
+    _auth: dict = Depends(require_yap_internal_auth),
     db: Session = Depends(get_db),
 ):
-    del user_data
+    # Restricted to the YAP worker / internal auth: this endpoint deletes an
+    # arbitrary appointment by date+search and is not scoped to a single
+    # practice, so it must not be reachable by any whitelisted end user.
     _ensure_yap_credentials("eliminare manualmente l'appuntamento su YAP")
 
-    if not str(body.date or "").strip() or not str(body.search or "").strip():
+    date_arg = str(body.date or "").strip()
+    search_arg = _safe_search_arg(body.search)
+    if not date_arg or not search_arg:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Date e search sono obbligatori")
 
-    args = ["--date", str(body.date).strip(), "--search", str(body.search).strip()]
+    args = ["--date", date_arg, f"--search={search_arg}"]
     if body.dry_run:
         args.append("--dry-run")
     if body.debug:
@@ -2438,7 +2581,10 @@ async def get_yap_mapping_preview_from_form(
 
 @app.get("/yap/error-channel-status")
 @limiter.limit("30/minute")
-async def get_error_channel_status(request: Request):
+async def get_error_channel_status(
+    request: Request,
+    _auth: dict = Depends(require_yap_internal_auth),
+):
     """Verifica lo stato della configurazione del canale errori."""
     from error_notifier import get_error_notifier
 
@@ -2448,13 +2594,13 @@ async def get_error_channel_status(request: Request):
         notifier.bot_token and notifier.channel_id
     )
 
+    # Do not leak any portion of the channel id; only booleans are returned.
     return APIResponse(
         success=True,
         data={
             "configured": is_configured,
             "has_bot_token": bool(notifier.bot_token),
             "has_channel_id": bool(notifier.channel_id),
-            "channel_id_preview": notifier.channel_id[:15] + "..." if notifier.channel_id and len(notifier.channel_id) > 15 else notifier.channel_id,
         }
     )
 
@@ -2566,7 +2712,14 @@ async def create_section(
         else:
             rows_json = _json.dumps([str(rows)])
 
-        context_value = section_data["context"]
+        context_value = _context_value(section_data["context"])
+        try:
+            Context(context_value)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Contesto non valido: {context_value}",
+            )
         section = db.query(PracticeSection).filter(
             PracticeSection.practice_id == practice_id,
             PracticeSection.context == context_value,
@@ -2631,6 +2784,11 @@ async def create_part(
         context_value = part_data.get("context")
         if not context_value:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Campo 'context' obbligatorio")
+        context_value = _context_value(context_value)
+        try:
+            Context(context_value)
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Contesto non valido: {context_value}")
 
         part = PracticePart(
             practice_id=practice_id,

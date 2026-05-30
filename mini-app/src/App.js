@@ -10,10 +10,26 @@ const API_BASE_URL = process.env.REACT_APP_API_URL
   || (process.env.NODE_ENV === 'development'
     ? 'http://127.0.0.1:8000'
     : 'https://giorgio-mvp-production.up.railway.app');
-const DEV_TELEGRAM_USER_ID = process.env.REACT_APP_DEV_TELEGRAM_USER_ID || '761118078';
+// No hardcoded default: set REACT_APP_DEV_TELEGRAM_USER_ID locally to use the real API in dev.
+const DEV_TELEGRAM_USER_ID = process.env.REACT_APP_DEV_TELEGRAM_USER_ID || '';
 
 const DRAFT_STORAGE_KEY = 'giorgio_draft';
+const DRAFT_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
 const CLIENT_CACHE_TTL_MS = 30 * 1000;
+
+const getDraftStorage = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    window.localStorage?.removeItem(DRAFT_STORAGE_KEY);
+  } catch (_) {
+    // Legacy localStorage cleanup is best-effort only.
+  }
+  try {
+    return window.sessionStorage || null;
+  } catch (_) {
+    return null;
+  }
+};
 
 // --- Helpers ---
 
@@ -227,7 +243,7 @@ function formatYapPracticeStatus(practice) {
   if (status === 'blocked_by_odl') return 'Eliminazione bloccata da ODL';
   if (status === 'duplicate') return 'Agenda già presente in YAP';
   if (status === 'not_ready') return 'Pratica non pronta per YAP';
-  if (status === 'not_found') return 'Appuntamento giÃ  assente su YAP';
+  if (status === 'not_found') return 'Appuntamento già assente su YAP';
   if (status) return status;
   return practice?.synced ? 'Sincronizzata' : 'Non sincronizzata';
 }
@@ -923,14 +939,14 @@ const filterPreviewPractices = (items, search = '', filters = {}) => {
 const getDashboardDraftCard = (search = '', filters = {}) => {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    const raw = getDraftStorage()?.getItem(DRAFT_STORAGE_KEY);
     if (!raw) return null;
     const draft = JSON.parse(raw);
     if (!draft || typeof draft !== 'object') return null;
 
     const timestamp = Number(draft.timestamp || 0);
-    if (!timestamp || Date.now() - timestamp > 24 * 60 * 60 * 1000) {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    if (!timestamp || Date.now() - timestamp > DRAFT_STORAGE_TTL_MS) {
+      getDraftStorage()?.removeItem(DRAFT_STORAGE_KEY);
       return null;
     }
 
@@ -1093,6 +1109,39 @@ const extractPracticeAccessTokenFromLocation = () => {
   return '';
 };
 
+const stripSensitiveAuthParamsFromUrl = () => {
+  if (typeof window === 'undefined' || !window.history?.replaceState) return;
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+    ['access_token', 'tgWebAppData'].forEach((key) => {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    });
+
+    const hashRaw = url.hash?.startsWith('#') ? url.hash.slice(1) : (url.hash || '');
+    if (hashRaw) {
+      const hashParams = new URLSearchParams(hashRaw);
+      ['access_token', 'tgWebAppData'].forEach((key) => {
+        if (hashParams.has(key)) {
+          hashParams.delete(key);
+          changed = true;
+        }
+      });
+      const nextHash = hashParams.toString();
+      url.hash = nextHash ? `#${nextHash}` : '';
+    }
+
+    if (changed) {
+      window.history.replaceState(null, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+  } catch (_) {
+    // no-op
+  }
+};
+
 const isDebugUiEnabled = () => (
   typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug_ui') === '1'
 );
@@ -1231,7 +1280,7 @@ function App() {
       if (saving || submitInProgress) return false;
       const data = getValues();
       const draft = { formData: data, selectedContexts, sections, parts, timestamp: Date.now(), practiceId: practice?.id || null };
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      getDraftStorage()?.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
       return true;
     } catch (_) {
       return false;
@@ -1431,17 +1480,17 @@ function App() {
   const watchedValues = watch();
 
   const clearDraft = useCallback(() => {
-    try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+    try { getDraftStorage()?.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
     setDashboardDraftCard(null);
   }, []);
 
   const restoreDraft = useCallback((targetPracticeId = null) => {
     try {
-      const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+      const raw = getDraftStorage()?.getItem(DRAFT_STORAGE_KEY);
       if (!raw) return false;
       const draft = JSON.parse(raw);
-      if (Date.now() - draft.timestamp > 24 * 60 * 60 * 1000) {
-        localStorage.removeItem(DRAFT_STORAGE_KEY);
+      if (Date.now() - draft.timestamp > DRAFT_STORAGE_TTL_MS) {
+        getDraftStorage()?.removeItem(DRAFT_STORAGE_KEY);
         return false;
       }
       if (draft.practiceId !== targetPracticeId) {
@@ -1721,7 +1770,7 @@ function App() {
     const items = Array.isArray(practiceItems) ? practiceItems : [];
     const duplicated = items.some((practiceItem) => isDraftDuplicatedByPractice(draftCard, practiceItem));
     if (duplicated) {
-      try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
+      try { getDraftStorage()?.removeItem(DRAFT_STORAGE_KEY); } catch (_) {}
       setDashboardDraftCard(null);
       return;
     }
@@ -2162,7 +2211,7 @@ function App() {
       invalidatePracticeCaches(id);
       const phaseLabel = summarizePhaseTimeline(data.phase_timeline, data.message || 'Eliminazione YAP completata.');
       if (data.status === 'deleted' || data.status === 'not_found') {
-        addToast(data.status === 'not_found' ? 'Appuntamento giÃ  assente su YAP. Pratica rimossa.' : 'Appuntamento eliminato da YAP', 'success');
+        addToast(data.status === 'not_found' ? 'Appuntamento già assente su YAP. Pratica rimossa.' : 'Appuntamento eliminato da YAP', 'success');
         if (String(selectedPracticeId || '') === String(id)) {
           setCurrentView('dashboard');
           setNavigationStack([]);
@@ -2289,7 +2338,7 @@ function App() {
       not_ready: 'Pratica non pronta',
       blocked_by_odl: 'Eliminazione bloccata da ODL',
       deleted: 'Appuntamento eliminato',
-      not_found: 'Appuntamento giÃ  assente',
+      not_found: 'Appuntamento già assente',
       sync_failed: 'Sync YAP fallita',
       delete_failed: 'Eliminazione YAP fallita',
       running: 'Operazione YAP in corso',
@@ -2708,6 +2757,7 @@ function App() {
       setInitData(currentInitData);
       setTelegramUserId(currentTelegramUserId);
       setPracticeAccessToken(currentPracticeAccessToken);
+      stripSensitiveAuthParamsFromUrl();
 
       const urlParams = new URLSearchParams(window.location.search);
       const demoMode = urlParams.get('demo');
@@ -2758,6 +2808,7 @@ function App() {
       const currentPracticeAccessToken = extractPracticeAccessTokenFromLocation();
       setTelegramUserId(currentTelegramUserId);
       setPracticeAccessToken(currentPracticeAccessToken);
+      stripSensitiveAuthParamsFromUrl();
       const urlParams = new URLSearchParams(window.location.search);
       const demoMode = urlParams.get('demo');
       const practiceId = urlParams.get('practice_id');

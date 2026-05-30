@@ -80,7 +80,9 @@ class OCRService:
                             text_parts.append(clean_text)
                             plate = OCRService._extract_plate_from_text(clean_text)
                             if plate:
-                                confidence = OCRService._safe_confidence(data.get('conf', [])[i])
+                                conf_list = data.get('conf', [])
+                                raw_conf = conf_list[i] if i < len(conf_list) else 0
+                                confidence = OCRService._safe_confidence(raw_conf)
                                 if confidence >= best_confidence:
                                     best_plate = plate
                                     best_confidence = confidence

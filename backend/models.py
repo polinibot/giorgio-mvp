@@ -214,9 +214,9 @@ class Practice(BaseModel):
     updated_by_telegram_id: Optional[int] = None
     status: PracticeStatus
     plate_detected: Optional[str] = None
-    plate_confirmed: str
-    phone: str
-    customer_name: str
+    plate_confirmed: Optional[str] = None
+    phone: Optional[str] = None
+    customer_name: Optional[str] = None
     customer_type: CustomerType
     billing_to_complete: bool
     appointment_date: datetime

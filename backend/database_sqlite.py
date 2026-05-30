@@ -1,5 +1,5 @@
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, Boolean, Float, Enum, text, ForeignKey, Index, event
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, Text, Boolean, Float, Enum, text, ForeignKey, Index, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -43,8 +43,9 @@ class Practice(Base):
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_by_telegram_id = Column(Integer, nullable=False, index=True)
-    updated_by_telegram_id = Column(Integer, nullable=True)
+    # Telegram user IDs already exceed 32-bit and are moving to 64-bit: use BigInteger.
+    created_by_telegram_id = Column(BigInteger, nullable=False, index=True)
+    updated_by_telegram_id = Column(BigInteger, nullable=True)
     status = Column(Enum(PracticeStatus, values_callable=enum_values), default=PracticeStatus.DRAFT)
     plate_detected = Column(String(20), nullable=True)
     plate_confirmed = Column(String(20), nullable=True)
@@ -299,13 +300,15 @@ def create_tables():
                     conn.execute(text("ALTER TABLE practices_new RENAME TO practices"))
                     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_id ON practices (id)"))
                     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_created_by_telegram_id ON practices (created_by_telegram_id)"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_owner_status_created ON practices (created_by_telegram_id, status, created_at)"))
+                    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_owner_status_synced ON practices (created_by_telegram_id, status, synced)"))
                     conn.commit()
                     logger.info("Migrated SQLite: made plate_confirmed, phone, customer_name nullable")
         elif "postgresql" in DATABASE_URL:
             with engine.connect() as conn:
                 res = conn.execute(text("""
-                    SELECT column_name, is_nullable 
-                    FROM information_schema.columns 
+                    SELECT column_name, is_nullable
+                    FROM information_schema.columns
                     WHERE table_name = 'practices' AND column_name IN ('plate_confirmed', 'phone', 'customer_name')
                 """)).fetchall()
                 notnull_cols = [row[0] for row in res if row[1] == 'NO']
@@ -331,6 +334,17 @@ def create_tables():
                 conn.commit()
         logger.info("Migrated: added cloudinary_public_id column to practice_photos")
 
+    # Widen Telegram-id columns to 64-bit on Postgres (SQLite INTEGER is already 64-bit).
+    if "postgresql" in DATABASE_URL:
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE practices ALTER COLUMN created_by_telegram_id TYPE BIGINT"))
+                conn.execute(text("ALTER TABLE practices ALTER COLUMN updated_by_telegram_id TYPE BIGINT"))
+                conn.commit()
+            logger.info("Migrated Postgres: widened telegram id columns to BIGINT")
+        except Exception as e:
+            logger.warning("Postgres BIGINT migration failed (may already be applied): %s", e)
+
     try:
         with engine.connect() as conn:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_practices_owner_status_created ON practices (created_by_telegram_id, status, created_at)"))
@@ -342,7 +356,7 @@ def create_tables():
     except Exception as e:
         logger.warning("Index optimization migration failed (may already exist): %s", e)
 
-    logger.info("Database SQLite creato con successo")
+    logger.info("Database schema initialized successfully")
 
 
 if __name__ == "__main__":

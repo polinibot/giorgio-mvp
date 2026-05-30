@@ -180,7 +180,7 @@ class ApiFlowTests(unittest.TestCase):
             repaired = db.query(Practice).filter(Practice.id == 1).first()
             self.assertEqual(repaired.created_by_telegram_id, self.current_user["id"])
 
-    def test_mini_app_data_repairs_draft_owner_via_plate_compat(self):
+    def test_mini_app_data_rejects_matching_plate_when_owner_differs(self):
         self.seed_practice(practice_id=2, owner_id=555, status=PracticeStatus.DRAFT, plate="AA123BB")
 
         response = self.client.get(
@@ -188,10 +188,10 @@ class ApiFlowTests(unittest.TestCase):
             params={"practice_id": 2, "user_id": self.current_user["id"], "plate_confirmed": "AA123BB"},
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 404)
         with self.SessionLocal() as db:
-            repaired = db.query(Practice).filter(Practice.id == 2).first()
-            self.assertEqual(repaired.created_by_telegram_id, self.current_user["id"])
+            unchanged = db.query(Practice).filter(Practice.id == 2).first()
+            self.assertEqual(unchanged.created_by_telegram_id, 555)
 
     def test_mini_app_data_rejects_wrong_plate_compat_when_owner_differs(self):
         self.seed_practice(practice_id=12, owner_id=555, status=PracticeStatus.DRAFT, plate="AA123BB")

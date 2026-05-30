@@ -21,11 +21,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia codice backend + worker YAP
 COPY backend/ .
 COPY automation/ ./automation
-COPY mini-app/package.json ./mini-app/package.json
-COPY mini-app/package-lock.json ./mini-app/package-lock.json
 
-# Dipendenze Node per worker YAP (Playwright API)
-RUN cd mini-app && npm install --include=dev --no-audit --no-fund
+# Dipendenze Node di runtime per worker YAP (lockfile deterministico, niente dev deps)
+RUN cd automation/yap && npm ci --omit=dev --no-audit --no-fund
 
 # Crea directory storage (before switching user)
 RUN mkdir -p storage/photos temp

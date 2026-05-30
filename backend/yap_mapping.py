@@ -123,9 +123,15 @@ def to_yap_time(time_str: Optional[str]) -> str:
 
 
 def add_minutes(time_str: str, minutes: int) -> str:
-    if not str(time_str or "").strip():
+    raw = str(time_str or "").strip()
+    if not raw:
         return ""
-    h, m = map(int, str(time_str or "00:00").split(":"))
+    # Accept both "HH:MM" and YAP's "HH.MM" separators.
+    normalized = raw.replace(".", ":")
+    try:
+        h, m = map(int, normalized.split(":")[:2])
+    except ValueError:
+        return ""
     dt = datetime(2000, 1, 1, h, m) + timedelta(minutes=minutes)
     return f"{dt.hour:02d}.{dt.minute:02d}"
 

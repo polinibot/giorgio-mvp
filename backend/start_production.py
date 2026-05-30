@@ -5,8 +5,16 @@ import sys
 import time
 
 
-def start_process(args):
-    return subprocess.Popen(args)
+def start_process(args, env=None):
+    return subprocess.Popen(args, env=env)
+
+
+def run_migrations_once():
+    """Run schema creation/migrations a single time before spawning the API and
+    bot, so the two child processes never run destructive DDL concurrently."""
+    from database_sqlite import create_tables
+
+    create_tables()
 
 
 def stop_process(proc):
@@ -21,8 +29,14 @@ def stop_process(proc):
 
 def main():
     port = os.getenv("PORT", "8000")
+
+    # Migrate once, then tell the children to skip migrations.
+    run_migrations_once()
+    child_env = os.environ.copy()
+    child_env["GIORGIO_SKIP_MIGRATIONS"] = "1"
+
     processes = [
-        start_process([sys.executable, "bot.py"]),
+        start_process([sys.executable, "bot.py"], env=child_env),
         start_process([
             sys.executable,
             "-m",
@@ -32,7 +46,7 @@ def main():
             "0.0.0.0",
             "--port",
             port,
-        ]),
+        ], env=child_env),
     ]
 
     try:

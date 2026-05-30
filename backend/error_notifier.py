@@ -38,6 +38,10 @@ class ErrorNotifier:
         Returns:
             True se l'invio è riuscito, False altrimenti
         """
+        self.bot_token = os.getenv("TELEGRAM_BOT_TOKEN", settings.telegram_bot_token)
+        self.channel_id = os.getenv("TELEGRAM_ERROR_CHANNEL_ID", ERROR_CHANNEL_ID)
+        self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
+
         if not self.bot_token or not self.channel_id:
             logger.warning("Telegram bot token o channel ID non configurati. Notifica non inviata.")
             return False
@@ -56,6 +60,31 @@ class ErrorNotifier:
             logger.error(f"Errore nell'invio notifica Telegram: {e}")
             return False
 
+    @staticmethod
+    def _escape_md(value) -> str:
+        """Escape Telegram (legacy) Markdown control chars in inline text."""
+        text = str(value if value is not None else "")
+        for ch in ("\\", "`", "*", "_", "[", "]"):
+            text = text.replace(ch, "\\" + ch)
+        return text
+
+    @staticmethod
+    def _safe_code_block(value) -> str:
+        """Neutralize content placed inside a ``` code block (backticks would
+        otherwise terminate the block early)."""
+        return str(value if value is not None else "").replace("`", "'")
+
+    @staticmethod
+    def _scrub_secrets(value) -> str:
+        text = str(value if value is not None else "")
+        sensitive_markers = ("TOKEN", "SECRET", "PASSWORD", "KEY", "DATABASE_URL", "COOKIE", "SESSION")
+        for env_name, env_value in os.environ.items():
+            if not env_value or len(env_value) < 8:
+                continue
+            if any(marker in env_name.upper() for marker in sensitive_markers):
+                text = text.replace(env_value, f"[REDACTED:{env_name}]")
+        return text
+
     def _format_message(
         self,
         error_message: str,
@@ -63,25 +92,28 @@ class ErrorNotifier:
         context: Optional[dict] = None,
     ) -> str:
         """Formatta il messaggio di errore per Telegram."""
+        esc = self._escape_md
         lines = ["🚨 *Errore YAP Automation*"]
 
         if context:
             if context.get("practice_id"):
-                lines.append(f"📋 Practice ID: `{context['practice_id']}`")
+                lines.append(f"📋 Practice ID: `{esc(context['practice_id'])}`")
             if context.get("customer"):
                 customer = context["customer"]
-                lines.append(f"👤 Cliente: {customer.get('name', 'N/A')} ({customer.get('plate', 'N/A')})")
+                lines.append(f"👤 Cliente: {esc(customer.get('name', 'N/A'))} ({esc(customer.get('plate', 'N/A'))})")
             if context.get("appointment"):
                 appt = context["appointment"]
-                lines.append(f"📅 Appuntamento: {appt.get('date', 'N/A')} {appt.get('time', 'N/A')}")
+                lines.append(f"📅 Appuntamento: {esc(appt.get('date', 'N/A'))} {esc(appt.get('time', 'N/A'))}")
             if context.get("worker"):
-                lines.append(f"🔧 Worker: `{context['worker']}`")
+                lines.append(f"🔧 Worker: `{esc(context['worker'])}`")
 
-        lines.append(f"\n❌ *Errore:*\n```\n{error_message[:500]}\n```")
+        safe_error = self._scrub_secrets(error_message)
+        lines.append(f"\n❌ *Errore:*\n```\n{self._safe_code_block(safe_error[:500])}\n```")
 
         if stack_trace:
-            truncated = stack_trace[:1500] if len(stack_trace) > 1500 else stack_trace
-            lines.append(f"\n📄 *Stack Trace:*\n```\n{truncated}\n```")
+            safe_stack = self._scrub_secrets(stack_trace)
+            truncated = safe_stack[:1500] if len(safe_stack) > 1500 else safe_stack
+            lines.append(f"\n📄 *Stack Trace:*\n```\n{self._safe_code_block(truncated)}\n```")
 
         return "\n".join(lines)
 

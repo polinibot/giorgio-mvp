@@ -16,8 +16,8 @@ import {
   ROOT_DIR,
 } from "./lib/yap-shared.mjs";
 
-const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
-const { chromium } = requireFromMiniApp("playwright");
+const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
+const { chromium } = requireFromYap("playwright");
 
 const ANALYSIS = path.join(path.dirname(fileURLToPath(import.meta.url)), "analysis");
 const ARTIFACTS = path.join(ROOT_DIR, "automation", "artifacts", "yap-readonly");

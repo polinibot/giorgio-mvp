@@ -210,7 +210,10 @@ class TelegramBot:
                 await callback.answer("⚠️ Accesso non autorizzato", show_alert=True)
                 return
 
-            action_data = callback.data.split("_")
+            action_data = (callback.data or "").split("_")
+            if len(action_data) < 3 or not action_data[2].lstrip("-").isdigit():
+                await callback.answer("⚠️ Azione non valida", show_alert=True)
+                return
             action = action_data[1]
             practice_id = int(action_data[2])
 
@@ -288,16 +291,14 @@ class TelegramBot:
                 contexts="officina",
             )
             db.add(practice)
-            db.commit()
-            db.refresh(practice)
+            db.flush()
 
         practice.created_by_telegram_id = telegram_user_id
         practice.updated_by_telegram_id = telegram_user_id
         practice.status = PracticeStatus.DRAFT
         practice.plate_detected = ocr_result.plate
         practice.plate_confirmed = ocr_result.plate if ocr_result.plate else None
-        db.commit()
-        db.refresh(practice)
+        db.flush()
 
         try:
             storage_path, metadata = cloudinary_service.upload_practice_photo(
@@ -467,7 +468,10 @@ class TelegramBot:
 
 
 async def start_bot():
-    create_tables()
+    # Skip schema creation when the supervisor has already migrated, to avoid two
+    # processes running destructive DDL against the same SQLite file concurrently.
+    if not os.getenv("GIORGIO_SKIP_MIGRATIONS"):
+        create_tables()
     bot_instance = TelegramBot()
     await bot_instance.start()
 

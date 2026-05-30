@@ -1,12 +1,9 @@
 import unittest
 from types import SimpleNamespace
 
-from models import PracticeStatus
 from main import (
-    _can_access_draft_via_plate_compat,
     _can_access_practice,
     _repair_practice_owner_if_needed,
-    _repair_practice_owner_via_plate_compat,
 )
 from security import SecurityService
 
@@ -56,26 +53,6 @@ class AuthLogicTests(unittest.TestCase):
 
         self.assertEqual(practice.created_by_telegram_id, 555)
         self.assertEqual(practice.updated_by_telegram_id, 555)
-        self.assertEqual(db.commits, 1)
-        self.assertEqual(db.refreshes, 1)
-
-    def test_draft_plate_compat_only_allows_matching_draft(self):
-        draft = SimpleNamespace(status=PracticeStatus.DRAFT, plate_confirmed="EG487YR")
-        confirmed = SimpleNamespace(status=PracticeStatus.CONFIRMED, plate_confirmed="EG487YR")
-
-        self.assertTrue(_can_access_draft_via_plate_compat(draft, "eg487yr"))
-        self.assertFalse(_can_access_draft_via_plate_compat(draft, "AA111AA"))
-        self.assertFalse(_can_access_draft_via_plate_compat(confirmed, "EG487YR"))
-
-    def test_repair_owner_via_plate_compat_updates_owner(self):
-        practice = SimpleNamespace(id=11, created_by_telegram_id=222, updated_by_telegram_id=None)
-        user_data = {"id": 333}
-        db = FakeDb()
-
-        _repair_practice_owner_via_plate_compat(db, practice, user_data)
-
-        self.assertEqual(practice.created_by_telegram_id, 333)
-        self.assertEqual(practice.updated_by_telegram_id, 333)
         self.assertEqual(db.commits, 1)
         self.assertEqual(db.refreshes, 1)
 

@@ -18,8 +18,8 @@ import {
   clickAgendaEvent,
 } from "./lib/yap-shared.mjs";
 
-const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
-const { chromium } = requireFromMiniApp("playwright");
+const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
+const { chromium } = requireFromYap("playwright");
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const ANALYSIS = path.join(DIR, "analysis");

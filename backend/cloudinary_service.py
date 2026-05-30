@@ -14,18 +14,36 @@ logger = logging.getLogger(__name__)
 # Target max dimensions for compression
 MAX_WIDTH = 1920
 MAX_HEIGHT = 1080
+# Hard cap for the uncompressed fallback upload path
+MAX_FALLBACK_BYTES = 10 * 1024 * 1024  # 10MB
 
 
 class CloudinaryService:
     """Servizio Cloudinary con compressione ottimizzata per foto targhe"""
 
     def __init__(self):
-        # Configura Cloudinary
+        self._configured = False
+
+    def _ensure_configured(self) -> None:
+        missing = [
+            name
+            for name, value in {
+                "CLOUDINARY_CLOUD_NAME": settings.cloudinary_cloud_name,
+                "CLOUDINARY_API_KEY": settings.cloudinary_api_key,
+                "CLOUDINARY_API_SECRET": settings.cloudinary_api_secret,
+            }.items()
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(f"Cloudinary non configurato: mancano {', '.join(missing)}")
+        if self._configured:
+            return
         cloudinary.config(
             cloud_name=settings.cloudinary_cloud_name,
             api_key=settings.cloudinary_api_key,
             api_secret=settings.cloudinary_api_secret
         )
+        self._configured = True
 
     def compress_image(self, image_path: str, quality: int = 80) -> bytes:
         """
@@ -69,9 +87,14 @@ class CloudinaryService:
             raise ValueError(f"Invalid image file: {image_path}") from e
         except Exception as e:
             logger.error("Error compressing image %s: %s", image_path, e)
-            # Fallback: immagine originale
+            # Fallback: immagine originale, ma con cap di dimensione per evitare upload enormi.
             with open(image_path, 'rb') as f:
-                return f.read()
+                data = f.read()
+            if len(data) > MAX_FALLBACK_BYTES:
+                raise ValueError(
+                    f"Image too large and compression failed: {len(data)} bytes (max {MAX_FALLBACK_BYTES})"
+                ) from e
+            return data
 
     def upload_practice_photo(self, image_path: str, practice_id: int, telegram_file_id: str) -> Tuple[str, dict]:
         """
@@ -86,6 +109,7 @@ class CloudinaryService:
             Tuple (URL, metadata upload)
         """
         try:
+            self._ensure_configured()
             # Comprimi immagine
             compressed_image = self.compress_image(image_path, quality=80)
 
@@ -161,6 +185,7 @@ class CloudinaryService:
             True se cancellato con successo
         """
         try:
+            self._ensure_configured()
             result = cloudinary.api.delete_resources([public_id], resource_type="image")
             deleted = result.get('deleted', {}).get(public_id) == 'deleted'
             if deleted:
@@ -203,6 +228,7 @@ class CloudinaryService:
             Info su utilizzo storage
         """
         try:
+            self._ensure_configured()
             result = cloudinary.api.usage()
             return {
                 "storage_used": result.get("storage", {}).get("used", 0),

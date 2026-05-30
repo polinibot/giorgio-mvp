@@ -21,8 +21,8 @@ import {
   launchChromiumWithFallback,
 } from "./lib/yap-shared.mjs";
 
-const requireFromMiniApp = createRequire(new URL("../../mini-app/package.json", import.meta.url));
-const { chromium } = requireFromMiniApp("playwright");
+const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
+const { chromium } = requireFromYap("playwright");
 
 const DELETE_ACTION_ENDPOINT = "/yap/action/PrenotazioneDelAction";
 
@@ -36,7 +36,9 @@ function parseArgs(argv) {
       return argv[i];
     };
     if (arg === "--date") args.date = next();
+    else if (arg.startsWith("--date=")) args.date = arg.slice("--date=".length);
     else if (arg === "--search") args.search = next();
+    else if (arg.startsWith("--search=")) args.search = arg.slice("--search=".length);
     else if (arg === "--headed") args.headed = true;
     else if (arg === "--dry-run") args.dryRun = true;
     else if (arg === "--debug") args.debug = true;
@@ -335,7 +337,7 @@ async function main() {
       headless: !args.headed,
       args: launchArgs,
     },
-    { resolveModule: requireFromMiniApp.resolve.bind(requireFromMiniApp), cwd: ROOT_DIR },
+    { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
   );
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
