@@ -501,7 +501,18 @@ def require_yap_internal_auth(
     x_yap_worker_secret: Optional[str] = Header(None, alias="X-Yap-Worker-Secret"),
 ) -> dict:
     expected_secret = (settings.yap_worker_secret or settings.secret_key).strip()
-    if expected_secret and x_yap_worker_secret:
+    if not expected_secret:
+        # No secret configured — internal endpoint cannot be safely authenticated.
+        # Return 503 (not 401) to signal misconfiguration vs bad credentials,
+        # and to block fallthrough to whitelisted-user auth on this destructive
+        # non-scoped endpoint.
+        logger.error("require_yap_internal_auth: no secret configured - rejecting request")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Endpoint interno non disponibile: secret non configurato",
+        )
+
+    if x_yap_worker_secret:
         if hmac.compare_digest(expected_secret, x_yap_worker_secret):
             return {"id": 0, "first_name": "YAP", "last_name": "Worker", "username": "yap_worker"}
         logger.warning("Rejected YAP internal request with invalid worker secret")
@@ -516,14 +527,9 @@ def require_yap_internal_auth(
     if user_data:
         return user_data
 
-    if expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid worker secret",
-        )
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required",
+        detail="Missing or invalid worker secret",
     )
 
 

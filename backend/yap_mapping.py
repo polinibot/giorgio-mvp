@@ -130,9 +130,10 @@ def add_minutes(time_str: str, minutes: int) -> str:
     normalized = raw.replace(".", ":")
     try:
         h, m = map(int, normalized.split(":")[:2])
+        # datetime raises ValueError for out-of-range h/m (e.g. hour=25).
+        dt = datetime(2000, 1, 1, h, m) + timedelta(minutes=minutes)
     except ValueError:
         return ""
-    dt = datetime(2000, 1, 1, h, m) + timedelta(minutes=minutes)
     return f"{dt.hour:02d}.{dt.minute:02d}"
 
 

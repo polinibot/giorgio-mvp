@@ -1,0 +1,18 @@
+# Normalize all text files to LF on commit.
+# This prevents CRLF/LF churn on diffs when the repo is touched from Windows.
+* text=auto eol=lf
+
+# Windows batch scripts must keep CRLF to run correctly on Windows.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files — never touch line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
