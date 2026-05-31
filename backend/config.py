@@ -10,6 +10,13 @@ logger = logging.getLogger(__name__)
 _BASE_DIR = Path(__file__).resolve().parent
 
 
+def _is_unresolved_placeholder(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    raw = value.strip()
+    return raw.startswith("${") and raw.endswith("}")
+
+
 class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_error_channel_id: str = ""  # Channel ID for error notifications (with -100 prefix)
@@ -42,6 +49,25 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         extra = "ignore"
 
+    @field_validator(
+        "telegram_bot_token",
+        "telegram_error_channel_id",
+        "database_url",
+        "secret_key",
+        "cloudinary_cloud_name",
+        "cloudinary_api_key",
+        "cloudinary_api_secret",
+        "plate_recognizer_token",
+        "yap_worker_secret",
+        mode="before",
+    )
+    @classmethod
+    def reject_unresolved_placeholders(cls, value, info):
+        if _is_unresolved_placeholder(value):
+            logger.warning("%s unresolved placeholder detected: %s", info.field_name.upper(), value)
+            return ""
+        return value
+
     @field_validator("whitelist_telegram_ids", mode="before")
     @classmethod
     def parse_whitelist_ids(cls, value):
@@ -58,7 +84,7 @@ class Settings(BaseSettings):
             if not raw:
                 return []
 
-            if raw.startswith("${") and raw.endswith("}"):
+            if _is_unresolved_placeholder(raw):
                 logger.warning("WHITELIST_TELEGRAM_IDS unresolved placeholder detected: %s", raw)
                 return []
 
@@ -146,7 +172,9 @@ else:
         _fatal.append("SECRET_KEY")
     if not settings.telegram_bot_token:
         _fatal.append("TELEGRAM_BOT_TOKEN")
-    if RUNNING_IN_PRODUCTION and settings.database_url.startswith("sqlite"):
+    if RUNNING_IN_PRODUCTION and (
+        not settings.database_url or settings.database_url.startswith("sqlite")
+    ):
         _fatal.append("DATABASE_URL (must be non-SQLite in production)")
     if RUNNING_IN_PRODUCTION and not settings.whitelist_telegram_ids:
         _fatal.append("WHITELIST_TELEGRAM_IDS")
