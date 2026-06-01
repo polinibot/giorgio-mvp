@@ -226,7 +226,7 @@ function getYapProgressLabel(action, startedAt, fallback = '') {
   const picked = actionHints.reduce((label, [threshold, text]) => (
     elapsed >= threshold ? text : label
   ), fallback || 'Operazione YAP in corso...');
-  return elapsed >= 10 ? `${picked} (${elapsed}s)` : picked;
+  return picked;
 }
 
 function getYapSyncScope(result) {
@@ -1579,14 +1579,13 @@ function App() {
         percent: 100,
       };
     });
-    if (clearDelay > 0) {
-      yapActionProgressClearTimerRef.current = setTimeout(() => {
-        setYapActionProgress((current) => {
-          if (!current || current.status !== status) return current;
-          return null;
-        });
-      }, clearDelay);
-    }
+    const delay = clearDelay <= 0 ? 3500 : clearDelay;
+    yapActionProgressClearTimerRef.current = setTimeout(() => {
+      setYapActionProgress((current) => {
+        if (!current || current.status !== status) return current;
+        return null;
+      });
+    }, delay);
   }, [stopYapActionProgressTimers]);
 
   const updateYapActionProgress = useCallback((patch) => {
@@ -4932,7 +4931,7 @@ function App() {
   return (
     <div className="App">
       <Toast toasts={toasts} removeToast={removeToast} />
-      {yapActionProgress && renderGlobalYapActionProgressBar()}
+      {yapActionProgress && (currentView === 'detail' || currentView === 'form') && renderGlobalYapActionProgressBar()}
       {confirmModal && (
         <ConfirmModal
           title={confirmModal.title}
