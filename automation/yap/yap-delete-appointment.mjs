@@ -17,6 +17,7 @@ import {
   openAgendaInApp,
   gotoAgendaDate,
   ROOT_DIR,
+  waitForYapAction,
   yapContextOptions,
   launchChromiumWithFallback,
 } from "./lib/yap-shared.mjs";
@@ -25,6 +26,40 @@ const requireFromYap = createRequire(new URL("./package.json", import.meta.url))
 const { chromium } = requireFromYap("playwright");
 
 const DELETE_ACTION_ENDPOINT = "/yap/action/PrenotazioneDelAction";
+
+function createDeleteTrace(context = {}) {
+  const startedAtMs = Date.now();
+  const startedAtIso = new Date(startedAtMs).toISOString();
+  const timeline = [];
+
+  const mark = (event, details = {}) => {
+    const entry = {
+      at: new Date().toISOString(),
+      elapsed_ms: Date.now() - startedAtMs,
+      event,
+      ...details,
+    };
+    timeline.push(entry);
+    console.warn(`[delete-trace] ${JSON.stringify(entry)}`);
+    return entry;
+  };
+
+  const fail = (event, error, details = {}) => mark(event, {
+    ...details,
+    error: error instanceof Error ? error.message : String(error || ""),
+  });
+
+  const snapshot = (extra = {}) => ({
+    ...context,
+    started_at: startedAtIso,
+    finished_at: new Date().toISOString(),
+    total_elapsed_ms: Date.now() - startedAtMs,
+    steps: [...timeline],
+    ...extra,
+  });
+
+  return { mark, fail, snapshot };
+}
 
 function parseArgs(argv) {
   const args = { headed: false, dryRun: false, debug: false, freshLogin: false };
@@ -120,12 +155,8 @@ async function clickDeleteAndAcceptNativeDialog(page, locator) {
   }
 }
 
-async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
-  const normalizeText = (t) =>
-    String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
-  const needle = normalizeText(searchTerm);
-
-  const events = await page.evaluate(() => {
+async function listVisibleAgendaEvents(page) {
+  return page.evaluate(() => {
     return [...document.querySelectorAll(".fc-time-grid-event, .fc-event")]
       .filter((el) => {
         const rect = el.getBoundingClientRect();
@@ -144,13 +175,29 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
       })
       .filter((ev) => ev.title);
   });
+}
+
+async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug = false, trace = null) {
+  const normalizeText = (t) =>
+    String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const needle = normalizeText(searchTerm);
+
+  trace?.mark("agenda_scan_started", { search: searchTerm, date: dateIso });
+  const events = await listVisibleAgendaEvents(page);
+  trace?.mark("agenda_scan_completed", { event_count: events.length });
 
   const match = events.find((ev) => normalizeText(ev.title).includes(needle));
   if (!match) {
+    trace?.mark("appointment_not_found_in_visible_events", { visible_titles: events.map((event) => event.title).slice(0, 12) });
     return { found: false, searched: searchTerm, events: events.map((e) => e.title) };
   }
+  trace?.mark("appointment_match_found", {
+    matched_title: match.title,
+    matched_time: match.time || null,
+  });
 
   if (dryRun) {
+    trace?.mark("dry_run_completed", { matched_title: match.title });
     return { found: true, dryRun: true, event: match, deleted: false };
   }
 
@@ -184,14 +231,16 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
 
   // Chiudi eventuali tooltip/popup esistenti prima di cliccare sull'evento
   await page.keyboard.press("Escape");
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(150);
   // Click su area neutra (intestazione ore, lontana da eventi e sidebar)
   await page.mouse.click(300, 128);
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(150);
 
+  trace?.mark("opening_appointment_details", { x: Math.round(match.x), y: Math.round(match.y) });
   await page.mouse.click(match.x, match.y);
   await page.getByText("Dettagli appuntamento").first().waitFor({ state: "visible", timeout: 15000 });
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(150);
+  trace?.mark("appointment_details_opened");
 
   // Usa page.locator per cliccare su "Elimina appuntamento" — GWT richiede click reale Playwright
   const elimLocator = page.locator(".gwt-DecoratedPopupPanel a.gwt-Anchor").filter({ hasText: /Elimina/i });
@@ -202,64 +251,74 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
     const screenshotPath = path.join(ROOT_DIR, "automation", "artifacts", "yap", `delete-popup-${Date.now()}.png`);
     await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
     await page.screenshot({ path: screenshotPath, fullPage: false });
+    trace?.mark("delete_anchor_missing", { screenshot: screenshotPath });
     throw new Error(`Anchor Elimina non trovato nel popup. Screenshot: ${screenshotPath}`);
   }
-  const dialogMessages = await clickDeleteAndAcceptNativeDialog(page, elimLocator.first());
+  let dialogMessages = [];
+  trace?.mark("delete_action_click_started");
+  const rpcSeen = waitForYapAction(
+    page,
+    "PrenotazioneDelAction",
+    async () => {
+      dialogMessages = await clickDeleteAndAcceptNativeDialog(page, elimLocator.first());
+    },
+    4500,
+  ).then(() => true).catch(() => false);
 
-  // Screenshot a 300ms, 1000ms, 2000ms dopo click Elimina per catturare dialog conferma
-  for (const delay of [300, 700, 1000]) {
-    await page.waitForTimeout(delay);
-    const midPath = path.join(ROOT_DIR, "automation", "artifacts", "yap", `after-elimina-${delay}ms-${Date.now()}.png`);
+  if (debug) {
+    await page.waitForTimeout(350);
+    const midPath = path.join(ROOT_DIR, "automation", "artifacts", "yap", `after-elimina-${Date.now()}.png`);
     await fs.mkdir(path.dirname(midPath), { recursive: true });
     await page.screenshot({ path: midPath, fullPage: false });
-    console.warn(`[debug] t+${delay}ms: ${midPath}`);
-    // Se appare un popup intanto, esci dal loop
-    const msg = await visibleYapMessage(page);
-    if (msg) { console.warn(`[debug] t+${delay}ms popup: ${msg.slice(0, 120)}`); break; }
+    console.warn(`[debug] dopo click elimina: ${midPath}`);
+    trace?.mark("debug_screenshot_after_delete_click", { screenshot: midPath });
   }
 
   let visibleMessage = "";
+  let confirmLoopIterations = 0;
 
-  // Aspetta la RPC delete tramite waitForRequest (event-driven, non polling)
-  // oppure un dialog di conferma che va cliccato prima
-  const waitForRpc = page.waitForRequest(
-    (req) => req.url().includes(DELETE_ACTION_ENDPOINT),
-    { timeout: 10000 }
-  ).then(() => "rpc").catch(() => "rpc_timeout");
-
-  // Controlla anche se arriva prima un dialog di conferma
-  let raceResult = "timeout";
-  for (let i = 0; i < 6; i++) {
-    await page.waitForTimeout(600);
-    if (deleteRpcRequest) { raceResult = "rpc"; break; }
+  for (let i = 0; i < 8; i += 1) {
+    confirmLoopIterations = i + 1;
+    await page.waitForTimeout(180);
+    if (deleteRpcRequest) break;
     visibleMessage = await visibleYapMessage(page);
-    if (classifyDeleteFailure(visibleMessage)) { raceResult = "error"; break; }
+    if (classifyDeleteFailure(visibleMessage)) break;
     const confirmed = await clickDeleteConfirmIfPresent(page);
-    if (confirmed) { raceResult = "confirmed"; break; }
+    if (confirmed) {
+      await page.waitForTimeout(180);
+      break;
+    }
   }
 
-  // Se c'era un dialog di conferma, aspetta ora la RPC
-  if (raceResult === "confirmed" || raceResult === "timeout") {
-    await Promise.race([waitForRpc, page.waitForTimeout(8000)]);
+  if (!deleteRpcRequest) {
+    trace?.mark("waiting_for_delete_rpc_after_confirm_loop", { iterations: confirmLoopIterations });
+    await Promise.race([rpcSeen, page.waitForTimeout(2200)]);
   }
 
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(deleteRpcRequest ? 220 : 420);
   visibleMessage = visibleMessage || await visibleYapMessage(page);
+  trace?.mark("delete_action_wait_completed", {
+    rpc_detected: !!deleteRpcRequest,
+    confirm_iterations: confirmLoopIterations,
+    visible_message: visibleMessage || null,
+    dialog_count: dialogMessages.length,
+  });
   page.off("request", onRequest);
   page.off("response", onResponse);
 
-  if (!page.url().includes("#!agenda")) {
+  let afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
+  let stillPresent = afterEvents.some((event) => event.title.toLowerCase().includes(searchTerm.toLowerCase()));
+  if (stillPresent || !page.url().includes("#!agenda")) {
+    trace?.mark("reopening_agenda_for_verification", {
+      still_present_before_reopen: stillPresent,
+      current_url: page.url(),
+    });
     await openAgendaInApp(page);
+    await gotoAgendaDate(page, dateIso);
+    await page.waitForTimeout(250);
+    afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
+    stillPresent = afterEvents.some((event) => event.title.toLowerCase().includes(searchTerm.toLowerCase()));
   }
-  await gotoAgendaDate(page, dateIso);
-  await page.waitForTimeout(600);
-
-  const afterEvents = await page.evaluate(() =>
-    [...document.querySelectorAll(".fc-time-grid-event, .fc-event")]
-      .filter((el) => el.getBoundingClientRect().width > 2)
-      .map((el) => (el.querySelector(".fc-title") || el).textContent.trim())
-  );
-  const stillPresent = afterEvents.some((t) => t.toLowerCase().includes(searchTerm.toLowerCase()));
   const failureStatus = stillPresent
     ? classifyDeleteFailure(deleteRpcResponse?.body || visibleMessage)
     : null;
@@ -271,6 +330,13 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
       reason: "L'appuntamento e' collegato a un ordine di lavoro. Prima elimina l'ODL, poi rilancia questo script.",
     }
     : null;
+
+  trace?.mark("delete_verification_completed", {
+    still_present: stillPresent,
+    failure_status: failureStatus,
+    response_status: deleteRpcResponse?.status ?? null,
+    verified_event_count: afterEvents.length,
+  });
 
   return {
     found: true,
@@ -291,6 +357,15 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso) {
         : "Richiesta delete inviata ma evento ancora visibile in agenda."
       : undefined,
     repairHint,
+    telemetry: {
+      dialogMessages,
+      rpcDetected: !!deleteRpcRequest,
+      trace: trace?.snapshot({
+        rpc_request_detected: !!deleteRpcRequest,
+        rpc_response_status: deleteRpcResponse?.status ?? null,
+        final_status: stillPresent ? (failureStatus || "not_deleted") : "deleted",
+      }),
+    },
   };
 }
 
@@ -341,37 +416,72 @@ async function main() {
   );
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
+  const trace = createDeleteTrace({
+    worker: "yap-delete-appointment.mjs",
+    search: args.search,
+    date: args.date,
+    debug: !!args.debug,
+    fresh_login: !!args.freshLogin,
+    dry_run: !!args.dryRun,
+  });
 
   try {
+    trace.mark("browser_ready", { headed: !!args.headed, fresh_login: !!args.freshLogin });
     if (hasCredentials) {
+      trace.mark("login_started", { mode: "credentials" });
       await loginYap(page, user, pass);
+      trace.mark("login_completed");
     } else {
       // Prova sessione esistente senza forzare login.
+      trace.mark("login_skipped_using_existing_session");
       await openAgendaInApp(page);
     }
+    trace.mark("agenda_open_requested");
     await openAgendaInApp(page);
+    trace.mark("agenda_open_completed");
+    trace.mark("agenda_date_navigation_started", { date: args.date });
     await gotoAgendaDate(page, args.date);
+    trace.mark("agenda_date_navigation_completed", { date: args.date });
 
-    const result = await findAndDeleteAppointment(page, args.search, args.dryRun, args.date);
+    const result = await findAndDeleteAppointment(page, args.search, args.dryRun, args.date, args.debug, trace);
+    trace.mark("delete_flow_completed", { final_status: result.status || (result.deleted ? "deleted" : "unknown") });
 
     let screenshotPath = null;
     if (args.debug || result.status === "unknown_yap_error") {
       screenshotPath = path.join(ROOT_DIR, "automation", "artifacts", "yap", `after-delete-${args.date}-${Date.now()}.png`);
       await fs.mkdir(path.dirname(screenshotPath), { recursive: true });
       await page.screenshot({ path: screenshotPath, fullPage: true });
+      trace.mark("final_screenshot_saved", { screenshot: screenshotPath });
     }
 
-    console.log(JSON.stringify({ ok: true, date: args.date, search: args.search, screenshot: screenshotPath, ...result }, null, 2));
+    console.log(JSON.stringify({
+      ok: true,
+      date: args.date,
+      search: args.search,
+      screenshot: screenshotPath,
+      ...result,
+      telemetry: {
+        ...(result.telemetry || {}),
+        trace: trace.snapshot({
+          outcome: result.status || (result.deleted ? "deleted" : "unknown"),
+          screenshot: screenshotPath,
+        }),
+      },
+    }, null, 2));
   } catch (error) {
+    trace.fail("delete_flow_failed", error);
     const errorSuffix = `${args.search}-${Date.now()}`;
     const errorScreenshotPath = path.join(ROOT_DIR, "automation", "artifacts", "yap", `error-delete-${errorSuffix}.png`);
     try {
       await page.screenshot({ path: errorScreenshotPath, fullPage: true });
       error.screenshotPath = errorScreenshotPath;
       console.warn(`Screenshot dell'errore salvato in: ${errorScreenshotPath}`);
+      trace.mark("error_screenshot_saved", { screenshot: errorScreenshotPath });
     } catch (screenshotError) {
       console.warn(`Fallito screenshot dell'errore: ${screenshotError.message}`);
+      trace.fail("error_screenshot_failed", screenshotError);
     }
+    error.deleteTrace = trace.snapshot({ screenshot: error.screenshotPath || null });
     throw error;
   } finally {
     await context.close();
@@ -425,6 +535,7 @@ main().catch(async (err) => {
     error: err.message,
     stack: err.stack,
     screenshot: err.screenshotPath || null,
+    telemetry: err.deleteTrace ? { trace: err.deleteTrace } : undefined,
   }, null, 2));
   process.exit(1);
 });

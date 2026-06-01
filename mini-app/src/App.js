@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, startTransition } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import axios from 'axios';
 import DatePicker from 'react-datepicker';
@@ -206,8 +206,10 @@ function getYapProgressLabel(action, startedAt, fallback = '') {
     ],
     delete: [
       [0, 'YAP: ricerca appuntamento da eliminare...'],
-      [15, 'YAP: eliminazione appuntamento in corso...'],
-      [35, 'YAP: conferma eliminazione e cleanup locale...'],
+      [6, 'YAP: apertura dettagli appuntamento...'],
+      [14, 'YAP: conferma eliminazione in corso...'],
+      [24, 'YAP: verifica rimozione appuntamento...'],
+      [40, 'YAP: pulizia locale e refresh lista...'],
       [60, 'YAP: eliminazione lenta, attendo risposta del portale...'],
     ],
   };
@@ -2390,24 +2392,25 @@ function App() {
       invalidatePracticeCaches(id);
       const phaseLabel = summarizePhaseTimeline(data.phase_timeline, data.message || 'Eliminazione YAP completata.');
       if (data.status === 'deleted' || data.status === 'not_found') {
+        finishYapActionProgress(phaseLabel, 'success', 1200);
         addToast(data.status === 'not_found' ? 'Appuntamento già assente su YAP. Pratica rimossa.' : 'Appuntamento eliminato da YAP', 'success');
+        setPractices((current) => current.filter((practiceItem) => String(practiceItem.id) !== String(id)));
         if (String(selectedPracticeId || '') === String(id)) {
           setCurrentView('dashboard');
           setNavigationStack([]);
           setSelectedPracticeId(null);
           setDetailData(null);
         }
-        await loadDashboard(searchQuery, activeFilters);
+        startTransition(() => {
+          loadDashboard(searchQuery, activeFilters);
+        });
       } else if (data.status === 'blocked_by_odl') {
+        finishYapActionProgress(phaseLabel, 'error', 0);
         addToast('Impossibile eliminare: associato a ordine di lavoro', 'warning');
       } else {
+        finishYapActionProgress(phaseLabel, 'success', 1200);
         addToast(data.message || `Delete YAP: ${data.status}`, 'info');
       }
-      finishYapActionProgress(
-        phaseLabel,
-        ['delete_failed', 'blocked_by_odl'].includes(data.status) ? 'error' : 'success',
-        ['delete_failed', 'blocked_by_odl'].includes(data.status) ? 0 : 1200,
-      );
       return data;
     } catch (err) {
       rememberError('yap.delete', err);
@@ -2484,6 +2487,27 @@ function App() {
             className="upload-progress-bar-fill"
             style={{ width: `${Math.max(0, Math.min(100, yapActionProgress.percent))}%` }}
           />
+        </div>
+      </div>
+    );
+  };
+
+  const renderGlobalYapActionProgressBar = () => {
+    if (!yapActionProgress) return null;
+    return (
+      <div className="yap-global-progress-shell">
+        <div className={`yap-action-progress yap-global-progress ${yapActionProgress.status === 'error' ? 'save-progress-error' : yapActionProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
+          <div className="save-progress-header">
+            {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
+            <span className="save-progress-label">{yapActionProgress.label}</span>
+            <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
+          </div>
+          <div className="upload-progress-bar" aria-hidden="true">
+            <div
+              className="upload-progress-bar-fill"
+              style={{ width: `${Math.max(0, Math.min(100, yapActionProgress.percent))}%` }}
+            />
+          </div>
         </div>
       </div>
     );
@@ -4889,6 +4913,7 @@ function App() {
   return (
     <div className="App">
       <Toast toasts={toasts} removeToast={removeToast} />
+      {yapActionProgress?.action === 'delete' && renderGlobalYapActionProgressBar()}
       {confirmModal && (
         <ConfirmModal
           title={confirmModal.title}

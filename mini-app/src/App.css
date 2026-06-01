@@ -1256,6 +1256,22 @@ h2 {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.yap-global-progress-shell {
+  position: sticky;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  z-index: 40;
+  padding: 10px 16px 0;
+  pointer-events: none;
+}
+
+.yap-global-progress {
+  max-width: 760px;
+  margin: 0 auto;
+  box-shadow: var(--shadow-card);
+  pointer-events: auto;
+  backdrop-filter: blur(10px);
+}
+
 .yap-result-action {
   border: 1px solid var(--border-subtle);
   background: rgba(255, 255, 255, 0.06);

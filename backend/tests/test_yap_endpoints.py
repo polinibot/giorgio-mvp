@@ -360,6 +360,13 @@ class TestYapSyncEndpoints:
                 "found": False,
                 "deleted": False,
                 "status": "not_found",
+                "telemetry": {
+                    "runner": {
+                        "script": "yap-delete-appointment.mjs",
+                        "lock_wait_ms": 12,
+                        "total_elapsed_ms": 240,
+                    },
+                },
             }
 
         monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
@@ -373,6 +380,12 @@ class TestYapSyncEndpoints:
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["status"] == "not_found"
+        assert isinstance(data.get("phase_timeline"), list)
+        assert all(item.get("started_at") for item in data["phase_timeline"])
+        assert all(item.get("finished_at") for item in data["phase_timeline"])
+        assert data["timing"]["started_at"]
+        assert data["timing"]["finished_at"]
+        assert data["yap"]["telemetry"]["runner"]["lock_wait_ms"] == 12
 
         listed = client.get("/api/practices?user_id=761118078")
         assert listed.status_code == 200

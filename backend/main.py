@@ -73,6 +73,10 @@ from yap_field_map import build_full_field_mapping
 
 logger = logging.getLogger(__name__)
 
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
 if not _SLOWAPI_AVAILABLE:
     logger.warning(
         "slowapi is not installed: rate limiting is DISABLED (no-op limiter in use). "
@@ -1429,9 +1433,23 @@ def _build_yap_failure_detail(out: str, err: str) -> dict:
 
 
 async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180, db: Optional[Session] = None) -> Dict[str, Any]:
+    queued_started_at = _utc_now_iso()
+    queued_started_monotonic = time.perf_counter()
+
     async with _get_yap_run_lock():
+        lock_acquired_at = _utc_now_iso()
+        lock_acquired_monotonic = time.perf_counter()
+        lock_wait_ms = int((lock_acquired_monotonic - queued_started_monotonic) * 1000)
         root = _project_root()
         script_path = os.path.join(root, "automation", "yap", script_name)
+        logger.info(
+            "YAP script lock acquired (%s) queued_at=%s acquired_at=%s lock_wait_ms=%d args=%s",
+            script_name,
+            queued_started_at,
+            lock_acquired_at,
+            lock_wait_ms,
+            args,
+        )
 
         # Serializziamo l'accesso al session-state condiviso.
         # NB: usiamo una sessione DB dedicata (non quella della request) così che il
@@ -1454,11 +1472,21 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
             finally:
                 state_db.close()
 
-        async def _run_once(extra_env: Optional[Dict[str, str]] = None) -> tuple[int, str, str]:
+        async def _run_once(extra_env: Optional[Dict[str, str]] = None) -> tuple[int, str, str, Dict[str, Any]]:
             node_bin = os.getenv("NODE_BINARY") or (_shutil.which("node") or _shutil.which("nodejs") or "node")
             env = os.environ.copy()
             if extra_env:
                 env.update(extra_env)
+            attempt_name = "safe_mode_retry" if extra_env and extra_env.get("YAP_SAFE_MODE") == "1" else "primary"
+            attempt_started_at = _utc_now_iso()
+            attempt_started_monotonic = time.perf_counter()
+            logger.info(
+                "YAP script starting (%s) attempt=%s started_at=%s timeout_seconds=%d",
+                script_name,
+                attempt_name,
+                attempt_started_at,
+                timeout_seconds,
+            )
             process = await asyncio.create_subprocess_exec(
                 node_bin,
                 script_path,
@@ -1473,12 +1501,39 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
             except asyncio.TimeoutError:
                 process.kill()
                 await process.communicate()
+                logger.error(
+                    "YAP script timeout (%s) attempt=%s started_at=%s timeout_seconds=%d",
+                    script_name,
+                    attempt_name,
+                    attempt_started_at,
+                    timeout_seconds,
+                )
                 raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Timeout automazione YAP")
+            attempt_finished_at = _utc_now_iso()
+            duration_ms = int((time.perf_counter() - attempt_started_monotonic) * 1000)
             out_text = stdout.decode("utf-8", errors="replace").strip()
             err_text = stderr.decode("utf-8", errors="replace").strip()
-            return process.returncode, out_text, err_text
+            logger.info(
+                "YAP script finished (%s) attempt=%s returncode=%d duration_ms=%d finished_at=%s",
+                script_name,
+                attempt_name,
+                process.returncode,
+                duration_ms,
+                attempt_finished_at,
+            )
+            if err_text:
+                logger.info("YAP script diagnostics (%s/%s):\n%s", script_name, attempt_name, err_text[-4000:])
+            return process.returncode, out_text, err_text, {
+                "attempt": attempt_name,
+                "started_at": attempt_started_at,
+                "finished_at": attempt_finished_at,
+                "duration_ms": duration_ms,
+                "returncode": process.returncode,
+            }
 
-        returncode, out, err = await _run_once()
+        attempts: List[Dict[str, Any]] = []
+        returncode, out, err, attempt_meta = await _run_once()
+        attempts.append(attempt_meta)
 
         if persist_session_state and os.path.exists(session_file_path):
             state_db = SessionLocal()
@@ -1520,7 +1575,8 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
             is_recoverable = any(signal in message_lc for signal in recoverable_signals)
             if is_recoverable:
                 logger.warning("YAP script recoverable failure (%s), retrying once in safe mode", script_name)
-                retry_code, retry_out, retry_err = await _run_once({"YAP_SAFE_MODE": "1"})
+                retry_code, retry_out, retry_err, retry_attempt_meta = await _run_once({"YAP_SAFE_MODE": "1"})
+                attempts.append(retry_attempt_meta)
                 if retry_code == 0:
                     out = retry_out
                     err = retry_err
@@ -1529,8 +1585,20 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                     out = retry_out
                     err = retry_err
 
+        runner_meta = {
+            "script": script_name,
+            "queued_at": queued_started_at,
+            "lock_acquired_at": lock_acquired_at,
+            "lock_wait_ms": lock_wait_ms,
+            "timeout_seconds": timeout_seconds,
+            "attempts": attempts,
+            "finished_at": _utc_now_iso(),
+            "total_elapsed_ms": int((time.perf_counter() - queued_started_monotonic) * 1000),
+        }
+
         if returncode != 0:
             failure_detail = _build_yap_failure_detail(out, err)
+            failure_detail["runner"] = runner_meta
             logger.error(
                 "YAP script failed (%s): %s",
                 script_name,
@@ -1547,8 +1615,13 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
 
         parsed = _extract_json_blob(out)
         if parsed:
+            telemetry = parsed.get("telemetry")
+            if isinstance(telemetry, dict):
+                telemetry.setdefault("runner", runner_meta)
+            else:
+                parsed["telemetry"] = {"runner": runner_meta}
             return parsed
-        return {"ok": True, "raw": out}
+        return {"ok": True, "raw": out, "telemetry": {"runner": runner_meta}}
 
 
 @app.patch("/api/practices/{practice_id}/sync")
@@ -2529,19 +2602,25 @@ async def delete_practice_yap_appointment(
 
     phase_timeline: List[Dict[str, Any]] = []
     phase_started_at = time.perf_counter()
+    phase_started_wall = datetime.now(timezone.utc)
+    request_started_at = phase_started_wall.isoformat()
 
     def close_phase(name: str, status_value: str, message: Optional[str] = None) -> None:
-        nonlocal phase_started_at
+        nonlocal phase_started_at, phase_started_wall
         now = time.perf_counter()
+        wall_now = datetime.now(timezone.utc)
         phase: Dict[str, Any] = {
             "name": name,
             "status": status_value,
+            "started_at": phase_started_wall.isoformat(),
+            "finished_at": wall_now.isoformat(),
             "duration_ms": int((now - phase_started_at) * 1000),
         }
         if message:
             phase["message"] = message
         phase_timeline.append(phase)
         phase_started_at = now
+        phase_started_wall = wall_now
 
     date_iso = body.date or _practice_date_iso(practice)
     search = _safe_search_arg(body.search or practice.plate_confirmed or practice.customer_name)
@@ -2583,6 +2662,11 @@ async def delete_practice_yap_appointment(
             "action_target": action_meta["action_target"] if status_value in {"delete_failed", "blocked_by_odl"} else None,
             "retryable": action_meta["retryable"] if status_value in {"delete_failed", "blocked_by_odl"} else False,
             "phase_timeline": phase_timeline,
+            "timing": {
+                "started_at": request_started_at,
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+                "total_elapsed_ms": sum(int(phase.get("duration_ms") or 0) for phase in phase_timeline),
+            },
             "yap": result,
         },
     )
