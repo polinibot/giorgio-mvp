@@ -2404,7 +2404,13 @@ async def sync_practice_to_yap(
             if body.fresh_login:
                 audit_args.append("--fresh-login")
             try:
-                audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=90, db=db)
+                # L'audit profondo (apertura pratica + ODL) richiede ~110s sui casi
+                # multi-reparto. Con il vecchio budget di 90s veniva ucciso a metà e
+                # restituiva YAP_AUDIT_INCOMPLETE / audit_not_completed pur essendo la
+                # scrittura andata a buon fine. Budget portato a 180s (l'endpoint
+                # standalone "Verifica YAP" usa 240s) così l'audit inline chiude e lo
+                # stato diventa complete_synced senza dover premere Verifica YAP a mano.
+                audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=180, db=db)
                 close_phase("audit", "completed", "Audit YAP completato.")
             except HTTPException as audit_exc:
                 logger.warning("Audit post-sync non riuscito per pratica %d: %s", practice_id, audit_exc.detail)
