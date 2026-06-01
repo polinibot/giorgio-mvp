@@ -1,10 +1,17 @@
 import logging
 import os
 import json
+import sys
 from pathlib import Path
 from pydantic_settings import BaseSettings
 from pydantic import field_validator
 from typing import Any, List
+
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        format="%(levelname)s:%(name)s:%(message)s",
+    )
 
 logger = logging.getLogger(__name__)
 _BASE_DIR = Path(__file__).resolve().parent
@@ -15,6 +22,11 @@ def _is_unresolved_placeholder(value: Any) -> bool:
         return False
     raw = value.strip()
     return raw.startswith("${") and raw.endswith("}")
+
+
+def _emit_startup_fatal(message: str) -> None:
+    logger.critical(message)
+    print(message, file=sys.stderr, flush=True)
 
 
 class Settings(BaseSettings):
@@ -160,7 +172,9 @@ else:
     logger.info("All critical configuration validated successfully.")
 
 if DEBUG and RUNNING_IN_PRODUCTION:
-    raise RuntimeError("DEBUG=True is not allowed in production environments")
+    message = "DEBUG=True is not allowed in production environments"
+    _emit_startup_fatal(message)
+    raise RuntimeError(message)
 
 if DEBUG:
     logger.info("Running in DEBUG mode.")
@@ -179,7 +193,9 @@ else:
     if RUNNING_IN_PRODUCTION and not settings.whitelist_telegram_ids:
         _fatal.append("WHITELIST_TELEGRAM_IDS")
     if _fatal:
-        raise RuntimeError(
+        message = (
             "Missing required configuration in production (DEBUG=False): "
             + ", ".join(_fatal)
         )
+        _emit_startup_fatal(message)
+        raise RuntimeError(message)
