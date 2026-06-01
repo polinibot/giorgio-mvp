@@ -4403,7 +4403,6 @@ function App() {
               🗑 Elimina
             </button>
           </div>
-          {renderYapActionProgressBar(practice.id)}
         </div>
 
         {lightboxPhoto && <Lightbox src={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}

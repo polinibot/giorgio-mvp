@@ -1235,7 +1235,7 @@ async function runYapAutomation(job, args) {
   const password = ensureEnv("YAP_PASSWORD");
   await fs.mkdir(args.artifactDir, { recursive: true });
   const safeMode = String(process.env.YAP_SAFE_MODE || "").trim() === "1";
-  const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+  const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote"];
   if (safeMode) {
     launchArgs.push(
       "--disable-gpu",
@@ -1545,3 +1545,4 @@ main().catch(async (error) => {
   }, null, 2));
   process.exit(1);
 });
+                                      
