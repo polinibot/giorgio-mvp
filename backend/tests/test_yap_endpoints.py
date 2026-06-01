@@ -275,6 +275,54 @@ class TestYapSyncEndpoints:
         assert any(item.get("name") == "audit" and item.get("status") == "skipped" for item in data["phase_timeline"])
         assert data["write_report"]["notes"]["error"] == "notes_field_not_found"
 
+    def test_yap_sync_surfaces_worker_phase_details_on_timeout(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+        from automation_service import AutomationService
+
+        monkeypatch.setattr(
+            AutomationService,
+            "pre_sync_check",
+            staticmethod(lambda payload: {"ready": True, "score": 92, "issues": [], "warnings": []}),
+        )
+
+        async def fake_run_yap_script(*args, **kwargs):
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "message": "Timeout automazione YAP",
+                    "reason": "timeout during odl",
+                    "error_code": "YAP_TIMEOUT",
+                    "failed_phase": "odl",
+                    "retryable": True,
+                    "next_action": "Riprova sync",
+                    "action_target": "sync",
+                    "worker_phases": [
+                        {"phase": "login", "status": "done", "elapsed_ms": 4200},
+                        {"phase": "odl", "status": "starting", "elapsed_ms": 151000},
+                    ],
+                    "runner": {"timeout_seconds": 150, "total_elapsed_ms": 151234},
+                    "stderr_tail": "{\"event\":\"yap:phase\",\"phase\":\"odl\"}",
+                },
+            )
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/sync?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "sync_failed"
+        assert data["failed_phase"] == "odl"
+        assert data["worker_phases"][-1]["phase"] == "odl"
+        assert data["runner"]["timeout_seconds"] == 150
+        assert "yap:phase" in data["stderr_tail"]
+
     @pytest.mark.parametrize(
         "audit_status,expected_synced",
         [

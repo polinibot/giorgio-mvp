@@ -1470,6 +1470,12 @@ def _build_yap_failure_detail(out: str, err: str) -> dict:
     return detail
 
 
+class _YapScriptTimeout(Exception):
+    def __init__(self, detail: Dict[str, Any]):
+        super().__init__(str(detail.get("message") or "Timeout automazione YAP"))
+        self.detail = detail
+
+
 async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180, db: Optional[Session] = None) -> Dict[str, Any]:
     queued_started_at = _utc_now_iso()
     queued_started_monotonic = time.perf_counter()
@@ -1550,7 +1556,12 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
             except asyncio.TimeoutError:
                 process.kill()
-                await process.communicate()
+                stdout, stderr = await process.communicate()
+                out_text = stdout.decode("utf-8", errors="replace").strip()
+                err_text = stderr.decode("utf-8", errors="replace").strip()
+                duration_ms = int((time.perf_counter() - attempt_started_monotonic) * 1000)
+                worker_phases = _extract_yap_phases(err_text)
+                last_phase = worker_phases[-1] if worker_phases else {}
                 logger.error(
                     "YAP script timeout (%s) attempt=%s started_at=%s timeout_seconds=%d",
                     script_name,
@@ -1558,7 +1569,29 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                     attempt_started_at,
                     timeout_seconds,
                 )
-                raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Timeout automazione YAP")
+                raise _YapScriptTimeout(
+                    {
+                        "message": "Timeout automazione YAP",
+                        "error": "Timeout automazione YAP",
+                        "reason": f"timeout during {last_phase.get('phase') or 'worker_execution'}",
+                        "error_code": "YAP_TIMEOUT",
+                        "failed_phase": last_phase.get("phase") or "write_or_audit",
+                        "retryable": True,
+                        "next_action": "Riprova sync",
+                        "action_target": "sync",
+                        "worker_phases": worker_phases,
+                        "runner": {
+                            "attempt": attempt_name,
+                            "started_at": attempt_started_at,
+                            "finished_at": _utc_now_iso(),
+                            "duration_ms": duration_ms,
+                            "returncode": None,
+                            "timeout_seconds": timeout_seconds,
+                        },
+                        "stderr_tail": err_text[-3000:],
+                        "stdout_tail": out_text[-2000:],
+                    }
+                )
             attempt_finished_at = _utc_now_iso()
             duration_ms = int((time.perf_counter() - attempt_started_monotonic) * 1000)
             out_text = stdout.decode("utf-8", errors="replace").strip()
@@ -1582,7 +1615,22 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
             }
 
         attempts: List[Dict[str, Any]] = []
-        returncode, out, err, attempt_meta = await _run_once()
+        try:
+            returncode, out, err, attempt_meta = await _run_once()
+        except _YapScriptTimeout as timeout_exc:
+            timeout_detail = dict(timeout_exc.detail or {})
+            timeout_detail["runner"] = {
+                "script": script_name,
+                "queued_at": queued_started_at,
+                "lock_acquired_at": lock_acquired_at,
+                "lock_wait_ms": lock_wait_ms,
+                "timeout_seconds": timeout_seconds,
+                "attempts": [],
+                "finished_at": _utc_now_iso(),
+                "total_elapsed_ms": int((time.perf_counter() - queued_started_monotonic) * 1000),
+                **(timeout_detail.get("runner") or {}),
+            }
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=timeout_detail)
         attempts.append(attempt_meta)
 
         if persist_session_state and os.path.exists(session_file_path):
@@ -2414,6 +2462,9 @@ async def sync_practice_to_yap(
                     "retryable": bool(detail.get("retryable", action_meta["retryable"])),
                     "failed_phase": detail.get("failed_phase") or action_meta["failed_phase"],
                     "debug_ref": detail.get("debug_ref"),
+                    "worker_phases": detail.get("worker_phases") or [],
+                    "runner": detail.get("runner"),
+                    "stderr_tail": detail.get("stderr_tail"),
                     "audit": None,
                     "preSync": check,
                     "phase_timeline": phase_timeline,

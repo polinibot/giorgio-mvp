@@ -723,6 +723,38 @@ async function clickRepartoSection(page, reparto) {
   }, needle).catch(() => false);
 }
 
+async function waitForPracticeWorkspaceReady(page, timeout = 1800) {
+  return page.waitForFunction(() => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const editables = [...document.querySelectorAll("textarea, input[type='text'], input[type='number'], input:not([type]), [contenteditable='true'], [role='textbox']")]
+      .filter(isVisible)
+      .filter((el) => !el.disabled && !el.readOnly);
+    if (editables.length > 0) return true;
+    const bodyText = (document.body?.innerText || "").toLowerCase();
+    return /dettagli pratica|ordini di lavoro|preventivi|annotazioni|note/.test(bodyText);
+  }, null, { timeout }).then(() => true).catch(() => false);
+}
+
+async function waitForOdlWorkspaceReady(page, timeout = 1800) {
+  return page.waitForFunction(() => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const bodyText = (document.body?.innerText || "").toLowerCase();
+    if (/ordini di lavoro|\bodl\b|materiali|ricambi|manodopera|\bman\b|\bmac\b/.test(bodyText)) return true;
+    const editables = [...document.querySelectorAll("textarea, input[type='text'], input[type='number'], input:not([type]), [contenteditable='true'], [role='textbox']")]
+      .filter(isVisible)
+      .filter((el) => !el.disabled && !el.readOnly);
+    return editables.length > 0;
+  }, null, { timeout }).then(() => true).catch(() => false);
+}
+
 async function fillBestEditableByKeywords(page, keywords, value, { append = false } = {}) {
   const textValue = String(value || "").trim();
   if (!textValue) return false;
@@ -944,7 +976,7 @@ async function writePracticeAndOdl(page, job, args) {
   writeReport.openedPractice = true;
   logPhase("odl_practice", "opened");
   await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(3000);
+  await waitForPracticeWorkspaceReady(page, 1800);
 
   // Scrivi note interne nella tab corrente (dati pratica) PRIMA di navigare all'ODL.
   if (job.internalNotes) {
@@ -983,7 +1015,7 @@ async function writePracticeAndOdl(page, job, args) {
 
   let odlTab = await clickOdlSection(page);
   if (!odlTab?.clicked) {
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(200);
     odlTab = await clickOdlSection(page);
   }
   if (!odlTab?.clicked) {
@@ -996,7 +1028,7 @@ async function writePracticeAndOdl(page, job, args) {
   if (odlTab?.clicked) {
     writeReport.openedOdl = true;
     logPhase("odl_tab", "opened", { label: odlTab.label });
-    await page.waitForTimeout(2500);
+    await waitForOdlWorkspaceReady(page, 1800);
   } else if (writeReport.odl.attempted) {
     writeReport.odl.error = "odl_tab_not_found";
     logPhase("odl_tab", "not_found");
@@ -1013,7 +1045,7 @@ async function writePracticeAndOdl(page, job, args) {
       if (yapReparto !== reparto) {
         await clickRepartoSection(page, reparto).catch(() => false);
       }
-      await page.waitForTimeout(180);
+      await page.waitForTimeout(60);
     }
     const sectionSummary = buildSectionSummary(section);
     const sectionWritten = await fillWithRetry(
@@ -1128,7 +1160,7 @@ async function writePracticeAndOdl(page, job, args) {
   }
 
   await clickGenericSaveInPractice(page).catch(() => false);
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(180);
 
   const needles = buildOdlNeedles(job);
   const scopedText = await safeEvaluate(page, () => {
@@ -1147,6 +1179,42 @@ async function writePracticeAndOdl(page, job, args) {
     return values.join(" | ").slice(0, 30000);
   }).catch(() => "");
   const normalizedScoped = normalizeLoose(scopedText);
+  const hasNeedle = (value) => normalizedScoped.includes(normalizeLoose(value));
+  if (job.internalNotes && !writeReport.notes.success && hasNeedle(job.internalNotes)) {
+    writeReport.notes.success = true;
+    writeReport.notes.error = null;
+  }
+  for (const section of job.sections || []) {
+    if (section.ore_man != null && !writeReport.hours.man.success && hasNeedle(`MAN ${section.ore_man}`)) {
+      writeReport.hours.man.success = true;
+      writeReport.hours.man.error = null;
+    }
+    if (section.ore_mac != null && !writeReport.hours.mac.success && hasNeedle(`MAC ${section.ore_mac}`)) {
+      writeReport.hours.mac.success = true;
+      writeReport.hours.mac.error = null;
+    }
+    if (section.materiali_euro != null && !writeReport.materials.success && hasNeedle(String(section.materiali_euro))) {
+      writeReport.materials.success = true;
+      writeReport.materials.error = null;
+    }
+    if (section.smaltimento_applica && !writeReport.waste.success && hasNeedle(String(section.smaltimento_percentuale ?? 2))) {
+      writeReport.waste.success = true;
+      writeReport.waste.error = null;
+    }
+    if ((section.ricambi || []).length && !writeReport.parts.success) {
+      const partsSeen = (section.ricambi || []).every((part) => {
+        const name = String(part?.name || part?.nome || "").trim();
+        const qty = String(part?.quantity || part?.quantita || "").trim();
+        if (!name) return true;
+        if (qty) return hasNeedle(`${name} x ${qty}`) || (hasNeedle(name) && hasNeedle(qty));
+        return hasNeedle(name);
+      });
+      if (partsSeen) {
+        writeReport.parts.success = true;
+        writeReport.parts.error = null;
+      }
+    }
+  }
   const matched = needles.filter((needle) => normalizedScoped.includes(normalizeLoose(needle))).length;
   writeReport.verify = {
     matched,

@@ -2663,7 +2663,10 @@ function App() {
         meta.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
       }
     }
-    if (Array.isArray(safeResult.phase_timeline) && safeResult.phase_timeline.length) {
+    const workerPhaseLabel = workerPhasesToLabel(safeResult.worker_phases);
+    if (workerPhaseLabel) {
+      meta.push(workerPhaseLabel);
+    } else if (Array.isArray(safeResult.phase_timeline) && safeResult.phase_timeline.length) {
       meta.push(summarizePhaseTimeline(safeResult.phase_timeline));
     }
     const writeReport = safeResult.write_report || safeResult.yap?.result?.write_report || null;
