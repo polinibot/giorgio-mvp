@@ -810,6 +810,17 @@ h2 {
   color: var(--text-secondary);
 }
 
+.detail-sync-action-danger {
+  background: rgba(239, 68, 68, 0.10);
+  border-color: rgba(239, 68, 68, 0.30);
+  color: #fca5a5;
+}
+
+.detail-sync-action-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.20);
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
 .detail-sync-toggle {
   display: flex;
   align-items: center;

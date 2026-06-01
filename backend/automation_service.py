@@ -243,6 +243,7 @@ class AutomationService:
                 "smaltimento_applica": (section_data.get("waste") or {}).get("apply"),
                 "smaltimento_percentuale": (section_data.get("waste") or {}).get("percentage"),
                 "ricambi": section_data.get("parts") or [],
+                "notes": section_data.get("notes") or None,
             })
 
         return {

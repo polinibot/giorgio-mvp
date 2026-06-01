@@ -2453,20 +2453,24 @@ function App() {
       setYapLastResult(simulated);
       return simulated;
     }
+    startYapActionProgress('audit', id, 'YAP: verifica appuntamento avviata...');
     setYapAuditLoading(true);
     setYapLastResult(null);
     setYapLastPracticeId(id);
     try {
       rememberRequest('yap.audit', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/audit`, params: getAuthParams(), headers: getHeaders() });
+      updateYapActionProgress({ percent: 20, label: 'YAP: lettura campi appuntamento e tag...' });
       const res = await fetchWithRetry(() =>
-        axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
+        axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 255000 })
       );
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.audit');
       invalidatePracticeCaches(id);
       const tone = data.status === 'complete_synced' ? 'success' : (data.status === 'sync_failed' ? 'error' : 'warning');
-      addToast(data.message || 'Controllo YAP completato', tone);
+      const auditLabel = data.message || 'Controllo YAP completato';
+      finishYapActionProgress(auditLabel, tone === 'error' ? 'error' : 'success', tone === 'error' ? 0 : 1400);
+      addToast(auditLabel, tone);
       loadDetail(id);
       return data;
     } catch (err) {
@@ -2478,12 +2482,13 @@ function App() {
         error: err?.response?.data?.detail || err?.response?.data || err?.message || 'audit_failed',
       };
       setYapLastResult(errorResult);
+      finishYapActionProgress(errorResult.message || 'Verifica YAP fallita', 'error', 0);
       addToast(errorResult.message, 'error');
       return errorResult;
     } finally {
       setYapAuditLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
   const renderYapActionProgressBar = (practiceId) => {
     if (!yapActionProgress || String(yapActionProgress.practiceId) !== String(practiceId)) return null;
@@ -4190,32 +4195,35 @@ function App() {
           {!browserPreviewMode && (
             <div className="section">
               <h2>🔧 Automazione YAP</h2>
-              <div className="yap-controls-grid">
+              <div className="detail-sync-actions">
                 <button
                   type="button"
-                  className="yap-control-button"
+                  className="detail-sync-action detail-sync-action-primary"
                   onClick={() => syncToYap(practice.id, { dry_run: false })}
-                  disabled={yapSyncLoading}
+                  disabled={yapBusy}
                 >
                   {yapSyncLoading ? 'Sincronizzazione...' : 'Sincronizza con YAP'}
                 </button>
+                {(practice.management_sync_status === 'partial_synced' || practice.management_sync_status === 'sync_failed' || practice.management_sync_status === 'complete_synced') && (
+                  <button
+                    type="button"
+                    className="detail-sync-action"
+                    onClick={() => auditYapAppointment(practice.id, { debug: false })}
+                    disabled={yapBusy}
+                  >
+                    {yapAuditLoading ? 'Verifica...' : 'Verifica YAP'}
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="yap-control-button"
-                  onClick={() => auditYapAppointment(practice.id, { debug: false })}
-                  disabled={yapAuditLoading}
-                >
-                  {yapAuditLoading ? 'Verifica...' : 'Verifica YAP'}
-                </button>
-                <button
-                  type="button"
-                  className="yap-control-button yap-delete-button"
+                  className="detail-sync-action detail-sync-action-danger"
                   onClick={() => deleteYapAppointment(practice.id, { dry_run: false })}
-                  disabled={yapDeleteLoading}
+                  disabled={yapBusy}
                 >
-                  {yapDeleteLoading ? 'Eliminazione...' : 'Elimina appuntamento YAP'}
+                  {yapDeleteLoading ? 'Eliminazione...' : 'Elimina da YAP'}
                 </button>
               </div>
+              {renderYapActionProgressBar(practice.id)}
             </div>
           )}
             </>
@@ -4240,22 +4248,24 @@ function App() {
                     onClick={runOverviewSync}
                     disabled={yapBusy}
                   >
-                    {yapSyncLoading ? 'Sync in corso...' : (practice.synced ? 'Risincronizza YAP' : 'Riprova sync YAP')}
+                    {yapSyncLoading ? 'Sync in corso...' : (practice.synced ? 'Risincronizza YAP' : 'Sincronizza con YAP')}
                   </button>
-                  <button
-                    type="button"
-                    className="detail-sync-action"
-                    onClick={runOverviewAudit}
-                    disabled={yapBusy}
-                  >
-                    {yapAuditLoading ? 'Verifica...' : 'Verifica YAP'}
-                  </button>
+                  {(practice.management_sync_status === 'partial_synced' || practice.management_sync_status === 'sync_failed' || practice.management_sync_status === 'complete_synced') && (
+                    <button
+                      type="button"
+                      className="detail-sync-action"
+                      onClick={runOverviewAudit}
+                      disabled={yapBusy}
+                    >
+                      {yapAuditLoading ? 'Verifica...' : 'Verifica YAP'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="detail-sync-action detail-sync-action-secondary"
                     onClick={openYapTab}
                   >
-                    Apri tab YAP
+                    Dettagli YAP
                   </button>
                 </div>
                 {renderYapActionProgressBar(practice.id)}
@@ -4925,7 +4935,7 @@ function App() {
   return (
     <div className="App">
       <Toast toasts={toasts} removeToast={removeToast} />
-      {yapActionProgress?.action === 'delete' && renderGlobalYapActionProgressBar()}
+      {yapActionProgress && renderGlobalYapActionProgressBar()}
       {confirmModal && (
         <ConfirmModal
           title={confirmModal.title}
