@@ -16,6 +16,7 @@ import {
   loginYap,
   openAgendaInApp,
   gotoAgendaDate,
+  waitForAgendaReady,
   ROOT_DIR,
   waitForYapAction,
   yapContextOptions,
@@ -394,15 +395,21 @@ async function main() {
   }
 
   const safeMode = String(process.env.YAP_SAFE_MODE || "").trim() === "1";
-  const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+  const launchArgs = [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+  ];
   if (safeMode) {
     launchArgs.push(
-      "--disable-gpu",
-      "--disable-software-rasterizer",
-      "--disable-extensions",
       "--no-zygote",
-      "--disable-background-networking",
-      "--disable-background-timer-throttling",
+      "--disable-features=site-per-process",
     );
   }
 
@@ -414,7 +421,10 @@ async function main() {
     },
     { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
   );
-  const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
+  const context = await browser.newContext(await yapContextOptions({
+    freshLogin: args.freshLogin,
+    viewport: { width: 1280, height: 820 },
+  }));
   const page = await context.newPage();
   const trace = createDeleteTrace({
     worker: "yap-delete-appointment.mjs",
@@ -423,6 +433,12 @@ async function main() {
     debug: !!args.debug,
     fresh_login: !!args.freshLogin,
     dry_run: !!args.dryRun,
+  });
+  page.on("crash", () => {
+    trace.mark("page_crashed");
+  });
+  page.on("pageerror", (pageError) => {
+    trace.fail("page_error", pageError);
   });
 
   try {
@@ -434,11 +450,14 @@ async function main() {
     } else {
       // Prova sessione esistente senza forzare login.
       trace.mark("login_skipped_using_existing_session");
-      await openAgendaInApp(page);
     }
-    trace.mark("agenda_open_requested");
-    await openAgendaInApp(page);
-    trace.mark("agenda_open_completed");
+    const agendaReady = await waitForAgendaReady(page, 2500).then(() => true).catch(() => false);
+    trace.mark("agenda_ready_check_completed", { ready: agendaReady });
+    if (!agendaReady) {
+      trace.mark("agenda_open_requested");
+      await openAgendaInApp(page);
+      trace.mark("agenda_open_completed");
+    }
     trace.mark("agenda_date_navigation_started", { date: args.date });
     await gotoAgendaDate(page, args.date);
     trace.mark("agenda_date_navigation_completed", { date: args.date });

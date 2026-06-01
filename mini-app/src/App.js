@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, startTransition } from 'react';
+import { flushSync } from 'react-dom';
 import { useForm, Controller } from 'react-hook-form';
 import axios from 'axios';
 import DatePicker from 'react-datepicker';
@@ -47,6 +48,14 @@ async function fetchWithRetry(fn, { maxRetries = 2, baseDelay = 300 } = {}) {
     }
   }
   throw lastErr;
+}
+
+async function waitForNextPaint() {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return;
+  }
+  await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
 /** Classify error for user-friendly messages */
@@ -2375,11 +2384,14 @@ function App() {
       setYapLastResult({ status: 'deleted', simulated: true, message: 'Eliminazione simulata in anteprima browser.' });
       return { status: 'deleted', simulated: true };
     }
-    startYapActionProgress('delete', id, 'Eliminazione appuntamento YAP in corso...');
+    flushSync(() => {
+      startYapActionProgress('delete', id, 'Eliminazione appuntamento YAP in corso...');
+      setYapDeleteLoading(true);
+      setYapLastResult(null);
+      setYapLastPracticeId(id);
+    });
     updateYapActionProgress({ percent: 14, label: 'Ricerca appuntamento su YAP...' });
-    setYapDeleteLoading(true);
-    setYapLastResult(null);
-    setYapLastPracticeId(id);
+    await waitForNextPaint();
     try {
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders() });
       updateYapActionProgress({ percent: 42, label: 'Eliminazione in corso su YAP...' });

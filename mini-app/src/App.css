@@ -1257,15 +1257,17 @@ h2 {
 }
 
 .yap-global-progress-shell {
-  position: sticky;
-  top: calc(env(safe-area-inset-top, 0px) + 8px);
-  z-index: 40;
-  padding: 10px 16px 0;
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 0;
+  right: 0;
+  z-index: 260;
+  padding: 0 12px;
   pointer-events: none;
 }
 
 .yap-global-progress {
-  max-width: 760px;
+  max-width: min(760px, calc(100vw - 24px));
   margin: 0 auto;
   box-shadow: var(--shadow-card);
   pointer-events: auto;
