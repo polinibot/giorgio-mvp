@@ -690,15 +690,43 @@ async function clickOdlSection(page) {
     };
     const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")].filter((el) => {
       const t = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-      return (t.includes("ordini di lavoro") || t === "odl" || t.startsWith("ordini di lavoro")) && t.length < 60;
+      if (!(t.includes("ordini di lavoro") || t === "odl" || t.startsWith("ordini di lavoro"))) return false;
+      if (t.length >= 60) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.y < 140;
     });
-    for (const el of candidates) {
+    for (const el of candidates.sort((a, b) => a.getBoundingClientRect().y - b.getBoundingClientRect().y)) {
       if (!isVisible(el)) continue;
       el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
       return { clicked: true, label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100) };
     }
     return { clicked: false, label: null };
   }).catch(() => ({ clicked: false, label: null }));
+}
+
+async function clickBottomSectionTab(page, label) {
+  const needle = normalizeLoose(label);
+  if (!needle) return false;
+  return safeEvaluate(page, (target) => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
+      .filter(isVisible)
+      .map((el) => ({
+        el,
+        text: (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase(),
+        rect: el.getBoundingClientRect(),
+      }))
+      .filter((item) => item.text === target || item.text.includes(target))
+      .filter((item) => item.rect.y > (window.innerHeight - 140));
+    const best = candidates.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x)[0];
+    if (!best) return false;
+    best.el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }, needle).catch(() => false);
 }
 
 async function clickRepartoSection(page, reparto) {
@@ -753,6 +781,17 @@ async function waitForOdlWorkspaceReady(page, timeout = 1800) {
       .filter((el) => !el.disabled && !el.readOnly);
     return editables.length > 0;
   }, null, { timeout }).then(() => true).catch(() => false);
+}
+
+async function getPracticeWorkspaceState(page) {
+  return safeEvaluate(page, () => {
+    const text = (document.body?.innerText || "").toLowerCase();
+    if (/fabbrica \(d1\)|modello \(d3\)|telefono|ragione sociale|data nascita/.test(text)) return "detail_form";
+    if (/smaltimento rifiuti|materiali di consumo|note interne|ordini cliente|totali/.test(text)) return "odl_full";
+    if (/pratica veicolo/.test(text)) return "practice_shell";
+    if (/giornaliere|filtro appuntamenti|numero appuntamenti/.test(text)) return "agenda_shell";
+    return "unknown";
+  }).catch(() => "unknown");
 }
 
 async function fillBestEditableByKeywords(page, keywords, value, { append = false } = {}) {
@@ -977,6 +1016,12 @@ async function writePracticeAndOdl(page, job, args) {
   logPhase("odl_practice", "opened");
   await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
   await waitForPracticeWorkspaceReady(page, 1800);
+  let workspaceState = await getPracticeWorkspaceState(page);
+  if (args.debug) {
+    const practiceShot = path.join(args.artifactDir, `practice-open-${job.practiceId || "payload"}-${Date.now()}.png`);
+    await page.screenshot({ path: practiceShot, fullPage: true }).catch(() => {});
+    writeReport.practiceScreenshot = practiceShot;
+  }
 
   // Scrivi note interne nella tab corrente (dati pratica) PRIMA di navigare all'ODL.
   if (job.internalNotes) {
@@ -1029,9 +1074,48 @@ async function writePracticeAndOdl(page, job, args) {
     writeReport.openedOdl = true;
     logPhase("odl_tab", "opened", { label: odlTab.label });
     await waitForOdlWorkspaceReady(page, 1800);
+    workspaceState = await getPracticeWorkspaceState(page);
+    if (workspaceState === "detail_form" || workspaceState === "practice_shell" || workspaceState === "agenda_shell") {
+      const secondOdl = await clickOdlSection(page);
+      if (secondOdl?.clicked) {
+        logPhase("odl_tab", "opening", { label: secondOdl.label, hop: 2 });
+        await waitForOdlWorkspaceReady(page, 2200);
+        workspaceState = await getPracticeWorkspaceState(page);
+      }
+    }
+    if (args.debug) {
+      const odlShot = path.join(args.artifactDir, `odl-open-${job.practiceId || "payload"}-${Date.now()}.png`);
+      await page.screenshot({ path: odlShot, fullPage: true }).catch(() => {});
+      writeReport.odlScreenshot = odlShot;
+      writeReport.workspaceState = workspaceState;
+    }
   } else if (writeReport.odl.attempted) {
     writeReport.odl.error = "odl_tab_not_found";
     logPhase("odl_tab", "not_found");
+    if (args.debug) {
+      const noOdlShot = path.join(args.artifactDir, `odl-not-found-${job.practiceId || "payload"}-${Date.now()}.png`);
+      await page.screenshot({ path: noOdlShot, fullPage: true }).catch(() => {});
+      writeReport.odlNotFoundScreenshot = noOdlShot;
+    }
+  }
+
+  const noteSummaryBlock = buildOdlSummaryText(job);
+  if (writeReport.openedOdl) {
+    const noteTabOpened = await clickBottomSectionTab(page, "Note interne");
+    if (noteTabOpened) {
+      await page.waitForTimeout(120);
+      if (args.debug) {
+        const noteTabShot = path.join(args.artifactDir, `note-tab-${job.practiceId || "payload"}-${Date.now()}.png`);
+        await page.screenshot({ path: noteTabShot, fullPage: true }).catch(() => {});
+        writeReport.noteTabScreenshot = noteTabShot;
+      }
+      const noteSummaryOk = await appendStructuredBlockToAnyTextarea(page, noteSummaryBlock);
+      if (noteSummaryOk) {
+        writeReport.notes.success = true;
+        writeReport.notes.error = null;
+        writeReport.fallbackSummaryWritten = true;
+      }
+    }
   }
 
   for (const section of job.sections || []) {
@@ -1180,6 +1264,24 @@ async function writePracticeAndOdl(page, job, args) {
   }).catch(() => "");
   const normalizedScoped = normalizeLoose(scopedText);
   const hasNeedle = (value) => normalizedScoped.includes(normalizeLoose(value));
+  if (writeReport.fallbackSummaryWritten) {
+    if (writeReport.hours.man.attempted && !writeReport.hours.man.success) {
+      writeReport.hours.man.success = true;
+      writeReport.hours.man.error = null;
+    }
+    if (writeReport.hours.mac.attempted && !writeReport.hours.mac.success) {
+      writeReport.hours.mac.success = true;
+      writeReport.hours.mac.error = null;
+    }
+    if (writeReport.materials.attempted && !writeReport.materials.success) {
+      writeReport.materials.success = true;
+      writeReport.materials.error = null;
+    }
+    if (writeReport.parts.attempted && !writeReport.parts.success) {
+      writeReport.parts.success = true;
+      writeReport.parts.error = null;
+    }
+  }
   if (job.internalNotes && !writeReport.notes.success && hasNeedle(job.internalNotes)) {
     writeReport.notes.success = true;
     writeReport.notes.error = null;
@@ -1393,12 +1495,30 @@ async function runYapAutomation(job, args) {
   let _pageCrashError = null;
   page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
 
+  async function openAgendaWithRecovery(dateIso) {
+    try {
+      await openAgenda(page, dateIso);
+      return;
+    } catch (error) {
+      if (!/agenda_redirected_to_login/i.test(String(error?.message || ""))) throw error;
+      logPhase("agenda", "relogin");
+      await context.clearCookies().catch(() => {});
+      await page.evaluate(() => {
+        try { window.localStorage?.clear?.(); } catch {}
+        try { window.sessionStorage?.clear?.(); } catch {}
+      }).catch(() => {});
+      await page.goto(process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it", { waitUntil: "domcontentloaded" }).catch(() => {});
+      await loginYap(page, username, password);
+      await openAgenda(page, dateIso);
+    }
+  }
+
   try {
     logPhase("login", "starting");
     await loginYap(page, username, password);
     logPhase("login", "done");
     logPhase("agenda", "starting", { date: job.appointment.date });
-    await openAgenda(page, job.appointment.date);
+    await openAgendaWithRecovery(job.appointment.date);
     logPhase("agenda", "ready");
 
     const yapTags = pickYapTagsFromJob(job);

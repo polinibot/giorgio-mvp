@@ -203,6 +203,10 @@ export async function waitForAgendaReady(page, timeout = 20000) {
   });
 }
 
+export async function isYapLoginPage(page, timeout = 1200) {
+  return page.locator('input[name="u"]').first().isVisible({ timeout }).catch(() => false);
+}
+
 async function dismissUnsupportedBrowserWarning(page) {
   const warningVisible = await page
     .getByText(/ATTENZIONE! La versione del browser in uso non è più supportata!/i)
@@ -375,12 +379,18 @@ export async function openAgendaInApp(page) {
   await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(200);
   await dismissUnsupportedBrowserWarning(page);
+  if (await isYapLoginPage(page, 1000)) {
+    throw new Error("agenda_redirected_to_login");
+  }
 
   const selectors = [".fc-time-grid", ".fc-view-container", ".view-switch", ".fc-agenda-view"];
   for (let attempt = 0; attempt < 3; attempt += 1) {
     for (const sel of selectors) {
       const visible = await page.locator(sel).first().isVisible().catch(() => false);
       if (visible) return;
+    }
+    if (await isYapLoginPage(page, 800)) {
+      throw new Error("agenda_redirected_to_login");
     }
     const agendaLink = page.getByText("Agenda", { exact: true }).first();
     if (await agendaLink.isVisible().catch(() => false)) {
@@ -389,9 +399,15 @@ export async function openAgendaInApp(page) {
     await page.waitForTimeout(300);
     await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
     await dismissUnsupportedBrowserWarning(page);
+    if (await isYapLoginPage(page, 800)) {
+      throw new Error("agenda_redirected_to_login");
+    }
     await waitForAgendaReady(page, 8000).catch(() => {});
   }
 
+  if (await isYapLoginPage(page, 1000)) {
+    throw new Error("agenda_redirected_to_login");
+  }
   await waitForAgendaReady(page, 20000);
 }
 
