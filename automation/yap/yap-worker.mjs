@@ -335,7 +335,8 @@ async function safeEvaluate(page, evaluator, arg, { retries = 2, delayMs = 250 }
     } catch (error) {
       lastError = error;
       const message = String(error?.message || "");
-      const recoverable = /Target crashed|Target closed|Execution context was destroyed|Page closed|Browser has been closed|Cannot find context with specified id/i.test(message);
+      const fatal = /Target crashed|Target closed|Page closed|Browser has been closed/i.test(message);
+      const recoverable = !fatal && /Execution context was destroyed|Cannot find context with specified id/i.test(message);
       if (!recoverable || attempt === retries) break;
       await page.waitForTimeout(delayMs * (attempt + 1)).catch(() => {});
     }
@@ -1257,6 +1258,8 @@ async function runYapAutomation(job, args) {
   );
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
+  let _pageCrashError = null;
+  page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
 
   try {
     await loginYap(page, username, password);

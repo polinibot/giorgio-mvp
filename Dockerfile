@@ -1,12 +1,26 @@
 FROM python:3.11-slim
 
-# Installa Tesseract OCR
+# Installa Tesseract OCR + dipendenze sistema per Playwright Chromium
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-ita \
     nodejs \
     npm \
-    chromium \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpango-1.0-0 \
+    libcairo2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Setta working directory
@@ -26,6 +40,11 @@ COPY automation/ ./automation
 
 # Dipendenze Node di runtime per worker YAP (lockfile deterministico, niente dev deps)
 RUN cd automation/yap && npm ci --omit=dev --no-audit --no-fund
+
+# Installa Playwright Chromium bundled (versione compatibile con playwright 1.50, ~Chrome 132)
+# Evita il chromium di sistema che causa "Target crashed" per mismatch versione CDP
+ENV PLAYWRIGHT_BROWSERS_PATH=/app/ms-playwright
+RUN cd automation/yap && npx playwright install chromium
 
 # Crea directory storage (before switching user)
 RUN mkdir -p storage/photos temp
