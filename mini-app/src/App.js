@@ -181,6 +181,18 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
   };
 }
 
+const YAP_PHASE_LABELS = {
+  browser: 'avvio browser',
+  login: 'accesso YAP',
+  agenda: 'navigazione agenda',
+  dedup: 'controllo duplicati',
+  popup: 'popup appuntamento',
+  save: 'salvataggio',
+  odl: 'scrittura pratica/ODL',
+  event_click: 'ricerca evento',
+  practice_odl: 'apertura pratica e ODL',
+};
+
 function summarizePhaseTimeline(phaseTimeline, fallback = '') {
   const phases = Array.isArray(phaseTimeline) ? phaseTimeline : [];
   if (!phases.length) return fallback;
@@ -188,9 +200,21 @@ function summarizePhaseTimeline(phaseTimeline, fallback = '') {
   const totalMs = phases.reduce((sum, phase) => sum + (Number(phase?.duration_ms) || 0), 0);
   const failed = phases.find((phase) => phase?.status === 'failed');
   if (failed) {
-    return `${failed.name || 'fase'} fallita (${Math.round(totalMs / 1000)}s)`;
+    const label = YAP_PHASE_LABELS[failed.name] || failed.name || 'fase';
+    return `YAP: ${label} fallita (${Math.round(totalMs / 1000)}s)`;
   }
   return `${done}/${phases.length} fasi completate (${Math.round(totalMs / 1000)}s)`;
+}
+
+function workerPhasesToLabel(workerPhases) {
+  if (!Array.isArray(workerPhases) || !workerPhases.length) return null;
+  const last = workerPhases[workerPhases.length - 1];
+  if (!last) return null;
+  const phaseLabel = YAP_PHASE_LABELS[last.phase] || last.phase;
+  const elapsedS = Math.round((last.elapsed_ms || 0) / 1000);
+  const statusMap = { starting: 'avvio', done: 'completato', ready: 'pronto', failed: 'fallito', scanning: 'scansione', opening: 'apertura', filled: 'compilato', found: 'trovato', not_found: 'non trovato', partial: 'parziale' };
+  const statusLabel = statusMap[last.status] || last.status;
+  return `YAP: ${phaseLabel} ${statusLabel} (${elapsedS}s)`;
 }
 
 function formatProgressElapsed(startedAt) {
@@ -2336,7 +2360,8 @@ function App() {
       setYapLastResult(data);
       rememberResponse('yap.sync');
       if (!silent) {
-        const phaseLabel = summarizePhaseTimeline(data.phase_timeline, 'Verifica finale YAP completata, chiusura...');
+        const phaseLabel = workerPhasesToLabel(data.worker_phases)
+          || summarizePhaseTimeline(data.phase_timeline, 'YAP: scrittura completata...');
         updateYapActionProgress({ percent: 90, label: phaseLabel });
       }
       if (['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(data.status)) {

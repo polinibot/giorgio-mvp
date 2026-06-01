@@ -1343,6 +1343,30 @@ def _persist_yap_audit_result(
     return status_value
 
 
+def _extract_yap_phases(stderr_text: str) -> list:
+    """Estrae gli eventi yap:phase emessi dal worker su stderr."""
+    if not stderr_text:
+        return []
+    phases = []
+    for line in stderr_text.splitlines():
+        line = line.strip()
+        if not line or '"event":"yap:phase"' not in line and '"event": "yap:phase"' not in line:
+            continue
+        try:
+            obj = json.loads(line)
+            if obj.get("event") == "yap:phase":
+                phases.append({
+                    "phase": obj.get("phase", ""),
+                    "status": obj.get("status", ""),
+                    "elapsed_ms": obj.get("elapsed_ms", 0),
+                    "ts": obj.get("ts", ""),
+                    **{k: v for k, v in obj.items() if k not in ("event", "phase", "status", "elapsed_ms", "ts")},
+                })
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return phases
+
+
 def _extract_json_blob(text: str) -> Optional[dict]:
     if not text:
         return None
@@ -1637,6 +1661,15 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 detail=failure_detail,
             )
 
+        worker_phases = _extract_yap_phases(err)
+        if worker_phases:
+            runner_meta["worker_phases"] = worker_phases
+            total_ms = runner_meta.get("total_elapsed_ms", 0)
+            phase_summary = " → ".join(
+                f"{p['phase']}({p['elapsed_ms']}ms)" for p in worker_phases
+            )
+            logger.info("YAP phases (%s) total=%dms: %s", script_name, total_ms, phase_summary)
+
         parsed = _extract_json_blob(out)
         if parsed:
             telemetry = parsed.get("telemetry")
@@ -1644,8 +1677,10 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 telemetry.setdefault("runner", runner_meta)
             else:
                 parsed["telemetry"] = {"runner": runner_meta}
+            if worker_phases:
+                parsed["worker_phases"] = worker_phases
             return parsed
-        return {"ok": True, "raw": out, "telemetry": {"runner": runner_meta}}
+        return {"ok": True, "raw": out, "telemetry": {"runner": runner_meta}, "worker_phases": worker_phases}
 
 
 @app.patch("/api/practices/{practice_id}/sync")

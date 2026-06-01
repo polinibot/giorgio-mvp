@@ -28,6 +28,18 @@ const requireFromYap = createRequire(new URL("./package.json", import.meta.url))
 const { chromium } = requireFromYap("playwright");
 
 const DEFAULT_ARTIFACT_DIR = path.join(ROOT_DIR, "automation", "artifacts", "yap-audit");
+
+const _auditStart = Date.now();
+function logPhase(phase, status, extra = {}) {
+  process.stderr.write(JSON.stringify({
+    event: "yap:phase",
+    phase,
+    status,
+    elapsed_ms: Date.now() - _auditStart,
+    ts: new Date().toISOString(),
+    ...extra,
+  }) + "\n");
+}
 const KNOWN_TAGS = ["officina", "pneumatici", "preventivo", "revisione", "comunicato", "carrozzeria"];
 
 function parseArgs(argv) {
@@ -734,23 +746,32 @@ async function runAudit(mapping, args) {
     },
     { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
   );
+  logPhase("browser", "ready");
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
 
   let screenshot = null;
   try {
+    logPhase("login", "starting");
     await loginYap(page, username, password);
+    logPhase("login", "done");
+    logPhase("agenda", "starting", { date: mapping.agenda.data });
     await openAgendaInApp(page);
     await gotoAgendaDate(page, mapping.agenda.data);
-
+    logPhase("agenda", "ready");
+    logPhase("event_click", "starting", { terms: searchTerms.slice(0, 2) });
     const click = await clickAgendaEventRobust(page, searchTerms, plan.agenda.dalle, mapping.agenda.data);
     const events = click.events?.length ? click.events : await scanAgendaEvents(page);
+    logPhase("event_click", click.success ? "done" : "not_found");
     await page.waitForTimeout(1800);
     const popup = await extractPopup(page);
     const toolbar = await extractAgendaToolbar(page);
+    logPhase("popup", popup.found ? "found" : "not_found");
     let practice = { openedPractice: false, openedOdl: false, text: "", clickLabels: [] };
     if (popup.found && !args.quick) {
+      logPhase("practice_odl", "starting");
       practice = await tryOpenPracticeAndOdl(page);
+      logPhase("practice_odl", practice.openedOdl ? "done" : "partial", { openedPractice: practice.openedPractice, openedOdl: practice.openedOdl });
     }
 
     if (args.debug) {

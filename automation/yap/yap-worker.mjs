@@ -37,6 +37,18 @@ const { chromium } = requireFromYap("playwright");
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DEFAULT_ARTIFACT_DIR = path.join(ROOT_DIR, "automation", "artifacts", "yap");
 
+const _workerStart = Date.now();
+function logPhase(phase, status, extra = {}) {
+  process.stderr.write(JSON.stringify({
+    event: "yap:phase",
+    phase,
+    status,
+    elapsed_ms: Date.now() - _workerStart,
+    ts: new Date().toISOString(),
+    ...extra,
+  }) + "\n");
+}
+
 function parseArgs(argv) {
   const args = {
     dryRun: true,
@@ -1256,6 +1268,7 @@ async function runYapAutomation(job, args) {
     );
   }
 
+  logPhase("browser", "starting");
   const browser = await launchChromiumWithFallback(
     chromium,
     {
@@ -1264,14 +1277,19 @@ async function runYapAutomation(job, args) {
     },
     { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
   );
+  logPhase("browser", "ready");
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
   const page = await context.newPage();
   let _pageCrashError = null;
   page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
 
   try {
+    logPhase("login", "starting");
     await loginYap(page, username, password);
+    logPhase("login", "done");
+    logPhase("agenda", "starting", { date: job.appointment.date });
     await openAgenda(page, job.appointment.date);
+    logPhase("agenda", "ready");
 
     const yapTags = pickYapTagsFromJob(job);
     if (args.debug) {
@@ -1293,6 +1311,7 @@ async function runYapAutomation(job, args) {
         ),
       );
     }
+    logPhase("dedup", "scanning");
     const existingEvents = await scanAgendaEvents(page);
     const dedup = findExistingAppointment(existingEvents, {
       plate: job.customer.plate,
@@ -1343,6 +1362,7 @@ async function runYapAutomation(job, args) {
       };
     }
 
+    logPhase("dedup", "done", { hit: dedup.hit });
     if (dedup.hit) {
       // Upsert su duplicato: apriamo l'evento esistente, riallineiamo popup/tag e continuiamo con ODL.
       const dedupTitle = dedup?.event?.title || "";
@@ -1409,6 +1429,7 @@ async function runYapAutomation(job, args) {
       };
     }
 
+    logPhase("popup", "opening", { time: job.appointment.time });
     await clickApproximateSlot(page, job.appointment.time);
     try {
       await fillAppointmentPopup(page, job);
@@ -1430,7 +1451,10 @@ async function runYapAutomation(job, args) {
       await page.screenshot({ path: beforeSavePath, fullPage: true });
     }
 
+    logPhase("popup", "filled");
+    logPhase("save", "starting");
     const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
+    logPhase("save", "done", { detected: Boolean(putResponse) });
     await page.waitForTimeout(240);
     let afterSavePath = null;
     if (args.debug) {
@@ -1439,11 +1463,13 @@ async function runYapAutomation(job, args) {
     }
     let managementWrite = null;
     if (shouldWriteOdlFromWorker()) {
+      logPhase("odl", "starting");
       managementWrite = await writePracticeAndOdl(page, job, args).catch((error) => ({
         attempted: true,
         ok: false,
         error: error.message,
       }));
+      logPhase("odl", managementWrite?.ok === false ? "failed" : "done", { ok: managementWrite?.ok });
     }
     return {
       saved: true,
