@@ -929,6 +929,31 @@ async function writePracticeAndOdl(page, job, args) {
   await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(3000);
 
+  // Scrivi note interne nella tab corrente (dati pratica) PRIMA di navigare all'ODL.
+  if (job.internalNotes) {
+    try {
+      writeReport.notes.success = await fillWithRetry(
+        page,
+        [
+          ["note interne", "note", "pratica", "annotazioni"],
+          ["note", "annotazioni"],
+          ["note"],
+        ],
+        String(job.internalNotes).trim(),
+        { append: true },
+      );
+      if (!writeReport.notes.success) {
+        // Fallback: qualsiasi textarea visibile nella pagina dati pratica.
+        const noteFallback = await appendStructuredBlockToAnyTextarea(page, String(job.internalNotes).trim());
+        writeReport.notes.success = noteFallback;
+        logPhase("notes_fallback", noteFallback ? "done" : "failed");
+      }
+      if (!writeReport.notes.success) writeReport.notes.error = "notes_field_not_found";
+    } catch (error) {
+      writeReport.notes.error = error?.message || "notes_write_failed";
+    }
+  }
+
   let odlTab = await clickOdlSection(page);
   if (!odlTab?.clicked) {
     await page.waitForTimeout(800);
@@ -948,24 +973,6 @@ async function writePracticeAndOdl(page, job, args) {
   } else if (writeReport.odl.attempted) {
     writeReport.odl.error = "odl_tab_not_found";
     logPhase("odl_tab", "not_found");
-  }
-
-  if (job.internalNotes) {
-    try {
-      writeReport.notes.success = await fillWithRetry(
-        page,
-        [
-          ["note interne", "note", "pratica", "annotazioni"],
-          ["note", "annotazioni", "odl"],
-          ["note", "pratica"],
-        ],
-        String(job.internalNotes).trim(),
-        { append: true },
-      );
-      if (!writeReport.notes.success) writeReport.notes.error = "notes_field_not_found";
-    } catch (error) {
-      writeReport.notes.error = error?.message || "notes_write_failed";
-    }
   }
 
   for (const section of job.sections || []) {
@@ -1080,15 +1087,7 @@ async function writePracticeAndOdl(page, job, args) {
     }
   }
 
-  // Fallback note: se le note non sono state scritte con keyword specifici, prova qualsiasi textarea visibile.
-  if (job.internalNotes && !writeReport.notes.success) {
-    const notesFallbackOk = await appendStructuredBlockToAnyTextarea(page, String(job.internalNotes).trim());
-    writeReport.notes.success = notesFallbackOk;
-    if (notesFallbackOk) writeReport.notes.error = null;
-    logPhase("notes_fallback", notesFallbackOk ? "done" : "failed");
-  }
-
-  // Fallback generico: se proprio nessun campo specifico funziona, metti il blocco completo nella prima textarea.
+  // Fallback generico: se proprio nessun campo ODL funziona, metti il blocco completo nella prima textarea.
   if (
     !writeReport.notes.success
     && !writeReport.hours.man.success

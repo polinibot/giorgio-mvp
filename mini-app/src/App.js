@@ -4110,15 +4110,6 @@ function App() {
                   if (isLocalDraft) openNewPracticeForm(); else navigateTo('detail', { practiceId: p.id });
                 }}
               >
-                {selectionMode && !isLocalDraft && (
-                  <input
-                    type="checkbox"
-                    className="practice-card-checkbox"
-                    checked={isSelected}
-                    onChange={e => toggleSelect(p.id, e)}
-                    onClick={e => e.stopPropagation()}
-                  />
-                )}
                 <div className="practice-card-header">
                   <span className="practice-plate">{p.plate || (isLocalDraft ? 'BOZZA' : '—')}</span>
                   <span className={`sync-pill ${isLocalDraft ? 'sync-pill-draft' : (p.synced ? 'sync-pill-green' : 'sync-pill-red')}`}>
@@ -4145,7 +4136,13 @@ function App() {
                 </div>
                 <div className="practice-card-footer">
                   <span className="practice-card-date">📅 {formatDate(p.appointment_date || p.created_at)}</span>
-                  <span className="practice-card-open">{isLocalDraft ? 'Riprendi bozza →' : 'Apri dettagli →'}</span>
+                  {selectionMode && !isLocalDraft ? (
+                    <span className={`card-select-indicator ${isSelected ? 'card-select-indicator-on' : ''}`}>
+                      {isSelected ? '✓' : '○'}
+                    </span>
+                  ) : (
+                    <span className="practice-card-open">{isLocalDraft ? 'Riprendi bozza →' : 'Apri dettagli →'}</span>
+                  )}
                 </div>
               </div>
               );
@@ -4169,13 +4166,32 @@ function App() {
       {/* Selection toolbar */}
       {selectionMode ? (
         <div className="selection-toolbar">
-          <span className="selection-count">{selectedIds.size > 0 ? `${selectedIds.size} selezionate` : 'Tocca per selezionare'}</span>
+          <div className="selection-toolbar-left">
+            <button
+              type="button"
+              className="selection-all-btn"
+              onClick={() => {
+                const selectablePractices = practices.filter(pr => !pr._localDraft);
+                if (selectedIds.size === selectablePractices.length) {
+                  setSelectedIds(new Set());
+                } else {
+                  setSelectedIds(new Set(selectablePractices.map(pr => pr.id)));
+                }
+              }}
+            >
+              {selectedIds.size === practices.filter(pr => !pr._localDraft).length ? 'Deseleziona tutte' : 'Seleziona tutte'}
+            </button>
+            <span className="selection-count">{selectedIds.size > 0 ? `${selectedIds.size} selezionate` : 'Nessuna selezionata'}</span>
+          </div>
           <div className="selection-actions">
-            {selectedIds.size > 0 && (
-              <button type="button" className="selection-delete-btn" onClick={deleteMultiplePractices}>
-                🗑 Elimina ({selectedIds.size})
-              </button>
-            )}
+            <button
+              type="button"
+              className="selection-delete-btn"
+              disabled={selectedIds.size === 0}
+              onClick={deleteMultiplePractices}
+            >
+              Elimina{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+            </button>
             <button type="button" className="selection-cancel-btn" onClick={() => { setSelectionMode(false); setSelectedIds(new Set()); }}>
               Annulla
             </button>
