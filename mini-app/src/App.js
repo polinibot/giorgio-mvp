@@ -1381,6 +1381,8 @@ function App() {
   const [lastApiDebug, setLastApiDebug] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [confirmModal, setConfirmModal] = useState(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   const [startedFromBot, setStartedFromBot] = useState(false);
   const [bootstrapped, setBootstrapped] = useState(false);
@@ -2537,24 +2539,6 @@ function App() {
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
-  const renderYapActionProgressBar = (practiceId) => {
-    if (!yapActionProgress || String(yapActionProgress.practiceId) !== String(practiceId)) return null;
-    return (
-      <div className={`yap-action-progress ${yapActionProgress.status === 'error' ? 'save-progress-error' : yapActionProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
-        <div className="save-progress-header">
-          {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
-          <span className="save-progress-label">{yapActionProgress.label}</span>
-          <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
-        </div>
-        <div className="upload-progress-bar" aria-hidden="true">
-          <div
-            className="upload-progress-bar-fill"
-            style={{ width: `${Math.max(0, Math.min(100, yapActionProgress.percent))}%` }}
-          />
-        </div>
-      </div>
-    );
-  };
 
   const renderGlobalYapActionProgressBar = () => {
     if (!yapActionProgress) return null;
@@ -3953,6 +3937,39 @@ function App() {
     setNavigationStack(['dashboard']);
   };
 
+  const deleteMultiplePractices = () => {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    setConfirmModal({
+      title: `🗑 Eliminare ${ids.length} pratiche?`,
+      message: 'Questa operazione non è reversibile. Vuoi procedere?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setSelectionMode(false);
+        setSelectedIds(new Set());
+        let deleted = 0;
+        for (const id of ids) {
+          try {
+            if (browserPreviewMode) {
+              setPractices(prev => prev.filter(pr => String(pr.id) !== String(id)));
+              deleted++;
+              continue;
+            }
+            await axios.delete(`${API_BASE_URL}/practices/${id}`, { params: getAuthParams(), headers: getHeaders() });
+            setPractices(prev => prev.filter(pr => String(pr.id) !== String(id)));
+            invalidatePracticeCaches(id);
+            deleted++;
+          } catch (err) {
+            addToast(`Errore eliminando pratica #${id}`, 'error');
+          }
+        }
+        if (deleted > 0) addToast(`${deleted} pratica${deleted > 1 ? 'e' : ''} eliminata${deleted > 1 ? '' : ''}`, 'success');
+        loadDashboard(searchQuery, activeFilters);
+      },
+      onCancel: () => setConfirmModal(null)
+    });
+  };
+
   // --- Dashboard View ---
   const renderDashboard = () => {
     const effectiveDraftCard = (
@@ -3961,6 +3978,14 @@ function App() {
         : null
     );
     const dashboardItems = effectiveDraftCard ? [effectiveDraftCard, ...practices] : practices;
+    const toggleSelect = (id, e) => {
+      e.stopPropagation();
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+      });
+    };
     return (
     <div className="view-dashboard view-enter">
       <div className="container">
@@ -4075,12 +4100,25 @@ function App() {
               const preSync = preSyncByPractice[p.id];
               const preSyncReady = preSync?.ready === true;
               const preSyncScore = Number.isFinite(preSync?.score) ? preSync.score : null;
+              const isSelected = selectedIds.has(p.id);
               return (
               <div
                 key={p.id}
-                className={`practice-card ${isLocalDraft ? 'practice-card-draft' : ''}`}
-                onClick={() => (isLocalDraft ? openNewPracticeForm() : navigateTo('detail', { practiceId: p.id }))}
+                className={`practice-card ${isLocalDraft ? 'practice-card-draft' : ''} ${selectionMode && isSelected ? 'practice-card-selected' : ''}`}
+                onClick={() => {
+                  if (selectionMode && !isLocalDraft) { toggleSelect(p.id, { stopPropagation: () => {} }); return; }
+                  if (isLocalDraft) openNewPracticeForm(); else navigateTo('detail', { practiceId: p.id });
+                }}
               >
+                {selectionMode && !isLocalDraft && (
+                  <input
+                    type="checkbox"
+                    className="practice-card-checkbox"
+                    checked={isSelected}
+                    onChange={e => toggleSelect(p.id, e)}
+                    onClick={e => e.stopPropagation()}
+                  />
+                )}
                 <div className="practice-card-header">
                   <span className="practice-plate">{p.plate || (isLocalDraft ? 'BOZZA' : '—')}</span>
                   <span className={`sync-pill ${isLocalDraft ? 'sync-pill-draft' : (p.synced ? 'sync-pill-green' : 'sync-pill-red')}`}>
@@ -4117,14 +4155,43 @@ function App() {
       </div>
 
       {/* FAB */}
-      <button
-        className="fab"
-        type="button"
-        onClick={openNewPracticeForm}
-        aria-label="Nuova pratica"
-      >
-        +
-      </button>
+      {!selectionMode && (
+        <button
+          className="fab"
+          type="button"
+          onClick={openNewPracticeForm}
+          aria-label="Nuova pratica"
+        >
+          +
+        </button>
+      )}
+
+      {/* Selection toolbar */}
+      {selectionMode ? (
+        <div className="selection-toolbar">
+          <span className="selection-count">{selectedIds.size > 0 ? `${selectedIds.size} selezionate` : 'Tocca per selezionare'}</span>
+          <div className="selection-actions">
+            {selectedIds.size > 0 && (
+              <button type="button" className="selection-delete-btn" onClick={deleteMultiplePractices}>
+                🗑 Elimina ({selectedIds.size})
+              </button>
+            )}
+            <button type="button" className="selection-cancel-btn" onClick={() => { setSelectionMode(false); setSelectedIds(new Set()); }}>
+              Annulla
+            </button>
+          </div>
+        </div>
+      ) : (
+        practices.length > 1 && (
+          <button
+            type="button"
+            className="selection-enter-btn"
+            onClick={() => { setSelectionMode(true); setSelectedIds(new Set()); }}
+          >
+            Seleziona
+          </button>
+        )
+      )}
     </div>
   );
   };

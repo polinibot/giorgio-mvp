@@ -582,6 +582,94 @@ h2 {
   transform: scale(0.95);
 }
 
+/* --- Selection mode --- */
+.practice-card-selected {
+  border-color: var(--accent) !important;
+  background: rgba(79, 140, 255, 0.08) !important;
+}
+
+.practice-card-checkbox {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  z-index: 2;
+}
+
+.practice-card {
+  position: relative;
+}
+
+.selection-toolbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-subtle);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 200;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.selection-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.selection-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.selection-delete-btn {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.selection-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+.selection-cancel-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.selection-enter-btn {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: 20px;
+  padding: 10px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
 /* --- Telegram dashboard fixed action --- */
 .telegram-dashboard-fab {
   position: fixed;
