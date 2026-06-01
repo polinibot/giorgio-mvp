@@ -300,6 +300,15 @@ async function clickAgendaEventRobust(page, searchTerms, expectedTime, dateIso) 
       await page.waitForTimeout(600);
     }
 
+    // Scrolla verso l'orario atteso prima di cercare eventi (fix per orari pomeridiani fuori viewport)
+    if (expectedTime) {
+      await page.evaluate((t) => {
+        const rows = [...document.querySelectorAll("td.fc-axis.fc-time, .fc-time")];
+        const target = rows.find(r => (r.textContent || '').trim().startsWith(t.slice(0,2)));
+        if (target) target.scrollIntoView({ block: 'center', behavior: 'instant' });
+      }, expectedTime).catch(() => {});
+      await page.waitForTimeout(300);
+    }
     lastEvents = await scanAgendaEvents(page).catch(() => []);
     const ranked = rankAgendaEvents(lastEvents, searchTerms, expectedTime);
 
