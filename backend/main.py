@@ -1353,7 +1353,7 @@ def _extract_yap_phases(stderr_text: str) -> list:
         if not line or '"event":"yap:phase"' not in line and '"event": "yap:phase"' not in line:
             continue
         try:
-            obj = json.loads(line)
+            obj = _json.loads(line)
             if obj.get("event") == "yap:phase":
                 phases.append({
                     "phase": obj.get("phase", ""),
@@ -1362,7 +1362,7 @@ def _extract_yap_phases(stderr_text: str) -> list:
                     "ts": obj.get("ts", ""),
                     **{k: v for k, v in obj.items() if k not in ("event", "phase", "status", "elapsed_ms", "ts")},
                 })
-        except (json.JSONDecodeError, ValueError):
+        except (_json.JSONDecodeError, ValueError):
             continue
     return phases
 
