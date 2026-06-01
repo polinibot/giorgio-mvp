@@ -2699,7 +2699,6 @@ function App() {
             )}
           </div>
         )}
-        {showActionProgress && renderYapActionProgressBar(resolvedPracticeId)}
       </div>
     );
   };
@@ -4223,7 +4222,6 @@ function App() {
                   {yapDeleteLoading ? 'Eliminazione...' : 'Elimina da YAP'}
                 </button>
               </div>
-              {renderYapActionProgressBar(practice.id)}
             </div>
           )}
             </>
@@ -4268,7 +4266,6 @@ function App() {
                     Dettagli YAP
                   </button>
                 </div>
-                {renderYapActionProgressBar(practice.id)}
               </div>
               <div className="section detail-overview-section">
                 {practice.internal_notes && (
