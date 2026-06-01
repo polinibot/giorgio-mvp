@@ -124,6 +124,48 @@ h2 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.debug-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.debug-panel-action {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.14);
+  color: #fee2e2;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.debug-panel-copy-status {
+  color: #fecaca;
+  font-size: 12px;
+}
+
+.debug-panel-payload {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  max-height: 220px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(248, 113, 113, 0.22);
+  background: rgba(0, 0, 0, 0.22);
+  color: #fee2e2;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  resize: vertical;
+}
+
 /* --- Back Button --- */
 .back-button {
   background: rgba(255, 255, 255, 0.06);

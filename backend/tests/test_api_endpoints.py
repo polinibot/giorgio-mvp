@@ -31,6 +31,27 @@ class TestHealthEndpoints:
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 
+    def test_client_diagnostics_endpoint(self, client):
+        """Test POST /client-diagnostics accepts sanitized client reports."""
+        response = client.post(
+            "/client-diagnostics",
+            json={
+                "source": "mini-app",
+                "severity": "error",
+                "message": "Errore di rete",
+                "url": "https://example.test/?access_token=secret-token",
+                "telegram_user_id": "761118078",
+                "api": {
+                    "label": "dashboard.list",
+                    "status": "error",
+                    "url": "https://api.test/mini-app/data?hash=secret-hash",
+                },
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        assert response.json()["data"]["received"] is True
+
 
 class TestMiniAppEndpoints:
     """Test endpoint Mini App."""

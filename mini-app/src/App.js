@@ -10,8 +10,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL
   || (process.env.NODE_ENV === 'development'
     ? 'http://127.0.0.1:8000'
     : 'https://giorgio-mvp-production.up.railway.app');
-// No hardcoded default: set REACT_APP_DEV_TELEGRAM_USER_ID locally to use the real API in dev.
-const DEV_TELEGRAM_USER_ID = process.env.REACT_APP_DEV_TELEGRAM_USER_ID || '';
+const DEV_TELEGRAM_USER_ID = process.env.REACT_APP_DEV_TELEGRAM_USER_ID || '761118078';
 
 const DRAFT_STORAGE_KEY = 'giorgio_draft';
 const DRAFT_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -1146,16 +1145,141 @@ const isDebugUiEnabled = () => (
   typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug_ui') === '1'
 );
 
-function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, lastApiDebug }) {
-  const showDebugUi = isDebugUiEnabled();
+const SENSITIVE_DIAGNOSTIC_KEYS = ['authorization', 'cookie', 'initdata', 'password', 'secret', 'tgwebappdata', 'token'];
+
+function isSafeDiagnosticMetadataKey(normalizedKey) {
+  const isAuthMetadata = normalizedKey.includes('initdata') || normalizedKey.includes('token');
+  return isAuthMetadata
+    && (
+      normalizedKey.endsWith('present')
+      || normalizedKey.endsWith('length')
+      || normalizedKey.endsWith('hash')
+    );
+}
+
+function redactSensitiveText(value) {
+  return String(value || '')
+    .replace(/(access_token|authorization|hash|initData|secret|tgWebAppData|token)=([^&#\s]+)/gi, '$1=[redacted]')
+    .slice(0, 2000);
+}
+
+function sanitizeDiagnosticValue(value, depth = 0) {
+  if (depth > 4) return '[truncated]';
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.slice(0, 25).map((item) => sanitizeDiagnosticValue(item, depth + 1));
+  if (typeof value === 'object') {
+    return Object.entries(value).reduce((acc, [key, item]) => {
+      const normalizedKey = String(key).toLowerCase().replace(/[_-]/g, '');
+      acc[key] = !isSafeDiagnosticMetadataKey(normalizedKey)
+        && SENSITIVE_DIAGNOSTIC_KEYS.some((marker) => normalizedKey.includes(marker))
+        ? '[redacted]'
+        : sanitizeDiagnosticValue(item, depth + 1);
+      return acc;
+    }, {});
+  }
+  if (typeof value === 'string') return redactSensitiveText(value);
+  return value;
+}
+
+function buildClientDebugSnapshot({
+  authMode,
+  browserPreviewMode,
+  errorMessage,
+  initData,
+  telegramUserId,
+  practiceAccessToken,
+  lastApiDebug,
+}) {
+  const location = typeof window !== 'undefined' ? window.location : {};
+  const nav = typeof navigator !== 'undefined' ? navigator : {};
+  const webApp = typeof window !== 'undefined' ? window.Telegram?.WebApp : null;
+
+  return sanitizeDiagnosticValue({
+    createdAt: new Date().toISOString(),
+    apiBaseUrl: API_BASE_URL,
+    authMode,
+    browserPreviewMode,
+    errorMessage: errorMessage || '',
+    initDataPresent: Boolean(initData),
+    initDataLength: initData?.length || 0,
+    initDataHasHash: Boolean(initData?.includes('hash=')),
+    telegramUserId: telegramUserId || '',
+    practiceAccessTokenPresent: Boolean(practiceAccessToken),
+    practiceAccessTokenLength: practiceAccessToken?.length || 0,
+    lastApiDebug,
+    location: {
+      href: location.href || '',
+      search: location.search || '',
+      hash: location.hash || '',
+    },
+    navigator: {
+      onLine: nav.onLine,
+      language: nav.language,
+      userAgent: nav.userAgent,
+    },
+    telegram: {
+      platform: webApp?.platform || '',
+      version: webApp?.version || '',
+      colorScheme: webApp?.colorScheme || '',
+      viewportHeight: webApp?.viewportHeight || null,
+      viewportStableHeight: webApp?.viewportStableHeight || null,
+    },
+    viewport: typeof window !== 'undefined' ? {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+    } : {},
+  });
+}
+
+function postClientDiagnostics(payload) {
+  if (typeof window === 'undefined') return;
+  try {
+    const body = JSON.stringify(sanitizeDiagnosticValue(payload));
+    fetch(`${API_BASE_URL}/client-diagnostics`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: body.length < 60000,
+    }).catch(() => {});
+  } catch (_) {
+    // Diagnostics must never break the user flow.
+  }
+}
+
+function DebugPanel({ authMode, browserPreviewMode, errorMessage, initData, telegramUserId, practiceAccessToken, lastApiDebug }) {
+  const [copyStatus, setCopyStatus] = useState('');
+  const payloadRef = useRef(null);
+  const showDebugUi = isDebugUiEnabled() || Boolean(errorMessage) || lastApiDebug?.status === 'error';
   if (!showDebugUi) return null;
 
-  const search = typeof window !== 'undefined' ? window.location.search : '';
-  const hash = typeof window !== 'undefined' ? window.location.hash : '';
+  const snapshot = buildClientDebugSnapshot({
+    authMode,
+    browserPreviewMode,
+    errorMessage,
+    initData,
+    telegramUserId,
+    practiceAccessToken,
+    lastApiDebug,
+  });
+  const snapshotText = JSON.stringify(snapshot, null, 2);
+
+  const copyDebug = async () => {
+    try {
+      await navigator.clipboard.writeText(snapshotText);
+      setCopyStatus('copiato');
+    } catch (_) {
+      payloadRef.current?.focus();
+      payloadRef.current?.select();
+      setCopyStatus('testo selezionato: copia manualmente');
+    }
+  };
 
   return (
     <div className="debug-panel">
       <div className="debug-panel-title">Debug Sessione</div>
+      {errorMessage && <div className="debug-panel-line">errore visibile: {errorMessage}</div>}
+      <div className="debug-panel-line">apiBaseUrl: {API_BASE_URL}</div>
       <div className="debug-panel-line">authMode: {authMode}</div>
       <div className="debug-panel-line">initData presente: {initData ? 'si' : 'no'}</div>
       <div className="debug-panel-line">initData len: {initData?.length || 0}</div>
@@ -1163,8 +1287,6 @@ function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, l
       <div className="debug-panel-line">telegramUserId: {telegramUserId || '-'}</div>
       <div className="debug-panel-line">accessToken presente: {practiceAccessToken ? 'si' : 'no'}</div>
       <div className="debug-panel-line">accessToken len: {practiceAccessToken?.length || 0}</div>
-      <div className="debug-panel-line">search: {search || '-'}</div>
-      <div className="debug-panel-line">hash: {hash || '-'}</div>
       {lastApiDebug && (
         <>
           <div className="debug-panel-line">lastApi.label: {lastApiDebug.label || '-'}</div>
@@ -1177,6 +1299,17 @@ function DebugPanel({ authMode, initData, telegramUserId, practiceAccessToken, l
           <div className="debug-panel-line">lastApi.timestamp: {lastApiDebug.timestamp || '-'}</div>
         </>
       )}
+      <div className="debug-panel-actions">
+        <button type="button" className="debug-panel-action" onClick={copyDebug}>Copia debug</button>
+        {copyStatus && <span className="debug-panel-copy-status">{copyStatus}</span>}
+      </div>
+      <textarea
+        ref={payloadRef}
+        className="debug-panel-payload"
+        readOnly
+        value={snapshotText}
+        aria-label="Payload debug copiabile"
+      />
     </div>
   );
 }
@@ -1272,6 +1405,7 @@ function App() {
 
   const { register, control, handleSubmit, setValue, watch, getValues, formState: { errors } } = useForm();
   const authMode = browserPreviewMode ? 'preview browser' : (initData ? 'initData' : (telegramUserId ? 'fallback user_id' : 'non autenticato'));
+  const diagnosticsStateRef = useRef({});
   const showDeveloperUi = isDebugUiEnabled();
 
   // --- Draft persistence ---
@@ -1564,6 +1698,15 @@ function App() {
       updatedAt: new Date().toISOString(),
     };
 
+    diagnosticsStateRef.current = {
+      authMode,
+      browserPreviewMode,
+      initData,
+      telegramUserId,
+      practiceAccessToken,
+      lastApiDebug,
+      hiddenDebug,
+    };
     window.__GIORGIO_DEBUG__ = hiddenDebug;
     try {
       sessionStorage.setItem('giorgio_hidden_debug', JSON.stringify(hiddenDebug));
@@ -1572,9 +1715,10 @@ function App() {
     }
   }, [authMode, browserPreviewMode, initData, telegramUserId, practiceAccessToken, lastApiDebug]);
 
-  const rememberRequest = (label, { method = 'GET', url, params = {}, headers = {} } = {}) => {
-    setLastApiDebug(prev => ({
-      ...(prev || {}),
+  const rememberRequest = useCallback((label, { method = 'GET', url, params = {}, headers = {} } = {}) => {
+    const previousApiDebug = diagnosticsStateRef.current?.lastApiDebug || null;
+    const nextApiDebug = {
+      ...(previousApiDebug || {}),
       timestamp: new Date().toISOString(),
       label,
       method,
@@ -1583,24 +1727,31 @@ function App() {
       headerKeys: Object.keys(headers || {}),
       status: 'pending',
       error: null,
-    }));
-  };
+    };
+    diagnosticsStateRef.current = { ...(diagnosticsStateRef.current || {}), lastApiDebug: nextApiDebug };
+    setLastApiDebug(nextApiDebug);
+  }, []);
 
-  const rememberResponse = (label, extra = {}) => {
-    setLastApiDebug(prev => ({
-      ...(prev || {}),
-      ...(prev?.label === label ? {} : { label }),
+  const rememberResponse = useCallback((label, extra = {}) => {
+    const previousApiDebug = diagnosticsStateRef.current?.lastApiDebug || null;
+    const nextApiDebug = {
+      ...(previousApiDebug || {}),
+      ...(previousApiDebug?.label === label ? {} : { label }),
       timestamp: new Date().toISOString(),
       status: 'ok',
       error: null,
       ...extra,
-    }));
-  };
+    };
+    diagnosticsStateRef.current = { ...(diagnosticsStateRef.current || {}), lastApiDebug: nextApiDebug };
+    setLastApiDebug(nextApiDebug);
+  }, []);
 
-  const rememberError = (label, err, extra = {}) => {
-    setLastApiDebug(prev => ({
-      ...(prev || {}),
-      ...(prev?.label === label ? {} : { label }),
+  const rememberError = useCallback((label, err, extra = {}) => {
+    const diagnosticState = diagnosticsStateRef.current || {};
+    const previousApiDebug = diagnosticState.lastApiDebug?.label === label ? diagnosticState.lastApiDebug : {};
+    const nextApiDebug = {
+      ...(previousApiDebug || {}),
+      ...(previousApiDebug?.label === label ? {} : { label }),
       timestamp: new Date().toISOString(),
       status: 'error',
       error: {
@@ -1610,8 +1761,36 @@ function App() {
         code: err?.response?.data?.code || err?.code || null,
       },
       ...extra,
-    }));
-  };
+    };
+    diagnosticsStateRef.current = { ...diagnosticState, lastApiDebug: nextApiDebug };
+    setLastApiDebug(nextApiDebug);
+    if (!diagnosticState.browserPreviewMode) {
+      const message = classifyError(err);
+      postClientDiagnostics({
+        source: 'mini-app',
+        severity: 'error',
+        message,
+        label,
+        url: typeof window !== 'undefined' ? window.location.href : '',
+        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+        telegram_user_id: diagnosticState.telegramUserId || '',
+        api: nextApiDebug,
+        context: {
+          authMode: diagnosticState.authMode,
+          online: typeof navigator !== 'undefined' ? navigator.onLine : null,
+        },
+        snapshot: buildClientDebugSnapshot({
+          authMode: diagnosticState.authMode,
+          browserPreviewMode: diagnosticState.browserPreviewMode,
+          errorMessage: message,
+          initData: diagnosticState.initData,
+          telegramUserId: diagnosticState.telegramUserId,
+          practiceAccessToken: diagnosticState.practiceAccessToken,
+          lastApiDebug: nextApiDebug,
+        }),
+      });
+    }
+  }, []);
 
   // --- Toast helpers ---
   const addToast = useCallback((message, type = 'success', duration = 4000) => {
@@ -1857,7 +2036,7 @@ function App() {
     } finally {
       setDashboardLoading(false);
     }
-  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, loadPreSyncChecks, refreshDashboardDraftCard]);
+  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, loadPreSyncChecks, refreshDashboardDraftCard, rememberRequest, rememberResponse, rememberError]);
 
   const seedDemoPractices = useCallback(async () => {
     if (seedingDemoPractices) return;
@@ -1955,7 +2134,7 @@ function App() {
     } finally {
       setDetailLoading(false);
     }
-  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, navigateBack, getCacheValue, setCacheValue]);
+  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, navigateBack, getCacheValue, setCacheValue, rememberRequest, rememberResponse, rememberError]);
 
   const loadYapPreview = useCallback(async (id) => {
     if (!id || browserPreviewMode) return;
@@ -1981,7 +2160,7 @@ function App() {
     } finally {
       setYapPreviewLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, getCacheValue, setCacheValue]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, getCacheValue, setCacheValue, rememberRequest, rememberResponse, rememberError]);
 
   useEffect(() => {
     if (currentView === 'detail' && selectedPracticeId) {
@@ -2107,7 +2286,7 @@ function App() {
     // Cleanup previews
     formPhotos.forEach(p => URL.revokeObjectURL(p.preview));
     setFormPhotos([]);
-  }, [formPhotos, initData, telegramUserId, addToast]);
+  }, [formPhotos, initData, telegramUserId, addToast, rememberRequest, rememberResponse, rememberError]);
 
   // --- YAP Automation ---
   const [yapSyncLoading, setYapSyncLoading] = useState(false);
@@ -2185,7 +2364,7 @@ function App() {
     } finally {
       setYapSyncLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
   const deleteYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -2245,7 +2424,7 @@ function App() {
     } finally {
       setYapDeleteLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, selectedPracticeId, loadDashboard, searchQuery, activeFilters, invalidatePracticeCaches]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, selectedPracticeId, loadDashboard, searchQuery, activeFilters, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
   const auditYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -2289,7 +2468,7 @@ function App() {
     } finally {
       setYapAuditLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapOutcome, invalidatePracticeCaches]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
   const renderYapActionProgressBar = (practiceId) => {
     if (!yapActionProgress || String(yapActionProgress.practiceId) !== String(practiceId)) return null;
@@ -2698,7 +2877,7 @@ function App() {
       clearSlowTimer();
       setLoading(false);
     }
-  }, [setValue, startSlowTimer, clearSlowTimer]);
+  }, [setValue, startSlowTimer, clearSlowTimer, rememberRequest, rememberResponse, rememberError]);
 
   // Pre-fill form when editing from detail
   useEffect(() => {
@@ -3698,7 +3877,15 @@ function App() {
             )}
           </>
         )}
-        <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} practiceAccessToken={practiceAccessToken} lastApiDebug={lastApiDebug} />
+        <DebugPanel
+          authMode={authMode}
+          browserPreviewMode={browserPreviewMode}
+          errorMessage={error}
+          initData={initData}
+          telegramUserId={telegramUserId}
+          practiceAccessToken={practiceAccessToken}
+          lastApiDebug={lastApiDebug}
+        />
 
         {/* Stats */}
         <div className="stats-row">
@@ -4217,7 +4404,15 @@ function App() {
               )}
             </>
           )}
-          <DebugPanel authMode={authMode} initData={initData} telegramUserId={telegramUserId} practiceAccessToken={practiceAccessToken} lastApiDebug={lastApiDebug} />
+          <DebugPanel
+            authMode={authMode}
+            browserPreviewMode={browserPreviewMode}
+            errorMessage={error}
+            initData={initData}
+            telegramUserId={telegramUserId}
+            practiceAccessToken={practiceAccessToken}
+            lastApiDebug={lastApiDebug}
+          />
 
           {showDraftBanner && (
             <div className="draft-banner">

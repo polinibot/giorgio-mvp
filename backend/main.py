@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import uuid
 import shutil
 import shutil as _shutil
@@ -551,6 +552,110 @@ async def root():
 async def test_connection():
     """Test endpoint for Vercel connection check."""
     return {"status": "ok", "message": "Connection successful", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+class ClientDiagnosticsReport(BaseModel):
+    source: str = "mini-app"
+    severity: str = "error"
+    message: str
+    label: Optional[str] = None
+    url: Optional[str] = None
+    user_agent: Optional[str] = None
+    telegram_user_id: Optional[str] = None
+    api: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None
+    snapshot: Optional[Dict[str, Any]] = None
+
+
+_CLIENT_DIAGNOSTIC_SECRET_KEYS = (
+    "authorization",
+    "cookie",
+    "initdata",
+    "password",
+    "secret",
+    "tgwebappdata",
+    "token",
+)
+_CLIENT_DIAGNOSTIC_SECRET_RE = re.compile(
+    r"(?i)(access_token|authorization|hash|initData|secret|tgWebAppData|token)=([^&#\s]+)"
+)
+
+
+def _scrub_client_diagnostic_text(value: str) -> str:
+    scrubbed = _CLIENT_DIAGNOSTIC_SECRET_RE.sub(r"\1=[redacted]", value)
+    return scrubbed[:2000]
+
+
+def _is_safe_client_diagnostic_metadata_key(key_norm: str) -> bool:
+    is_auth_metadata = "initdata" in key_norm or "token" in key_norm
+    return is_auth_metadata and (
+        key_norm.endswith("present")
+        or key_norm.endswith("length")
+        or key_norm.endswith("hash")
+    )
+
+
+def _scrub_client_diagnostics(value: Any, depth: int = 0) -> Any:
+    if depth > 4:
+        return "[truncated]"
+    if isinstance(value, dict):
+        scrubbed = {}
+        for key, item in value.items():
+            key_text = str(key)
+            key_norm = key_text.lower().replace("_", "")
+            if (
+                not _is_safe_client_diagnostic_metadata_key(key_norm)
+                and any(marker in key_norm for marker in _CLIENT_DIAGNOSTIC_SECRET_KEYS)
+            ):
+                scrubbed[key_text] = "[redacted]"
+            else:
+                scrubbed[key_text] = _scrub_client_diagnostics(item, depth + 1)
+        return scrubbed
+    if isinstance(value, list):
+        return [_scrub_client_diagnostics(item, depth + 1) for item in value[:25]]
+    if isinstance(value, str):
+        return _scrub_client_diagnostic_text(value)
+    return value
+
+
+async def _notify_client_diagnostics(report: Dict[str, Any]) -> None:
+    try:
+        from error_notifier import get_error_notifier
+
+        notifier = get_error_notifier()
+        if not notifier.bot_token or not notifier.channel_id:
+            return
+
+        api = report.get("api") if isinstance(report.get("api"), dict) else {}
+        await notifier.notify_error(
+            error_message=f"Client diagnostics: {report.get('message') or 'errore mini-app'}",
+            context={
+                "source": report.get("source"),
+                "label": report.get("label"),
+                "severity": report.get("severity"),
+                "telegram_user_id": report.get("telegram_user_id"),
+                "api_status": api.get("status"),
+                "api_url": api.get("url") or report.get("url"),
+                "api_error": api.get("error"),
+            },
+        )
+    except Exception:
+        logger.warning("Unable to forward client diagnostics to Telegram error channel", exc_info=True)
+
+
+@app.post("/client-diagnostics")
+@limiter.limit("20/minute")
+async def report_client_diagnostics(request: Request, body: ClientDiagnosticsReport):
+    """Receive sanitized client-side diagnostics from the Telegram Mini App."""
+    report = _scrub_client_diagnostics(body.model_dump())
+    client_host = request.client.host if request.client else "unknown"
+    logger.warning(
+        "Client diagnostics report from %s: %s",
+        client_host,
+        _json.dumps(report, ensure_ascii=False)[:4000],
+    )
+    asyncio.create_task(_notify_client_diagnostics(report))
+    return APIResponse(success=True, data={"received": True})
 
 
 # --- Practice Dashboard Endpoints ---
