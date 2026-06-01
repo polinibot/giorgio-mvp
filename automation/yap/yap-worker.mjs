@@ -925,9 +925,15 @@ async function writePracticeAndOdl(page, job, args) {
     return writeReport;
   }
   writeReport.openedPractice = true;
-  await page.waitForTimeout(2200);
+  logPhase("odl_practice", "opened");
+  await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(3000);
 
   let odlTab = await clickOdlSection(page);
+  if (!odlTab?.clicked) {
+    await page.waitForTimeout(800);
+    odlTab = await clickOdlSection(page);
+  }
   if (!odlTab?.clicked) {
     const fallbackOdl = page.locator("button, a, [role='button'], .gwt-Label, span, div, td").filter({ hasText: /ordini di lavoro|\bodl\b/i }).first();
     if (await fallbackOdl.count()) {
@@ -937,9 +943,11 @@ async function writePracticeAndOdl(page, job, args) {
   }
   if (odlTab?.clicked) {
     writeReport.openedOdl = true;
-    await page.waitForTimeout(1600);
+    logPhase("odl_tab", "opened", { label: odlTab.label });
+    await page.waitForTimeout(2500);
   } else if (writeReport.odl.attempted) {
     writeReport.odl.error = "odl_tab_not_found";
+    logPhase("odl_tab", "not_found");
   }
 
   if (job.internalNotes) {
