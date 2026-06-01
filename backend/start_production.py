@@ -3,18 +3,70 @@ import signal
 import subprocess
 import sys
 import time
+import logging
+
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(levelname)s:%(name)s:%(message)s",
+)
+logger = logging.getLogger(__name__)
+
+DEFAULT_MIGRATION_TIMEOUT_SECONDS = 60
+MIGRATION_TIMEOUT_ENV = "GIORGIO_MIGRATION_TIMEOUT_SECONDS"
 
 
 def start_process(args, env=None):
     return subprocess.Popen(args, env=env)
 
 
-def run_migrations_once():
-    """Run schema creation/migrations a single time before spawning the API and
-    bot, so the two child processes never run destructive DDL concurrently."""
-    from database_sqlite import create_tables
+def _build_child_env():
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    return env
 
-    create_tables()
+
+def _migration_timeout_seconds() -> int:
+    raw_value = str(os.getenv(MIGRATION_TIMEOUT_ENV, DEFAULT_MIGRATION_TIMEOUT_SECONDS)).strip()
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        logger.warning("Invalid %s=%s, using default %s", MIGRATION_TIMEOUT_ENV, raw_value, DEFAULT_MIGRATION_TIMEOUT_SECONDS)
+        return DEFAULT_MIGRATION_TIMEOUT_SECONDS
+
+
+def run_migrations_once():
+    """Run schema creation/migrations before spawning the API and bot.
+
+    Migrations run in a dedicated subprocess so startup logs stay visible and a
+    hung DB connection cannot block the whole container forever.
+    """
+    env = _build_child_env()
+    timeout_seconds = _migration_timeout_seconds()
+    migration_cmd = [
+        sys.executable,
+        "-c",
+        "from database_sqlite import create_tables; create_tables()",
+    ]
+
+    logger.info("Starting database migrations before boot")
+    proc = start_process(migration_cmd, env=env)
+
+    try:
+        proc.wait(timeout=None if timeout_seconds <= 0 else timeout_seconds)
+    except subprocess.TimeoutExpired:
+        logger.error(
+            "Database migrations exceeded %s seconds. Continuing startup with GIORGIO_SKIP_MIGRATIONS=1 so /health can come up.",
+            timeout_seconds,
+        )
+        stop_process(proc)
+        return False
+
+    if proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, migration_cmd)
+
+    logger.info("Database migrations completed")
+    return True
 
 
 def stop_process(proc):
@@ -28,12 +80,15 @@ def stop_process(proc):
 
 
 def main():
+    os.environ.setdefault("PYTHONUNBUFFERED", "1")
     port = os.getenv("PORT", "8000")
 
     # Migrate once, then tell the children to skip migrations.
-    run_migrations_once()
-    child_env = os.environ.copy()
+    migrations_completed = run_migrations_once()
+    child_env = _build_child_env()
     child_env["GIORGIO_SKIP_MIGRATIONS"] = "1"
+    if not migrations_completed:
+        child_env["GIORGIO_MIGRATIONS_TIMED_OUT"] = "1"
 
     processes = [
         start_process([sys.executable, "bot.py"], env=child_env),

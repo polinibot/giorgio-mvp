@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
 
 # Setta working directory
 WORKDIR /app
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONIOENCODING=UTF-8
 
 # Copia requirements
 COPY requirements.txt .
