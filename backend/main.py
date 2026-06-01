@@ -2088,6 +2088,7 @@ async def delete_practice(
     request: Request,
     practice_id: int,
     access_token: Optional[str] = None,
+    skip_yap: bool = False,
     user_data: dict = Depends(require_whitelisted_user),
     db: Session = Depends(get_db),
 ):
@@ -2106,7 +2107,7 @@ async def delete_practice(
         or getattr(practice, "management_last_sync_at", None)
         or management_status in {"synced", "duplicate", "agenda_synced", "partial_synced", "complete_synced", "unknown"}
     )
-    if not needs_yap_delete:
+    if skip_yap or not needs_yap_delete:
         practice.status = PracticeStatus.DELETED
         practice.updated_by_telegram_id = user_data["id"]
         db.commit()

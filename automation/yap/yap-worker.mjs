@@ -806,15 +806,32 @@ async function appendStructuredBlockToAnyTextarea(page, text) {
       const style = window.getComputedStyle(el);
       return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
     };
-    const targets = [...document.querySelectorAll("textarea, [contenteditable='true']")].filter(isVisible);
+    const selectors = [
+      "textarea",
+      "[contenteditable='true']",
+      "[contenteditable]",
+      "[role='textbox']",
+    ];
+    const targets = [...document.querySelectorAll(selectors.join(", "))].filter(el => {
+      if (!isVisible(el)) return false;
+      const ce = el.getAttribute("contenteditable");
+      if (ce === "false") return false;
+      return true;
+    });
     if (!targets.length) return false;
     const target = targets.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)[0];
-    const isInput = target.tagName === "TEXTAREA";
+    const isInput = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
     const current = isInput ? (target.value || "") : (target.innerText || target.textContent || "");
     const nextValue = current ? `${current}\n${blockText}` : blockText;
     target.focus();
-    if (isInput) target.value = nextValue;
-    else target.textContent = nextValue;
+    if (isInput) {
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
+        || Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+      if (nativeInputValueSetter) nativeInputValueSetter.call(target, nextValue);
+      else target.value = nextValue;
+    } else {
+      target.textContent = nextValue;
+    }
     target.dispatchEvent(new Event("input", { bubbles: true }));
     target.dispatchEvent(new Event("change", { bubbles: true }));
     target.blur();
@@ -943,7 +960,17 @@ async function writePracticeAndOdl(page, job, args) {
         { append: true },
       );
       if (!writeReport.notes.success) {
-        // Fallback: qualsiasi textarea visibile nella pagina dati pratica.
+        // Diagnostica: conta elementi editabili visibili per debug.
+        const editableCount = await safeEvaluate(page, () => {
+          const isVisible = (el) => {
+            const r = el.getBoundingClientRect(); const s = window.getComputedStyle(el);
+            return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+          };
+          return [...document.querySelectorAll("textarea, [contenteditable], [role='textbox']")]
+            .filter(el => isVisible(el) && el.getAttribute("contenteditable") !== "false").length;
+        }).catch(() => -1);
+        logPhase("notes_editable_scan", "info", { editableCount });
+        // Fallback: qualsiasi elemento editabile visibile nella pagina dati pratica.
         const noteFallback = await appendStructuredBlockToAnyTextarea(page, String(job.internalNotes).trim());
         writeReport.notes.success = noteFallback;
         logPhase("notes_fallback", noteFallback ? "done" : "failed");

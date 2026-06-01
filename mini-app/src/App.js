@@ -3940,30 +3940,42 @@ function App() {
   const deleteMultiplePractices = () => {
     const ids = [...selectedIds];
     if (!ids.length) return;
+    const n = ids.length;
     setConfirmModal({
-      title: `🗑 Eliminare ${ids.length} pratiche?`,
-      message: 'Questa operazione non è reversibile. Vuoi procedere?',
+      title: `🗑 Eliminare ${n} pratica${n > 1 ? 'e' : ''}?`,
+      message: `Le pratiche verranno rimosse localmente. Se sincronizzate su YAP, l'appuntamento YAP rimarrà intatto (potrai eliminarlo manualmente). Operazione non reversibile.`,
       onConfirm: async () => {
         setConfirmModal(null);
         setSelectionMode(false);
         setSelectedIds(new Set());
         let deleted = 0;
-        for (const id of ids) {
+        let failed = 0;
+        startYapActionProgress('batch_delete', null, `Eliminazione in corso… 0/${n}`);
+        for (let i = 0; i < ids.length; i++) {
+          const id = ids[i];
+          updateYapActionProgress({ percent: Math.round(((i) / n) * 100), label: `Eliminazione ${i + 1}/${n}…` });
           try {
             if (browserPreviewMode) {
               setPractices(prev => prev.filter(pr => String(pr.id) !== String(id)));
-              deleted++;
-              continue;
+            } else {
+              await axios.delete(`${API_BASE_URL}/practices/${id}`, {
+                params: { ...getAuthParams(), skip_yap: true },
+                headers: getHeaders(),
+                timeout: 15000,
+              });
+              setPractices(prev => prev.filter(pr => String(pr.id) !== String(id)));
+              invalidatePracticeCaches(id);
             }
-            await axios.delete(`${API_BASE_URL}/practices/${id}`, { params: getAuthParams(), headers: getHeaders() });
-            setPractices(prev => prev.filter(pr => String(pr.id) !== String(id)));
-            invalidatePracticeCaches(id);
             deleted++;
           } catch (err) {
-            addToast(`Errore eliminando pratica #${id}`, 'error');
+            failed++;
           }
         }
-        if (deleted > 0) addToast(`${deleted} pratica${deleted > 1 ? 'e' : ''} eliminata${deleted > 1 ? '' : ''}`, 'success');
+        if (failed > 0) {
+          finishYapActionProgress(`${deleted} eliminat${deleted === 1 ? 'a' : 'e'}, ${failed} fallite`, 'error', 4000);
+        } else {
+          finishYapActionProgress(`${deleted} pratica${deleted > 1 ? 'e' : ''} eliminata${deleted > 1 ? '' : ''}`, 'success', 2500);
+        }
         loadDashboard(searchQuery, activeFilters);
       },
       onCancel: () => setConfirmModal(null)
