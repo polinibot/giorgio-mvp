@@ -1432,6 +1432,7 @@ function App() {
   const saveProgressClearTimerRef = useRef(null);
   const yapActionProgressTimerRef = useRef(null);
   const yapActionProgressClearTimerRef = useRef(null);
+  const yapAbortControllerRef = useRef(null);
   const toastIdRef = useRef(0);
   const formRef = useRef(null);
   const searchTimerRef = useRef(null);
@@ -1617,6 +1618,14 @@ function App() {
   const updateYapActionProgress = useCallback((patch) => {
     setYapActionProgress((current) => (current ? { ...current, ...patch } : current));
   }, []);
+
+  const cancelYapAction = useCallback(() => {
+    if (yapAbortControllerRef.current) {
+      yapAbortControllerRef.current.abort();
+      yapAbortControllerRef.current = null;
+    }
+    finishYapActionProgress('Operazione annullata.', 'error', 2000);
+  }, [finishYapActionProgress]);
 
   const normalizeYapOutcome = useCallback((rawResult, options = {}) => (
     normalizeYapResult(rawResult, options)
@@ -2348,13 +2357,15 @@ function App() {
     setYapSyncLoading(true);
     setYapLastResult(null);
     setYapLastPracticeId(id);
+    const abortController = new AbortController();
+    yapAbortControllerRef.current = abortController;
     try {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
       if (!silent) {
         updateYapActionProgress({ percent: 30, label: 'YAP: scrittura appuntamento e pratica in corso...' });
       }
       const res = await fetchWithRetry(() =>
-        axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
+        axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 180000, signal: abortController.signal })
       );
       const data = normalizeYapOutcome(res.data?.data || {}, { dryRun: Boolean(apiOptions.dry_run) });
       setYapLastResult(data);
@@ -2387,6 +2398,9 @@ function App() {
       }
       return data;
     } catch (err) {
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError') {
+        return { status: 'cancelled' };
+      }
       rememberError('yap.sync', err);
       const errorResult = {
         status: 'sync_failed',
@@ -2399,6 +2413,7 @@ function App() {
       if (!silent) finishYapActionProgress(errorResult.message || 'Sync YAP fallita', 'error', 0);
       return errorResult;
     } finally {
+      yapAbortControllerRef.current = null;
       setYapSyncLoading(false);
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
@@ -2483,11 +2498,13 @@ function App() {
     setYapAuditLoading(true);
     setYapLastResult(null);
     setYapLastPracticeId(id);
+    const auditAbortController = new AbortController();
+    yapAbortControllerRef.current = auditAbortController;
     try {
       rememberRequest('yap.audit', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/audit`, params: getAuthParams(), headers: getHeaders() });
       updateYapActionProgress({ percent: 20, label: 'YAP: lettura campi appuntamento e tag...' });
       const res = await fetchWithRetry(() =>
-        axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 255000 })
+        axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 255000, signal: auditAbortController.signal })
       );
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
@@ -2500,6 +2517,9 @@ function App() {
       loadDetail(id);
       return data;
     } catch (err) {
+      if (err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError') {
+        return { status: 'cancelled' };
+      }
       rememberError('yap.audit', err);
       const errorResult = {
         status: 'sync_failed',
@@ -2512,6 +2532,7 @@ function App() {
       addToast(errorResult.message, 'error');
       return errorResult;
     } finally {
+      yapAbortControllerRef.current = null;
       setYapAuditLoading(false);
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
@@ -2543,7 +2564,19 @@ function App() {
           <div className="save-progress-header">
             {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
             <span className="save-progress-label">{yapActionProgress.label}</span>
-            <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
+              {yapActionProgress.status === 'running' && (
+                <button
+                  type="button"
+                  onClick={cancelYapAction}
+                  style={{ background: 'none', border: '1px solid currentColor', borderRadius: '4px', color: 'inherit', cursor: 'pointer', fontSize: '11px', opacity: 0.75, padding: '1px 6px', lineHeight: '1.4' }}
+                  title="Annulla operazione"
+                >
+                  Stop
+                </button>
+              )}
+            </div>
           </div>
           <div className="upload-progress-bar" aria-hidden="true">
             <div
@@ -2564,6 +2597,7 @@ function App() {
       String(yapActionProgress.practiceId) === String(resolvedPracticeId)
     );
     if (!result && !showActionProgress) return null;
+    if (showActionProgress && yapActionProgress.status === 'running') return null;
     const safeResult = result || {};
     const statusCandidate = [
       safeResult.status,
