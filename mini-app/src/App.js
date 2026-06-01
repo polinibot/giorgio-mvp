@@ -3438,14 +3438,14 @@ function App() {
         }
 
         setSaving(true);
-        startSlowTimer();
+        startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         try {
-          await fetchWithRetry(() =>
-            axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 })
-          );
+          await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
+          finishYapActionProgress('Pratica eliminata', 'success', 800);
           invalidatePracticeCaches(p.id);
           clearDraft();
           addToast('Pratica cancellata con successo', 'success');
+          await new Promise(r => setTimeout(r, 900));
           setCurrentView('dashboard');
           setNavigationStack([]);
           setSelectedPracticeId(null);
@@ -3453,9 +3453,9 @@ function App() {
           setPractices(prev => prev.filter(pr => pr.id !== p.id));
           setStats(prev => prev ? { ...prev, total: prev.total - 1, pending_sync: p.synced ? prev.pending_sync : prev.pending_sync - 1 } : prev);
         } catch (err) {
+          finishYapActionProgress(classifyError(err), 'error', 0);
           addToast(classifyError(err), 'error');
         } finally {
-          clearSlowTimer();
           setSaving(false);
         }
       },
@@ -4403,6 +4403,7 @@ function App() {
               🗑 Elimina
             </button>
           </div>
+          {renderYapActionProgressBar(practice.id)}
         </div>
 
         {lightboxPhoto && <Lightbox src={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}
@@ -4710,245 +4711,4 @@ function App() {
 
               <div className="form-group">
                 <label htmlFor="practice_type">Tipo Pratica*</label>
-                <select id="practice_type" {...register('practice_type')} className="select">
-                  <option value="preventivo">Preventivo</option>
-                  <option value="ordine_di_lavoro">Ordine di Lavoro</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="internal_notes">Note interne (pratica)</label>
-                <textarea
-                  id="internal_notes"
-                  {...register('internal_notes')}
-                  className="textarea"
-                  rows="2"
-                  placeholder="Note generali visibili nel mapping verso YAP (non nel popup agenda)"
-                />
-              </div>
-            </div>
-
-            {/* Contesti */}
-            <div className="section" data-field="contexts">
-              <h2>🔧 Contesti</h2>
-              <div className="checkboxes">
-                {['officina', 'carrozzeria', 'revisione'].map(context => (
-                  <label key={context} className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={selectedContexts.includes(context)}
-                      onChange={() => toggleContext(context)}
-                    />
-                    {context.charAt(0).toUpperCase() + context.slice(1)}
-                  </label>
-                ))}
-              </div>
-              <div className="field-hint">Seleziona almeno un tipo di sezione</div>
-              {fieldErrors.contexts && <div className="field-error">{fieldErrors.contexts}</div>}
-            </div>
-
-            {/* Sezioni dinamiche */}
-            {selectedContexts.map(context => (
-              <div key={context} className="section">
-                <h2>📋 {context.charAt(0).toUpperCase() + context.slice(1)}</h2>
-
-                <div className="form-group">
-                  <div className="section-inline-actions">
-                    <label>Righe Descrittive*</label>
-                    <button type="button" onClick={() => addDescriptionRow(context)} className="button-add">+ Aggiungi riga</button>
-                  </div>
-                  {sections[context]?.description_rows?.map((row, index) => (
-                    <div key={`${context}-row-${index}-${sections[context].description_rows.length}`} className="description-row">
-                      <input
-                        type="text"
-                        value={row}
-                        onChange={(e) => updateDescriptionRow(context, index, e.target.value)}
-                        className="input"
-                        placeholder="Descrizione lavoro..."
-                      />
-                      {sections[context].description_rows.length > 1 && (
-                        <button type="button" onClick={() => removeDescriptionRow(context, index)} className="button-remove">✕</button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                {context === 'officina' && (
-                  <div className="form-group">
-                    <label>MAN Ore</label>
-                    <input
-                      type="number" step="0.5"
-                      value={sections[context]?.man_hours || ''}
-                      onChange={(e) => updateSection(context, 'man_hours', parseFloat(e.target.value) || '')}
-                      className="input" placeholder="2.5"
-                    />
-                  </div>
-                )}
-
-                {context === 'carrozzeria' && (
-                  <>
-                    <div className="form-group">
-                      <label>MAC Ore</label>
-                      <input
-                        type="number" step="0.5"
-                        value={sections[context]?.mac_hours || ''}
-                        onChange={(e) => updateSection(context, 'mac_hours', parseFloat(e.target.value) || '')}
-                        className="input" placeholder="2.5"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label>Materiali (€)</label>
-                      <input
-                        type="number" step="0.01"
-                        value={sections[context]?.materials_amount || ''}
-                        onChange={(e) => updateSection(context, 'materials_amount', parseFloat(e.target.value) || '')}
-                        className="input" placeholder="150.00"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="inline-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={sections[context]?.waste_apply || false}
-                          onChange={(e) => updateSection(context, 'waste_apply', e.target.checked)}
-                        />
-                        Applica smaltimento rifiuti
-                      </label>
-                      {sections[context]?.waste_apply && (
-                        <div className="revealed-fields">
-                          <input
-                            type="number" step="0.1"
-                            value={sections[context]?.waste_percentage || 2}
-                            onChange={(e) => updateSection(context, 'waste_percentage', parseFloat(e.target.value) || 2)}
-                            className="input" placeholder="Percentuale smaltimento %" min="0" max="100"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {(context === 'officina' || context === 'carrozzeria') && (
-                  <div className="form-group">
-                    <div className="section-inline-actions">
-                      <label>Pezzi / ricambi</label>
-                      <button type="button" onClick={() => addPart(context)} className="button-add">+ Aggiungi pezzo</button>
-                    </div>
-                    {getPartsForContext(context).map((part, index) => (
-                      <div key={part._key || index} className="description-row">
-                        <input
-                          type="text" value={part.name}
-                          onChange={(e) => updatePart(context, index, 'name', e.target.value)}
-                          className="input" placeholder="Es. Pastiglie freno"
-                        />
-                        <input
-                          type="text" value={part.quantity}
-                          onChange={(e) => updatePart(context, index, 'quantity', e.target.value)}
-                          className="input" placeholder="1 pz"
-                          style={{ maxWidth: '100px' }}
-                        />
-                        <button type="button" onClick={() => removePart(context, index)} className="button-remove">✕</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label htmlFor={`notes_${context}`}>Note interne</label>
-                  <textarea
-                    id={`notes_${context}`}
-                    value={sections[context]?.notes || ''}
-                    onChange={(e) => updateSection(context, 'notes', e.target.value)}
-                    className="textarea"
-                    rows="3"
-                    placeholder="Note per questo reparto..."
-                    aria-label={`Note interne ${context}`}
-                  />
-                </div>
-              </div>
-            ))}
-
-            {!browserPreviewMode && renderYapPreviewPanel(formYapPreview, formYapPreviewLoading, {
-              title: '📅 Anteprima YAP (live)',
-            })}
-
-            {saveProgress && (
-              <div className={`save-progress ${saveProgress.status === 'error' ? 'save-progress-error' : saveProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
-                <div className="save-progress-header">
-                  {saveProgress.status === 'running' && <span className="loading-spinner sm"></span>}
-                  <span className="save-progress-label">{saveProgress.label}</span>
-                  <span className="save-progress-percent">{Math.round(saveProgress.percent)}%</span>
-                </div>
-                <div className="upload-progress-bar" aria-hidden="true">
-                  <div
-                    className="upload-progress-bar-fill"
-                    style={{ width: `${Math.min(100, Math.max(0, saveProgress.percent))}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={saving}
-              className={`button-submit ${saving ? 'btn-loading' : ''}`}
-            >
-              {saving ? 'Salvataggio in corso...' : (practice ? '✓ Aggiorna' : '✓ Salva')}
-            </button>
-
-            {practice && practice.id && (
-              <button
-                type="button"
-                onClick={() => deletePractice()}
-                disabled={saving}
-                className="button-delete"
-              >
-                🗑 Elimina
-              </button>
-            )}
-          </form>
-        </div>
-      </div>
-    );
-  };
-
-  // --- Main Render ---
-  if (loading && currentView === 'form') {
-    return (
-      <div className="App">
-        <SkeletonLoader />
-        {slowRequest && <div className="slow-request-warning">Richiesta lenta: se e' una sync YAP, guarda la barra progresso per la fase corrente.</div>}
-      </div>
-    );
-  }
-
-  return (
-    <div className="App">
-      <Toast toasts={toasts} removeToast={removeToast} />
-      {yapActionProgress?.action === 'delete' && renderGlobalYapActionProgressBar()}
-      {confirmModal && (
-        <ConfirmModal
-          title={confirmModal.title}
-          message={confirmModal.message}
-          onConfirm={confirmModal.onConfirm}
-          onCancel={confirmModal.onCancel}
-        />
-      )}
-      {currentView === 'dashboard' && renderDashboard()}
-      {currentView === 'detail' && renderDetail()}
-      {currentView === 'form' && renderForm()}
-      {typeof window !== 'undefined' && (!window.Telegram?.WebApp || browserPreviewMode) && currentView !== 'dashboard' && (
-        <button
-          type="button"
-          className="telegram-dashboard-fab"
-          onClick={openDashboard}
-          aria-label="Apri dashboard"
-        >
-          📋 Dashboard
-        </button>
-      )}
-    </div>
-  );
-}
-
-export default App;
+                <se
