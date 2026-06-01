@@ -1080,7 +1080,15 @@ async function writePracticeAndOdl(page, job, args) {
     }
   }
 
-  // Fallback unico: se non troviamo campi specifici, mettiamo il blocco completo in una textarea visibile.
+  // Fallback note: se le note non sono state scritte con keyword specifici, prova qualsiasi textarea visibile.
+  if (job.internalNotes && !writeReport.notes.success) {
+    const notesFallbackOk = await appendStructuredBlockToAnyTextarea(page, String(job.internalNotes).trim());
+    writeReport.notes.success = notesFallbackOk;
+    if (notesFallbackOk) writeReport.notes.error = null;
+    logPhase("notes_fallback", notesFallbackOk ? "done" : "failed");
+  }
+
+  // Fallback generico: se proprio nessun campo specifico funziona, metti il blocco completo nella prima textarea.
   if (
     !writeReport.notes.success
     && !writeReport.hours.man.success
