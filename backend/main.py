@@ -1316,6 +1316,8 @@ def _audit_reason_for_status(status_value: str, audit_result: Dict[str, Any]) ->
         return explicit_reason
     if status_value == "complete_synced":
         return "strict_match_complete"
+    if status_value == "agenda_synced":
+        return "audit_deferred"
     if status_value == "partial_synced":
         missing = len(audit_result.get("missing") or [])
         mismatch = len(audit_result.get("mismatch") or [])

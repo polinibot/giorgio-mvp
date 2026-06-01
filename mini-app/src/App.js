@@ -150,7 +150,7 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
     const inferred = String(result.practice?.management_sync_status || result.yap?.status || '').trim();
     const normalizedMessage = String(message || '').toLowerCase();
     if (inferred) status = inferred;
-    else if (result.yap?.result?.saved || result.yap?.result?.mode === 'commit') status = 'partial_synced';
+    else if (result.yap?.result?.saved || result.yap?.result?.mode === 'commit') status = result.audit ? 'partial_synced' : 'agenda_synced';
     else if (normalizedMessage.includes('agenda sincronizzata')) status = 'partial_synced';
     else if (normalizedMessage.includes('appuntamento eliminato')) status = 'deleted';
     else if (normalizedMessage.includes('non trovato') || normalizedMessage.includes('not found')) status = 'not_found';
@@ -263,6 +263,32 @@ function getYapAuditResult(resultOrPractice) {
   return resultOrPractice?.audit || resultOrPractice?.management_audit_result || resultOrPractice?.practice?.management_audit_result || null;
 }
 
+function formatYapStatusReason(reason) {
+  const normalized = String(reason || '').trim().toLowerCase();
+  if (!normalized) return '';
+  if (normalized === 'audit_deferred') return 'verifica completa in attesa';
+  if (normalized === 'appointment_not_verified') return 'appuntamento non verificato';
+  if (normalized === 'audit_not_completed') return 'audit non completato';
+  if (normalized.startsWith('strict_mismatch_missing_')) return 'alcuni campi non coincidono con l’atteso';
+  if (normalized === 'strict_match_complete') return 'verifica completa riuscita';
+  return normalized.replaceAll('_', ' ');
+}
+
+function formatYapWriteReportIssue(fieldLabel, errorCode) {
+  const field = String(fieldLabel || '').trim().toLowerCase();
+  const error = String(errorCode || '').trim().toLowerCase();
+  if (!field && !error) return '';
+  if (error === 'notes_field_not_found') return 'note da ricontrollare';
+  if (error === 'odl_tab_not_found') return 'ODL da ricontrollare';
+  if (error === 'materials_field_not_found') return 'materiali da ricontrollare';
+  if (error === 'parts_field_not_found') return 'ricambi da ricontrollare';
+  if (error === 'waste_field_not_found') return 'smaltimento da ricontrollare';
+  if (error === 'man_field_not_found') return 'MAN da ricontrollare';
+  if (error === 'mac_field_not_found') return 'MAC da ricontrollare';
+  if (error.endsWith('_field_not_found')) return `${field || 'campo'} da ricontrollare`;
+  return field || error;
+}
+
 function isAgendaOnlyYapSync(result) {
   const scope = getYapSyncScope(result);
   if (!scope) return false;
@@ -273,7 +299,7 @@ function formatYapPracticeStatus(practice) {
   const status = String(practice?.management_sync_status || '').trim();
   if (status === 'complete_synced') return 'Completa';
   if (status === 'partial_synced') return 'Parziale';
-  if (status === 'agenda_synced') return 'Parziale (solo agenda)';
+  if (status === 'agenda_synced') return 'Agenda scritta (verifica in attesa)';
   if (status === 'sync_failed') return 'Sync YAP fallita';
   if (status === 'deleted') return 'Appuntamento eliminato da YAP';
   if (status === 'blocked_by_odl') return 'Eliminazione bloccata da ODL';
@@ -2595,7 +2621,7 @@ function App() {
     const titleMap = {
       complete_synced: 'YAP completo',
       partial_synced: 'YAP parziale',
-      agenda_synced: 'YAP parziale',
+      agenda_synced: 'YAP agenda scritta',
       synced: agendaOnly ? 'YAP parziale' : 'Sync YAP completata',
       duplicate: 'Duplicato rilevato',
       dry_run: 'Dry-run YAP completato',
@@ -2643,20 +2669,23 @@ function App() {
     const writeReport = safeResult.write_report || safeResult.yap?.result?.write_report || null;
     if (writeReport?.ok === false) {
       const issues = [
-        writeReport.notes?.error ? `note:${writeReport.notes.error}` : null,
-        writeReport.odl?.error ? `odl:${writeReport.odl.error}` : null,
-        writeReport.materials?.error ? `materiali:${writeReport.materials.error}` : null,
-        writeReport.parts?.error ? `ricambi:${writeReport.parts.error}` : null,
-        writeReport.waste?.error ? `smaltimento:${writeReport.waste.error}` : null,
+        writeReport.notes?.error ? formatYapWriteReportIssue('note', writeReport.notes.error) : null,
+        writeReport.odl?.error ? formatYapWriteReportIssue('odl', writeReport.odl.error) : null,
+        writeReport.materials?.error ? formatYapWriteReportIssue('materiali', writeReport.materials.error) : null,
+        writeReport.parts?.error ? formatYapWriteReportIssue('ricambi', writeReport.parts.error) : null,
+        writeReport.waste?.error ? formatYapWriteReportIssue('smaltimento', writeReport.waste.error) : null,
       ].filter(Boolean);
-      meta.push(issues.length ? `Write report: incompleto (${issues.slice(0, 2).join(', ')})` : 'Write report: incompleto');
+      meta.push(issues.length ? `Post-scrittura: ${issues.slice(0, 2).join(', ')}` : 'Post-scrittura: controlli incompleti');
     }
     const errorCode = safeResult.error_code || safeResult?.yap?.error?.error_code || null;
     const statusReason = safeResult.status_reason || safeResult?.yap?.error?.reason || null;
     const nextAction = safeResult.next_action || safeResult?.yap?.error?.next_action || '';
     const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
     if (errorCode) meta.push(`Codice ${errorCode}`);
-    if (statusReason) meta.push(`Causa ${statusReason}`);
+    if (statusReason) {
+      const prefix = String(statusReason).trim().toLowerCase() === 'audit_deferred' ? 'Stato' : 'Causa';
+      meta.push(`${prefix} ${formatYapStatusReason(statusReason)}`);
+    }
     if (nextAction) meta.push(`Azione ${nextAction}`);
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);

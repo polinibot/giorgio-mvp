@@ -88,6 +88,11 @@ class TestYapNotifyError:
 class TestYapSyncEndpoints:
     """Test endpoint YAP sync (/practices/{id}/yap/*)."""
 
+    def test_audit_reason_marks_agenda_synced_as_deferred_verification(self):
+        import main
+
+        assert main._audit_reason_for_status("agenda_synced", {}) == "audit_deferred"
+
     def test_yap_sync_rejects_missing_credentials(self, client, sample_practice, monkeypatch):
         monkeypatch.delenv("YAP_USERNAME", raising=False)
         monkeypatch.delenv("YAP_PASSWORD", raising=False)
@@ -165,7 +170,7 @@ class TestYapSyncEndpoints:
         assert "Configurazione YAP mancante" in data["detail"]["message"]
         assert called["value"] is False
 
-    def test_yap_sync_returns_single_final_status_after_audit(self, client, sample_practice, monkeypatch):
+    def test_yap_sync_returns_agenda_written_state_and_defers_audit(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
@@ -179,15 +184,7 @@ class TestYapSyncEndpoints:
         )
 
         async def fake_run_yap_script(script_name, *args, **kwargs):
-            if script_name == "yap-audit-appointment.mjs":
-                return {
-                    "ok": True,
-                    "status": "complete_synced",
-                    "message": "YAP completo: agenda, note, ODL, materiali e ricambi verificati.",
-                    "present": [{"field": "agenda.cosa", "label": "Cosa", "expected": "YAPTEST01", "found": "YAPTEST01"}],
-                    "missing": [],
-                    "mismatch": [],
-                }
+            assert script_name == "yap-worker.mjs"
             return {
                 "result": {
                     "saved": True,
@@ -214,18 +211,19 @@ class TestYapSyncEndpoints:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["status"] == "complete_synced"
-        assert "completo" in data["message"].lower()
-        assert data["practice"]["management_sync_status"] == "complete_synced"
+        assert data["status"] == "agenda_synced"
+        assert "premi verifica yap" in data["message"].lower()
+        assert data["status_reason"] == "audit_deferred"
+        assert data["practice"]["management_sync_status"] == "agenda_synced"
         assert data["practice"]["synced"] is True
-        assert data["audit"]["status"] == "complete_synced"
+        assert data["audit"] is None
         assert isinstance(data.get("phase_timeline"), list)
         assert any(item.get("name") == "precheck" for item in data["phase_timeline"])
         assert any(item.get("name") == "write" for item in data["phase_timeline"])
-        assert any(item.get("name") == "audit" for item in data["phase_timeline"])
+        assert any(item.get("name") == "audit" and item.get("status") == "skipped" for item in data["phase_timeline"])
         assert isinstance(data.get("write_report"), dict)
 
-    def test_yap_sync_keeps_partial_when_post_write_audit_fails(self, client, sample_practice, monkeypatch):
+    def test_yap_sync_keeps_write_report_details_when_audit_is_deferred(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
@@ -239,8 +237,7 @@ class TestYapSyncEndpoints:
         )
 
         async def fake_run_yap_script(script_name, *args, **kwargs):
-            if script_name == "yap-audit-appointment.mjs":
-                raise HTTPException(status_code=504, detail="Timeout automazione YAP")
+            assert script_name == "yap-worker.mjs"
             return {
                 "result": {
                     "saved": True,
@@ -267,18 +264,15 @@ class TestYapSyncEndpoints:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["status"] == "partial_synced"
-        assert data["status_reason"] == "audit_not_completed"
-        assert data["error_code"] == "YAP_AUDIT_INCOMPLETE"
-        assert data["action_target"] == "audit"
-        assert data["next_action"] == "Verifica YAP"
-        assert data["practice"]["management_sync_status"] == "partial_synced"
-        assert data["practice"]["synced"] is False
-        assert data["audit"]["completed"] is False
-        assert data["audit"]["present"] == []
-        assert data["audit"]["missing"] == []
-        assert data["audit"]["mismatch"] == []
-        assert any(item.get("name") == "audit" and item.get("status") == "failed" for item in data["phase_timeline"])
+        assert data["status"] == "agenda_synced"
+        assert data["status_reason"] == "audit_deferred"
+        assert data["error_code"] is None
+        assert data["action_target"] is None
+        assert data["next_action"] is None
+        assert data["practice"]["management_sync_status"] == "agenda_synced"
+        assert data["practice"]["synced"] is True
+        assert data["audit"] is None
+        assert any(item.get("name") == "audit" and item.get("status") == "skipped" for item in data["phase_timeline"])
         assert data["write_report"]["notes"]["error"] == "notes_field_not_found"
 
     @pytest.mark.parametrize(
