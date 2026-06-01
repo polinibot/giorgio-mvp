@@ -85,12 +85,14 @@ function extractErrorDetail(detail) {
 function classifyError(err) {
   if (!err.response) {
     if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-      return 'Connessione scaduta. Controlla la tua connessione e riprova.';
+      return 'Automazione YAP non risponde entro i tempi. Il portale YAP potrebbe essere lento. Riprova tra qualche minuto.';
     }
     return 'Errore di rete. Controlla la connessione internet e riprova.';
   }
   const status = err.response.status;
   const detail = extractErrorDetail(err.response.data?.detail || err.response.data?.message || err.response.data?.error);
+  if (status === 429) return detail || 'Operazione YAP già in corso. Attendi il completamento e riprova.';
+  if (status === 504) return detail || 'Automazione YAP scaduta: il portale non ha risposto in tempo. Riprova tra qualche minuto.';
   if (status === 422 || status === 400) return detail || 'Dati non validi. Controlla i campi e riprova.';
   if (status === 403) return detail || 'Utente non autorizzato. Contatta l\'amministratore.';
   if (status === 401) {
@@ -4202,7 +4204,7 @@ function App() {
                 >
                   {yapSyncLoading ? 'Sincronizzazione...' : 'Sincronizza con YAP'}
                 </button>
-                {(practice.management_sync_status === 'partial_synced' || practice.management_sync_status === 'sync_failed' || practice.management_sync_status === 'complete_synced') && (
+                {(['partial_synced', 'sync_failed', 'complete_synced', 'agenda_synced'].includes(practice.management_sync_status)) && (
                   <button
                     type="button"
                     className="detail-sync-action"
@@ -4247,7 +4249,7 @@ function App() {
                   >
                     {yapSyncLoading ? 'Sync in corso...' : (practice.synced ? 'Risincronizza YAP' : 'Sincronizza con YAP')}
                   </button>
-                  {(practice.management_sync_status === 'partial_synced' || practice.management_sync_status === 'sync_failed' || practice.management_sync_status === 'complete_synced') && (
+                  {(['partial_synced', 'sync_failed', 'complete_synced', 'agenda_synced'].includes(practice.management_sync_status)) && (
                     <button
                       type="button"
                       className="detail-sync-action"

@@ -706,7 +706,15 @@ async function runAudit(mapping, args) {
 
   await fs.mkdir(args.artifactDir, { recursive: true });
   const safeMode = String(process.env.YAP_SAFE_MODE || "").trim() === "1";
-  const launchArgs = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"];
+  const launchArgs = [
+    "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-zygote",
+    "--no-first-run", "--bwsi", "--hide-scrollbars", "--mute-audio",
+    "--disable-background-networking", "--disable-background-timer-throttling",
+    "--disable-client-side-phishing-detection", "--disable-default-apps",
+    "--disable-hang-monitor", "--disable-popup-blocking", "--disable-prompt-on-repost",
+    "--disable-sync", "--disable-translate", "--metrics-recording-only",
+    "--safebrowsing-disable-auto-update", "--password-store=basic",
+  ];
   if (safeMode) {
     launchArgs.push(
       "--disable-gpu",

@@ -345,6 +345,18 @@ def _get_yap_run_lock() -> asyncio.Lock:
     return YAP_RUN_LOCK
 
 
+class _WithAcquiredLock:
+    """Context manager che rilascia un asyncio.Lock già acquisito esternamente."""
+    def __init__(self, lock: asyncio.Lock):
+        self._lock = lock
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        self._lock.release()
+
+
 def _repair_practice_owner_if_needed(db: Session, practice: Practice, user_data: dict, access_token: Optional[str]) -> None:
     if practice.created_by_telegram_id == user_data["id"]:
         return
@@ -1436,7 +1448,19 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
     queued_started_at = _utc_now_iso()
     queued_started_monotonic = time.perf_counter()
 
-    async with _get_yap_run_lock():
+    lock = _get_yap_run_lock()
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=10)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "message": "Un'altra operazione YAP è già in corso. Attendi il completamento e riprova.",
+                "error_code": "YAP_BUSY",
+                "next_action": "retry",
+            },
+        )
+    async with _WithAcquiredLock(lock):
         lock_acquired_at = _utc_now_iso()
         lock_acquired_monotonic = time.perf_counter()
         lock_wait_ms = int((lock_acquired_monotonic - queued_started_monotonic) * 1000)
@@ -2390,34 +2414,19 @@ async def sync_practice_to_yap(
             external_id = result_data.get("externalId") or result_data.get("external_id")
             if external_id:
                 practice.management_external_id = str(external_id)
-            # Stato finale deciso solo dall'audit.
-            practice.synced = False
-            practice.management_sync_status = "sync_failed"
+            # Audit inline rimosso: la sync scrive su YAP e salva stato 'agenda_synced'.
+            # L'audit (più lento, apre pratica+ODL) viene eseguito solo on-demand via
+            # il pulsante "Verifica YAP", così la sync completa in ~30-60s invece di 300s+.
+            practice.synced = True
+            practice.management_sync_status = "agenda_synced"
             practice.management_last_sync_at = datetime.now(timezone.utc)
             practice.updated_by_telegram_id = user_data["id"]
             db.commit()
             _cache_invalidate_practice(practice.id)
-
-            audit_args = ["--payload-file", tmp_path]
-            if body.debug:
-                audit_args.append("--debug")
-            if body.fresh_login:
-                audit_args.append("--fresh-login")
-            try:
-                # L'audit profondo (apertura pratica + ODL) richiede ~110s sui casi
-                # multi-reparto. Con il vecchio budget di 90s veniva ucciso a metà e
-                # restituiva YAP_AUDIT_INCOMPLETE / audit_not_completed pur essendo la
-                # scrittura andata a buon fine. Budget portato a 180s (l'endpoint
-                # standalone "Verifica YAP" usa 240s) così l'audit inline chiude e lo
-                # stato diventa complete_synced senza dover premere Verifica YAP a mano.
-                audit_result = await _run_yap_script("yap-audit-appointment.mjs", audit_args, timeout_seconds=180, db=db)
-                close_phase("audit", "completed", "Audit YAP completato.")
-            except HTTPException as audit_exc:
-                logger.warning("Audit post-sync non riuscito per pratica %d: %s", practice_id, audit_exc.detail)
-                audit_result = _build_incomplete_post_write_audit(audit_exc.detail, write_report)
-                close_phase("audit", "failed", "Audit YAP non riuscito.")
-            response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
-            response_message = _audit_message_for_status(response_status, audit_result)
+            response_status = "agenda_synced"
+            response_message = "Appuntamento scritto su YAP. Premi Verifica YAP per controllare tutti i campi."
+            audit_result = None
+            close_phase("audit", "skipped", "Audit rinviato: usa Verifica YAP per il controllo completo.")
             close_phase("finalize", "completed", "Stato finale persistito.")
         else:
             practice.synced = False

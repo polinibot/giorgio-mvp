@@ -216,7 +216,7 @@ async function dismissUnsupportedBrowserWarning(page) {
 
   if (await ok.isVisible({ timeout: 1500 }).catch(() => false)) {
     await ok.click({ force: true }).catch(() => {});
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(100);
     return true;
   }
 
@@ -225,7 +225,7 @@ async function dismissUnsupportedBrowserWarning(page) {
     const okBtn = btns.find((b) => (b.textContent || "").trim().toUpperCase() === "OK");
     if (okBtn) okBtn.click();
   }).catch(() => {});
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
   return true;
 }
 
@@ -265,7 +265,7 @@ export async function gotoAgendaDate(page, isoDate) {
     const currentIndex = await currentMonthIndex();
     if (currentIndex == null || currentIndex === targetIndex) break;
     await page.locator(currentIndex > targetIndex ? ".prev-button" : ".next-button").first().click();
-    await page.waitForTimeout(120);
+    await page.waitForTimeout(50);
   }
 
   const moved = await page.evaluate((targetDate) => {
@@ -290,12 +290,11 @@ export async function gotoAgendaDate(page, isoDate) {
   if (!moved) await page.keyboard.press("Home").catch(() => {});
   await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
   await waitForAgendaReady(page, 10000).catch(() => {});
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(200);
 }
 
 export async function loginYap(page, username, password) {
   await page.goto(YAP_BASE_URL, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(500);
   await dismissUnsupportedBrowserWarning(page);
 
   const loginInputVisible = await page.locator('input[name="u"]').first().isVisible({ timeout: 2500 }).catch(() => false);
@@ -326,7 +325,7 @@ export async function loginYap(page, username, password) {
     });
   }
 
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(100);
   await dismissUnsupportedBrowserWarning(page);
   await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 12000 });
   const filled = await page.evaluate(({ u, p }) => {
@@ -365,7 +364,7 @@ export async function loginYap(page, username, password) {
       if (btn) btn.click();
     });
   }
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(400);
   await dismissUnsupportedBrowserWarning(page);
   await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
   await page.getByText("Agenda", { exact: true }).first().waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
@@ -374,7 +373,7 @@ export async function loginYap(page, username, password) {
 
 export async function openAgendaInApp(page) {
   await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(200);
   await dismissUnsupportedBrowserWarning(page);
 
   const selectors = [".fc-time-grid", ".fc-view-container", ".view-switch", ".fc-agenda-view"];
@@ -387,7 +386,7 @@ export async function openAgendaInApp(page) {
     if (await agendaLink.isVisible().catch(() => false)) {
       await agendaLink.click().catch(() => {});
     }
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(300);
     await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
     await dismissUnsupportedBrowserWarning(page);
     await waitForAgendaReady(page, 8000).catch(() => {});
