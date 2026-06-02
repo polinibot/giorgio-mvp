@@ -2081,18 +2081,21 @@ async function scanAgendaEvents(page) {
   });
 }
 
-async function saveAppointmentPopup(page, { maxSaveAttempts = 2 } = {}) {
+async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
   let putResponse = null;
   let saveAttemptsUsed = 0;
   let lastSaveError = null;
+  logPhase("save_popup", "starting", { maxAttempts: maxSaveAttempts });
+  
   for (let attempt = 1; attempt <= maxSaveAttempts; attempt += 1) {
     saveAttemptsUsed = attempt;
+    logPhase("save_attempt", `try_${attempt}`);
     try {
       putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
         const saved = await safeEvaluate(page, () => {
           const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
             .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
-          if (!popup) return false;
+          if (!popup) return { found: false, reason: "popup_not_found" };
           const isVisible = (el) => {
             const rect = el.getBoundingClientRect();
             const style = window.getComputedStyle(el);
@@ -2105,24 +2108,41 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 2 } = {}) {
             const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
             return text.includes("salva") || text.includes("save") || text.includes("floppy") || text.includes("done") || text.includes("check");
           }) || btns[0];
-          if (saveBtn) { saveBtn.click(); return true; }
-          return false;
+          if (saveBtn) { 
+            saveBtn.click(); 
+            return { found: true, buttonText: saveBtn.textContent || saveBtn.title || "unknown" }; 
+          }
+          return { found: false, reason: "save_button_not_found", buttonsCount: btns.length };
         });
-        if (!saved) {
-          throw new Error("Bottone salva non trovato nel popup YAP");
+        
+        if (!saved || !saved.found) {
+          throw new Error(`Bottone salva non trovato: ${saved?.reason || "unknown"}`);
         }
-      }, 7000 + (attempt - 1) * 2500);
-      if (putResponse) break;
-      const stillOpenAttempt = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1200 }).catch(() => false);
-      if (!stillOpenAttempt) break;
+        logPhase("save_click", "clicked", { buttonText: saved.buttonText });
+      }, 10000 + (attempt - 1) * 3000); // Timeout: 10s, 13s, 16s
+      
+      if (putResponse) {
+        logPhase("save_response", "received", { attempt });
+        break;
+      }
+      
+      const stillOpenAttempt = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1500 }).catch(() => false);
+      if (!stillOpenAttempt) {
+        logPhase("save_popup", "closed_after_click", { attempt });
+        break;
+      }
     } catch (error) {
       lastSaveError = error;
+      logPhase("save_attempt", `failed_${attempt}`, { error: error.message });
     }
-    await page.waitForTimeout(500 * attempt);
+    await page.waitForTimeout(800 * attempt);
   }
+  
   const saved = Boolean(putResponse);
+  logPhase("save_result", saved ? "success" : "failed", { attempts: saveAttemptsUsed });
+  
   if (!saved) {
-    const stillOpen = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1000 }).catch(() => false);
+    const stillOpen = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1500 }).catch(() => false);
     if (stillOpen) {
       const detail = lastSaveError?.message ? ` (${lastSaveError.message})` : "";
       throw new Error(`Salvataggio YAP non confermato dopo ${maxSaveAttempts} tentativi${detail}`);

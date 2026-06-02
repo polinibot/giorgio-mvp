@@ -5119,7 +5119,7 @@ function App() {
   return (
     <div className="App">
       <Toast toasts={toasts} removeToast={removeToast} />
-      {yapActionProgress && (currentView === 'detail' || currentView === 'form') && renderGlobalYapActionProgressBar()}
+      {yapActionProgress && renderGlobalYapActionProgressBar()}
       {confirmModal && (
         <ConfirmModal
           title={confirmModal.title}
