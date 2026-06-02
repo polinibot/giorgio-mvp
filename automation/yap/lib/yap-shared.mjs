@@ -241,6 +241,22 @@ export async function waitForYapAction(page, actionName, trigger, timeout = 1500
   return responsePromise;
 }
 
+async function navigateWithRetry(page, url, options = {}, attempts = 3) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await page.goto(url, options);
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.message || "");
+      const retryable = /ERR_FAILED|ERR_ABORTED|Timeout/i.test(message);
+      if (!retryable || attempt === attempts) throw error;
+      await page.waitForTimeout(350 * attempt).catch(() => {});
+    }
+  }
+  throw lastError;
+}
+
 export async function gotoAgendaDate(page, isoDate) {
   const months = {
     gennaio: 0,
@@ -258,11 +274,47 @@ export async function gotoAgendaDate(page, isoDate) {
   };
   const target = new Date(`${isoDate}T12:00:00`);
   const targetIndex = target.getFullYear() * 12 + target.getMonth();
+  const targetDay = String(target.getDate());
+  const targetNeedle = `${targetDay} ${Object.keys(months)[target.getMonth()]} ${target.getFullYear()}`;
   const currentMonthIndex = async () => {
     const text = normalize(await page.locator(".view-switch").first().innerText({ timeout: 5000 }));
     const [monthName, yearText] = text.split(/\s+/);
     if (!(monthName in months) || !yearText) return null;
     return Number(yearText) * 12 + months[monthName];
+  };
+  const agendaShowsTargetDate = async () => {
+    return page.evaluate((needle) => {
+      const normalizeText = (value) => String(value || "")
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+      const targetNeedle = normalizeText(needle);
+      const isVisible = (node) => {
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      return [...document.querySelectorAll("h1, h2, h3, div, span, td")]
+        .filter(isVisible)
+        .some((node) => {
+          const text = normalizeText((node.textContent || "").slice(0, 80));
+          return text.includes(targetNeedle);
+        });
+    }, targetNeedle).catch(() => false);
+  };
+  const agendaLoadingVisible = async () => {
+    return page.evaluate(() => {
+      const isVisible = (node) => {
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      return [...document.querySelectorAll("div, span, td")]
+        .filter(isVisible)
+        .some((node) => /caricamento appuntamenti in corso/i.test(node.textContent || ""));
+    }).catch(() => false);
   };
 
   for (let guard = 0; guard < 36; guard += 1) {
@@ -272,33 +324,60 @@ export async function gotoAgendaDate(page, isoDate) {
     await page.waitForTimeout(50);
   }
 
-  const moved = await page.evaluate((targetDate) => {
-    const target = new Date(`${targetDate}T12:00:00`);
-    const titleButton = document.querySelector(".view-switch");
-    if (!titleButton) return false;
-    const day = String(target.getDate());
-    const switchRoot = titleButton.parentElement?.parentElement?.parentElement || document.body;
-    const candidates = [...switchRoot.querySelectorAll("button, div, span, td, a")]
-      .filter((node) => (node.textContent || "").trim() === day)
+  const moved = await page.evaluate((dayText) => {
+    const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 10 && rect.height > 10 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const calendars = [...document.querySelectorAll("table, div")]
+      .filter(isVisible)
+      .filter((node) => {
+        const text = normalizeText((node.textContent || "").slice(0, 240));
+        return /lu ma me gi ve sa do/i.test(text) || /gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre/i.test(text);
+      });
+    const scope = calendars[0] || document.body;
+    const candidates = [...scope.querySelectorAll("button, div, span, td, a")]
+      .filter(isVisible)
+      .filter((node) => normalizeText(node.textContent || "") === dayText)
       .filter((node) => {
         const rect = node.getBoundingClientRect();
         const classes = String(node.className || "").toLowerCase();
-        return rect.width > 0 && rect.height > 0 && !classes.includes("disabled") && !classes.includes("other");
+        return rect.width > 12 && rect.height > 12 && !classes.includes("disabled") && !classes.includes("other") && !classes.includes("outside");
       });
-    const candidate = candidates[0];
+    const candidate = candidates.sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x)[0];
     if (!candidate) return false;
     candidate.click();
     return true;
-  }, isoDate).catch(() => false);
+  }, targetDay).catch(() => false);
 
   if (!moved) await page.keyboard.press("Home").catch(() => {});
   await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
   await waitForAgendaReady(page, 10000).catch(() => {});
+  for (let loadingGuard = 0; loadingGuard < 24; loadingGuard += 1) {
+    if (!(await agendaLoadingVisible())) break;
+    if (await agendaShowsTargetDate()) return true;
+    await page.waitForTimeout(500);
+  }
+  for (let verify = 0; verify < 4; verify += 1) {
+    if (await agendaShowsTargetDate()) return true;
+    await page.waitForTimeout(250);
+    if (verify === 1 && moved) {
+      await page.evaluate((dayText) => {
+        const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim();
+        const nodes = [...document.querySelectorAll("button, div, span, td, a")]
+          .filter((node) => normalizeText(node.textContent || "") === dayText);
+        nodes[0]?.click();
+      }, targetDay).catch(() => {});
+    }
+  }
   await page.waitForTimeout(200);
+  throw new Error(`agenda_date_not_reached:${isoDate}`);
 }
 
 export async function loginYap(page, username, password) {
-  await page.goto(YAP_BASE_URL, { waitUntil: "domcontentloaded" });
+  await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
   await dismissUnsupportedBrowserWarning(page);
 
   const loginInputVisible = await page.locator('input[name="u"]').first().isVisible({ timeout: 2500 }).catch(() => false);
@@ -308,7 +387,7 @@ export async function loginYap(page, username, password) {
       await persistYapSession(page.context()).catch(() => {});
       return;
     }
-    await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
+    await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
     await dismissUnsupportedBrowserWarning(page);
     const agendaReady = await waitForAgendaReady(page, 5000).then(() => true).catch(() => false);
     if (agendaReady) {
@@ -376,7 +455,7 @@ export async function loginYap(page, username, password) {
 }
 
 export async function openAgendaInApp(page) {
-  await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
+  await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(200);
   await dismissUnsupportedBrowserWarning(page);
   if (await isYapLoginPage(page, 1000)) {
@@ -397,7 +476,7 @@ export async function openAgendaInApp(page) {
       await agendaLink.click().catch(() => {});
     }
     await page.waitForTimeout(300);
-    await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
+    await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
     await dismissUnsupportedBrowserWarning(page);
     if (await isYapLoginPage(page, 800)) {
       throw new Error("agenda_redirected_to_login");

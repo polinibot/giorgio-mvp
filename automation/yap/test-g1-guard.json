@@ -1,0 +1,28 @@
+{
+  "_README": "PAYLOAD per testare che G1 blocchi scritture su clienti non-test",
+  "mapping": {
+    "anagrafica": {
+      "cliente_nome": "MARIO ROSSI",
+      "cliente_telefono": "+391234567890",
+      "cliente_tipo": "privato",
+      "targa": "AB123CD"
+    },
+    "agenda": {
+      "data": "2026-12-27",
+      "ora": "07:00",
+      "durata_minuti": 20,
+      "tipo_pratica": "preventivo"
+    },
+    "lavorazioni": [
+      {
+        "reparto": "officina",
+        "descrizioni": ["Questo non dovrebbe mai essere scritto"],
+        "ore_man": 1
+      }
+    ],
+    "note_interne": "Se vedi questa nota, G1 NON ha funzionato!",
+    "meta": {
+      "practice_id": "test-g1-guard-001"
+    }
+  }
+}

@@ -681,8 +681,30 @@ async function clickAppointmentPopupPractice(page) {
   }).catch(() => ({ clicked: false, label: null }));
 }
 
+async function clickAppointmentPopupFooterSlot(page, slotIndex) {
+  if (!Number.isInteger(slotIndex) || slotIndex < 0) return { clicked: false, label: null };
+  const target = await safeEvaluate(page, (index) => {
+    const popup = document.querySelector(".gwt-DecoratedPopupPanel");
+    if (!popup) return null;
+    const rect = popup.getBoundingClientRect();
+    if (rect.width < 120 || rect.height < 80) return null;
+    const slots = 4;
+    const clamped = Math.min(Math.max(index, 0), slots - 1);
+    const segmentWidth = rect.width / slots;
+    return {
+      x: rect.x + (segmentWidth * clamped) + (segmentWidth / 2),
+      y: rect.y + rect.height - 18,
+      label: `footer-slot-${clamped + 1}`,
+    };
+  }, slotIndex).catch(() => null);
+  if (!target) return { clicked: false, label: null };
+  await page.mouse.click(target.x, target.y).catch(() => {});
+  await page.waitForTimeout(180).catch(() => {});
+  return { clicked: true, label: target.label };
+}
+
 async function clickOdlSection(page) {
-  return safeEvaluate(page, () => {
+  const candidate = await safeEvaluate(page, () => {
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
@@ -695,19 +717,65 @@ async function clickOdlSection(page) {
       const rect = el.getBoundingClientRect();
       return rect.y < 140;
     });
-    for (const el of candidates.sort((a, b) => a.getBoundingClientRect().y - b.getBoundingClientRect().y)) {
-      if (!isVisible(el)) continue;
-      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-      return { clicked: true, label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 100) };
-    }
-    return { clicked: false, label: null };
-  }).catch(() => ({ clicked: false, label: null }));
+    const ranked = candidates
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        let score = 0;
+        if (/^ordini di lavoro$/i.test(text)) score += 20;
+        if (/^ordini di lavoro/i.test(text)) score += 12;
+        if (/tab|item|label/i.test(String(el.className || ""))) score += 6;
+        if (rect.width >= 40 && rect.width <= 180) score += 4;
+        if (rect.height >= 18 && rect.height <= 42) score += 4;
+        return {
+          text,
+          x: rect.x + (rect.width / 2),
+          y: rect.y + (rect.height / 2),
+          width: rect.width,
+          height: rect.height,
+          score,
+        };
+      })
+      .sort((a, b) => b.score - a.score || a.y - b.y || a.x - b.x);
+    return ranked[0] || null;
+  }).catch(() => null);
+  if (!candidate) return { clicked: false, label: null };
+  await page.mouse.click(candidate.x, candidate.y).catch(() => {});
+  await page.waitForTimeout(120).catch(() => {});
+  return { clicked: true, label: String(candidate.text || "").slice(0, 100) };
+}
+
+async function snapshotTopOdlCandidates(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 3 && rect.height > 3 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    return [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
+      .filter(isVisible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        return {
+          text,
+          className: String(el.className || ""),
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+      })
+      .filter((item) => item.text && /ordini di lavoro|\bodl\b/i.test(item.text))
+      .filter((item) => item.y < 160)
+      .slice(0, 25);
+  }).catch(() => []);
 }
 
 async function clickBottomSectionTab(page, label) {
   const needle = normalizeLoose(label);
   if (!needle) return false;
-  return safeEvaluate(page, (target) => {
+  const candidate = await safeEvaluate(page, (target) => {
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
@@ -716,17 +784,73 @@ async function clickBottomSectionTab(page, label) {
     const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
       .filter(isVisible)
       .map((el) => ({
-        el,
+        rawText: (el.textContent || "").replace(/\s+/g, " ").trim(),
+        cls: String(el.className || ""),
+        title: String(el.getAttribute("title") || ""),
+        tag: el.tagName,
         text: (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase(),
         rect: el.getBoundingClientRect(),
       }))
       .filter((item) => item.text === target || item.text.includes(target))
-      .filter((item) => item.rect.y > (window.innerHeight - 140));
-    const best = candidates.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x)[0];
-    if (!best) return false;
-    best.el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-    return true;
-  }, needle).catch(() => false);
+      .filter((item) => item.rect.y > (window.innerHeight - 140))
+      .map((item) => {
+        let score = 0;
+        if (item.text === target) score += 20;
+        if (item.title.toLowerCase() === target) score += 8;
+        if (/td|span|a|button/i.test(item.tag)) score += 4;
+        if (/tab|item|label/i.test(item.cls)) score += 4;
+        if (item.rect.width >= 40 && item.rect.width <= 180) score += 4;
+        if (item.rect.height >= 16 && item.rect.height <= 40) score += 3;
+        return {
+          ...item,
+          score,
+          x: item.rect.x + (item.rect.width / 2),
+          y: item.rect.y + (item.rect.height / 2),
+        };
+      });
+    const best = candidates.sort((a, b) => b.score - a.score || b.rect.y - a.rect.y || a.rect.x - b.rect.x)[0];
+    if (!best) return null;
+    return {
+      x: best.x,
+      y: best.y,
+      text: best.rawText,
+      score: best.score,
+    };
+  }, needle).catch(() => null);
+  if (!candidate) return false;
+  await page.mouse.click(candidate.x, candidate.y).catch(() => {});
+  await page.waitForTimeout(120).catch(() => {});
+  return true;
+}
+
+async function snapshotBottomSectionTabs(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    return [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
+      .filter(isVisible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        return {
+          text,
+          className: String(el.className || ""),
+          title: String(el.getAttribute("title") || ""),
+          tag: el.tagName,
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        };
+      })
+      .filter((item) => item.text && item.text.length <= 80)
+      .filter((item) => item.y > (window.innerHeight - 160))
+      .sort((a, b) => a.y - b.y || a.x - b.x)
+      .slice(0, 60);
+  }).catch(() => []);
 }
 
 async function clickRepartoSection(page, reparto) {
@@ -753,44 +877,442 @@ async function clickRepartoSection(page, reparto) {
 
 async function waitForPracticeWorkspaceReady(page, timeout = 1800) {
   return page.waitForFunction(() => {
+    const loadingRe = /caricamento .* in corso|recupero dettagli pratica in corso/;
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
       return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
     };
+    const bodyText = (document.body?.innerText || "").toLowerCase();
+    const popup = document.querySelector(".gwt-DecoratedPopupPanel");
+    const popupVisible = Boolean(popup && isVisible(popup));
+    if (popupVisible && /dettagli appuntamento/.test(popup.textContent || "")) return false;
+    if (/giornaliere|filtro appuntamenti|numero appuntamenti/.test(bodyText)) return false;
+    if (loadingRe.test(bodyText)) return false;
     const editables = [...document.querySelectorAll("textarea, input[type='text'], input[type='number'], input:not([type]), [contenteditable='true'], [role='textbox']")]
       .filter(isVisible)
       .filter((el) => !el.disabled && !el.readOnly);
-    if (editables.length > 0) return true;
-    const bodyText = (document.body?.innerText || "").toLowerCase();
-    return /dettagli pratica|ordini di lavoro|preventivi|annotazioni|note/.test(bodyText);
+    const usefulTabs = [...document.querySelectorAll("button, a, span, div, td")]
+      .filter(isVisible)
+      .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase())
+      .filter(Boolean)
+      .filter((text) => /dettagli pratica|ordini di lavoro|preventivi|note interne|materiali di consumo|smaltimento rifiuti/.test(text));
+    return (editables.length >= 3 || usefulTabs.length >= 2) && /pratica veicolo|ordini di lavoro|preventivi|ragione sociale/.test(bodyText);
   }, null, { timeout }).then(() => true).catch(() => false);
+}
+
+async function waitForPracticeTransition(page, timeout = 6000) {
+  const started = Date.now();
+  while ((Date.now() - started) < timeout) {
+    const state = await getPracticeWorkspaceState(page);
+    if (state !== "agenda_shell") return state;
+    const popupOpen = await waitForAppointmentPopup(page, 200);
+    if (!popupOpen) {
+      await page.waitForTimeout(200).catch(() => {});
+    }
+    await page.waitForTimeout(200).catch(() => {});
+  }
+  return await getPracticeWorkspaceState(page);
+}
+
+async function openPracticeFromAppointment(page, job) {
+  const searchTerms = [job.customer?.plate, pickCosaFromJob(job)].filter(Boolean);
+  const strategies = [
+    { type: "footer", slotIndex: 2 },
+    { type: "footer", slotIndex: 2, retry: true },
+    { type: "text" },
+  ];
+  const attempts = [];
+
+  const ensurePopup = async () => {
+    const visible = await waitForAppointmentPopup(page, 600);
+    if (visible) return true;
+    const reopened = await clickAgendaEvent(page, searchTerms).catch(() => ({ success: false }));
+    if (!reopened?.success) return false;
+    return waitForAppointmentPopup(page, 1500);
+  };
+
+  for (const strategy of strategies) {
+    const popupReady = await ensurePopup();
+    if (!popupReady) break;
+    let clickResult = { clicked: false, label: null };
+    if (strategy.type === "text") {
+      clickResult = await clickAppointmentPopupPractice(page);
+    } else {
+      clickResult = await clickAppointmentPopupFooterSlot(page, strategy.slotIndex);
+    }
+    if (!clickResult?.clicked) {
+      attempts.push({
+        strategy: strategy.type === "footer" ? `footer:${strategy.slotIndex + 1}` : "text",
+        clicked: false,
+      });
+      continue;
+    }
+    const state = await waitForPracticeTransition(page, 6500);
+    if (state !== "agenda_shell") {
+      const loadingDone = await waitForPracticeLoadingToFinish(page, 12000);
+      const url = page.url();
+      const isDirectPracticeRoute = /#!pratica/i.test(url) && /IdCompanyFolder/i.test(url);
+      const blankShell = isDirectPracticeRoute ? false : await isBlankNewPracticeShell(page);
+      const courtesyPopup = isDirectPracticeRoute ? false : await isCourtesyCommunicationPopup(page);
+      const attemptMeta = {
+        strategy: strategy.type === "footer" ? `footer:${strategy.slotIndex + 1}` : "text",
+        clicked: true,
+        state,
+        loadingDone,
+        blankShell,
+        courtesyPopup,
+        url,
+      };
+      attempts.push(attemptMeta);
+      if (courtesyPopup) {
+        await page.keyboard.press("Escape").catch(() => {});
+        await openAgenda(page, job.appointment.date).catch(() => {});
+        continue;
+      }
+      if (blankShell) {
+        await openAgenda(page, job.appointment.date).catch(() => {});
+        continue;
+      }
+      return {
+        clicked: true,
+        label: clickResult.label,
+        strategy: strategy.type === "footer" ? `footer:${strategy.slotIndex + 1}` : "text",
+        state,
+        loadingDone,
+        url: page.url(),
+        attempts,
+      };
+    }
+    attempts.push({
+      strategy: strategy.type === "footer" ? `footer:${strategy.slotIndex + 1}` : "text",
+      clicked: true,
+      state,
+      url: page.url(),
+    });
+  }
+
+  return { clicked: false, label: null, strategy: null, state: await getPracticeWorkspaceState(page), url: page.url(), attempts };
+}
+
+async function hasVehicleSearchOverlay(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 30 && rect.height > 30 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    return [...document.querySelectorAll("div, td, span, label")]
+      .filter(isVisible)
+      .some((el) => {
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+        return text.includes("ricerca autoveicolo") || text.includes("crea un nuovo veicolo dalla targa");
+      });
+  }).catch(() => false);
+}
+
+async function dismissVehicleSearchOverlay(page) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const visible = await hasVehicleSearchOverlay(page);
+    if (!visible) return true;
+    await page.keyboard.press("Escape").catch(() => {});
+    const viewport = page.viewportSize() || { width: 1440, height: 950 };
+    await page.mouse.click(Math.max(40, viewport.width - 80), 120).catch(() => {});
+    await page.waitForTimeout(180).catch(() => {});
+  }
+  return !(await hasVehicleSearchOverlay(page));
+}
+
+async function waitForPracticeLoadingToFinish(page, timeout = 12000) {
+  return page.waitForFunction(() => {
+    const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const loadingRe = /caricamento .* in corso|recupero dettagli pratica in corso/;
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 20 && rect.height > 20 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    // F4: controlla il loading SOLO se l'elemento è visibile (non su bodyText globale che persiste)
+    const loadingVisible = [...document.querySelectorAll("div, span, td, label")]
+      .filter(isVisible)
+      .some((el) => loadingRe.test(normalizeText(el.textContent || "")));
+    if (loadingVisible) return false;
+    const bodyText = normalizeText(document.body?.innerText || "");
+    const editables = [...document.querySelectorAll("textarea, input[type='text'], input[type='number'], input:not([type]), [contenteditable='true'], [role='textbox']")]
+      .filter(isVisible)
+      .filter((el) => !el.disabled && !el.readOnly);
+    const usefulTabs = [...document.querySelectorAll("button, a, span, div, td")]
+      .filter(isVisible)
+      .map((el) => normalizeText(el.textContent || ""))
+      .filter((text) => /dettagli pratica|ordini di lavoro|preventivi|note interne|materiali di consumo|smaltimento rifiuti/.test(text));
+    return bodyText.includes("pratica veicolo") && (editables.length >= 3 || usefulTabs.length >= 2);
+  }, null, { timeout }).then(() => true).catch(() => false);
+}
+
+async function isBlankNewPracticeShell(page) {
+  return safeEvaluate(page, () => {
+    const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 12 && rect.height > 12 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const visibleText = [...document.querySelectorAll("div, span, td, label, button, a")]
+      .filter(isVisible)
+      .map((el) => normalizeText(el.textContent || ""))
+      .filter(Boolean)
+      .join(" | ");
+    return visibleText.includes("nuovo")
+      && visibleText.includes("crea una nuova anagrafica")
+      && visibleText.includes("ragione sociale")
+      && visibleText.includes("partita iva");
+  }).catch(() => false);
+}
+
+async function isCourtesyCommunicationPopup(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 20 && rect.height > 20 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    return [...document.querySelectorAll(".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel")]
+      .filter(isVisible)
+      .some((el) => /comunicazioni di cortesia/i.test(el.textContent || ""));
+  }).catch(() => false);
+}
+
+// F3: naviga all'ODL cambiando hash in-place (niente page.goto → GWT non fa full-reload)
+async function openOdlByRoute(page, currentUrl) {
+  try {
+    const rawHash = decodeURIComponent(String(currentUrl || page.url()).replace(/^[^#]*/, ""));
+    const hashMatch = rawHash.match(/#!pratica\|(.+)$/);
+    if (!hashMatch) return { navigated: false, reason: "no_pratica_hash", rawHashPreview: rawHash.slice(0, 100) };
+    let idCompanyFolder = null;
+    try {
+      const jsonStr = decodeURIComponent(hashMatch[1]);
+      idCompanyFolder = JSON.parse(jsonStr)?.IdCompanyFolder ?? null;
+    } catch {
+      const idMatch = /IdCompanyFolder[^0-9]*(\d+)/.exec(hashMatch[1]);
+      idCompanyFolder = idMatch ? Number(idMatch[1]) : null;
+    }
+    if (!idCompanyFolder) return { navigated: false, reason: "no_idcompanyfolder" };
+    const token = JSON.stringify({
+      IdCompanyFolder: Number(idCompanyFolder),
+      Page: "ODL",
+      ShowOdlMarcatempo: true,
+    });
+    await page.evaluate((t) => { window.location.hash = `#!pratica|${t}`; }, token);
+    return { navigated: true, idCompanyFolder };
+  } catch (error) {
+    return { navigated: false, reason: String(error?.message || "error") };
+  }
+}
+
+// F2: seleziona il widget Veicolo nel popup appuntamento e collega la targa
+async function selectVehicleByPlate(page, plate) {
+  if (!plate) return { found: false, reason: "no_plate" };
+  const cleanPlate = String(plate).trim().toUpperCase();
+
+  // Step 1: individua l'input Veicolo nel popup tramite il contesto del DOM
+  const vehicleInputCoords = await safeEvaluate(page, (targetPlate) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
+      .find((p) => isVisible(p) && (p.textContent || "").toLowerCase().includes("dettagli appuntamento"));
+    if (!popup) return null;
+
+    const inputs = [...popup.querySelectorAll("input[type='text'], input:not([type])")].filter(isVisible);
+    for (const input of inputs) {
+      // Cerca "veicolo" / "autoveicolo" in max 5 antenati
+      let node = input;
+      for (let i = 0; i < 5; i++) {
+        node = node?.parentElement;
+        if (!node || node === popup) break;
+        const txt = ([...node.childNodes].map((n) => n.nodeType === 3 ? n.textContent : "").join("")).toLowerCase();
+        if (txt.includes("veicolo") || txt.includes("autoveicolo")) {
+          const r = input.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, strategy: "ancestor_text" };
+        }
+      }
+    }
+    // Fallback: cerca label "Veicolo" nel popup e poi l'input fratello
+    const labels = [...popup.querySelectorAll("td, label, span, div")]
+      .filter(isVisible)
+      .find((el) => {
+        const t = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+        return t === "veicolo" || t === "autoveicolo";
+      });
+    if (labels) {
+      const tr = labels.closest("tr") || labels.parentElement;
+      const sibInput = tr ? [...tr.querySelectorAll("input")].find(isVisible) : null;
+      if (sibInput) {
+        const r = sibInput.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, strategy: "sibling_label" };
+      }
+    }
+    return null;
+  }, cleanPlate).catch(() => null);
+
+  if (!vehicleInputCoords) return { found: false, reason: "vehicle_input_not_found" };
+
+  // Step 2: click + type (usa keyboard per triggerare autocomplete GWT)
+  await page.mouse.click(vehicleInputCoords.x, vehicleInputCoords.y).catch(() => {});
+  await page.waitForTimeout(150);
+  await page.keyboard.press("Control+a").catch(() => {});
+  await page.keyboard.type(cleanPlate, { delay: 55 }).catch(() => {});
+  await page.waitForTimeout(700);
+
+  // Step 3: clicca il primo suggerimento del dropdown autocomplete
+  const selected = await safeEvaluate(page, (targetPlate) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const candidates = [...document.querySelectorAll(
+      ".gwt-SuggestBoxPopup li, .gwt-SuggestBoxPopup td, .gwt-SuggestBoxPopup .item, " +
+      "[class*='suggest'] li, [class*='suggest'] td, [class*='autocomplete'] li, " +
+      ".gwt-MenuBar li, .gwt-MenuBar td"
+    )].filter(isVisible);
+    const match = candidates.find((el) => (el.textContent || "").toUpperCase().includes(targetPlate));
+    const target = match || candidates[0];
+    if (!target) return false;
+    target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    return true;
+  }, cleanPlate).catch(() => false);
+
+  if (!selected) {
+    await page.keyboard.press("Enter").catch(() => {});
+    await page.waitForTimeout(250);
+  }
+  await page.waitForTimeout(250);
+  return { found: true, strategy: vehicleInputCoords.strategy, selected };
+}
+
+// F5: guard "no veicolo" — rileva pratica guscio senza veicolo reale
+async function isPracticeShellWithoutVehicle(page) {
+  return safeEvaluate(page, () => {
+    const rawText = document.body?.innerText || "";
+    // Tab "Dettagli pratica ⚠" → warning = nessun veicolo
+    const hasWarningTab = /dettagli pratica\s*⚠/i.test(rawText);
+    // "Ordini di lavoro U" → il badge U indica che esiste un ODL con contenuto
+    const hasOdlBadge = /ordini di lavoro\s*U\b/.test(rawText);
+    // Targa placeholder come ZZ998ZZ o Telaio vuoto (campi anagrafici vuoti)
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 3 && rect.height > 3 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    // Se il tab ODL esiste senza badge U + c'è il warning sul tab dettagli → guscio
+    if (hasWarningTab && !hasOdlBadge) return true;
+    // Ulteriore segnale: Telaio/Omologazione visibili vuoti E nessun ODL badge
+    const inputs = [...document.querySelectorAll("input[type='text'], input:not([type])")].filter(isVisible);
+    const emptyKeyFields = inputs.filter((el) => {
+      const label = (el.getAttribute("placeholder") || "").toLowerCase();
+      const ctxText = (el.parentElement?.textContent || "").toLowerCase();
+      return (label.includes("telaio") || ctxText.includes("telaio")
+              || label.includes("omologazione") || ctxText.includes("omologazione"))
+             && !el.value.trim();
+    });
+    return emptyKeyFields.length >= 2 && !hasOdlBadge;
+  }).catch(() => false);
 }
 
 async function waitForOdlWorkspaceReady(page, timeout = 1800) {
   return page.waitForFunction(() => {
+    const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const loadingRe = /caricamento .* in corso|recupero dettagli pratica in corso/;
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
       return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
     };
-    const bodyText = (document.body?.innerText || "").toLowerCase();
-    if (/ordini di lavoro|\bodl\b|materiali|ricambi|manodopera|\bman\b|\bmac\b/.test(bodyText)) return true;
+    // F4: controlla loading SOLO su elementi visibili (bodyText globale dà falsi positivi)
+    const loadingVisible = [...document.querySelectorAll("div, span, td, label")]
+      .filter(isVisible)
+      .some((el) => loadingRe.test(normalizeText(el.textContent || "")));
+    if (loadingVisible) return false;
     const editables = [...document.querySelectorAll("textarea, input[type='text'], input[type='number'], input:not([type]), [contenteditable='true'], [role='textbox']")]
       .filter(isVisible)
       .filter((el) => !el.disabled && !el.readOnly);
-    return editables.length > 0;
+    const usefulTabs = [...document.querySelectorAll("button, a, span, div, td")]
+      .filter(isVisible)
+      .map((el) => normalizeText(el.textContent || ""))
+      .filter((text) => /descrizione danni|materiali di consumo|smaltimento rifiuti|note interne|tempi|totali|ordini cliente|prospetti/.test(text));
+    return usefulTabs.length >= 2 || editables.length >= 3;
   }, null, { timeout }).then(() => true).catch(() => false);
 }
 
 async function getPracticeWorkspaceState(page) {
   return safeEvaluate(page, () => {
-    const text = (document.body?.innerText || "").toLowerCase();
-    if (/fabbrica \(d1\)|modello \(d3\)|telefono|ragione sociale|data nascita/.test(text)) return "detail_form";
-    if (/smaltimento rifiuti|materiali di consumo|note interne|ordini cliente|totali/.test(text)) return "odl_full";
-    if (/pratica veicolo/.test(text)) return "practice_shell";
-    if (/giornaliere|filtro appuntamenti|numero appuntamenti/.test(text)) return "agenda_shell";
-    return "unknown";
+    // F5: detection a scope ristretto — non usare bodyText globale
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 3 && rect.height > 3 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const bodyText = (document.body?.innerText || "").toLowerCase();
+
+    // Agenda: non siamo in una pratica
+    if (/giornaliere|filtro appuntamenti|numero appuntamenti/.test(bodyText)
+        && !/pratica veicolo|gestione pratica/i.test(bodyText)) return "agenda_shell";
+
+    // Loading: SOLO se elemento visibile (bodyText può contenere testo nascosto)
+    const loadingRe = /caricamento .* in corso|recupero dettagli pratica in corso/;
+    const loadingVisible = [...document.querySelectorAll("div, span, td, label")]
+      .filter(isVisible)
+      .some((el) => loadingRe.test((el.textContent || "").toLowerCase()));
+    if (loadingVisible) return "loading_shell";
+
+    // Non in pratica
+    if (!/pratica veicolo|gestione pratica/i.test(bodyText)) return "unknown";
+
+    // F5: trovare il tab attivo nel header della pratica (y < 140)
+    const topTabs = [...document.querySelectorAll("td, span, a, div, button")]
+      .filter(isVisible)
+      .filter((el) => el.getBoundingClientRect().y < 140)
+      .map((el) => ({
+        text: (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase(),
+        cls: String(el.className || ""),
+        ariaSel: el.getAttribute("aria-selected"),
+        tag: el.tagName,
+      }));
+
+    // Tab attivo = ha classe "selected"/"active" o aria-selected="true"
+    const activeTab = topTabs.find((t) =>
+      /\bselected\b|\bactive\b|gwt-selected/i.test(t.cls) || t.ariaSel === "true"
+    );
+
+    if (activeTab) {
+      if (/ordini di lavoro/.test(activeTab.text)) {
+        // Siamo sul tab ODL — cercare i marker ODL nel contenuto
+        const odlMarkers = /descrizione danni|smaltimento rifiuti|materiali di consumo|note interne|tempi|totali|ordini cliente|prospetti/;
+        const visibleTabTexts = [...document.querySelectorAll("button, a, span, div, td")]
+          .filter(isVisible)
+          .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase())
+          .filter((t) => odlMarkers.test(t));
+        return visibleTabTexts.length >= 2 ? "odl_full" : "odl_loading";
+      }
+      if (/dettagli pratica/.test(activeTab.text)) return "detail_form";
+      if (/preventivi/.test(activeTab.text)) return "preventivi";
+    }
+
+    // Fallback: ODL markers visibili nel body
+    const odlMarkersInBody = /descrizione danni|smaltimento rifiuti|materiali di consumo|note interne|tempi|totali/.test(bodyText);
+    if (odlMarkersInBody) return "odl_full";
+
+    // Fallback: dettagli pratica attivo (tab senza classe selected)
+    const dettagliPraticaVisible = topTabs.some((t) => /dettagli pratica/.test(t.text));
+    const odlTabVisible = topTabs.some((t) => /ordini di lavoro/.test(t.text));
+    if (dettagliPraticaVisible && !odlMarkersInBody) return "detail_form";
+    if (!odlTabVisible) return "practice_shell";
+
+    return "practice_shell";
   }).catch(() => "unknown");
 }
 
@@ -856,15 +1378,21 @@ async function fillBestEditableByKeywords(page, keywords, value, { append = fals
   }, { keywordsRaw: keywords, text: textValue, appendMode: Boolean(append) }).catch(() => false);
 }
 
-async function fillWithRetry(page, attempts, value, options = {}) {
+async function fillWithRetry(page, attempts, value, options = {}, { debug = false, fieldId = "" } = {}) {
   const plans = Array.isArray(attempts) ? attempts : [];
-  for (const attempt of plans) {
+  for (let i = 0; i < plans.length; i++) {
+    const attempt = plans[i];
     const keywords = Array.isArray(attempt) ? attempt : (attempt?.keywords || []);
     const append = typeof attempt === "object" && "append" in attempt ? attempt.append : options.append;
+    if (debug) logPhase("fill_attempt", `plan_${i}`, { fieldId, keywords: keywords.slice(0, 3), value: String(value).slice(0, 50) });
     const ok = await fillBestEditableByKeywords(page, keywords, value, { ...options, append });
-    if (ok) return true;
+    if (ok) {
+      if (debug) logPhase("fill_success", fieldId, { plan: i, keywords: keywords.slice(0, 3) });
+      return true;
+    }
     await page.waitForTimeout(120).catch(() => {});
   }
+  if (debug) logPhase("fill_failed", fieldId, { attempts: plans.length });
   return false;
 }
 
@@ -999,24 +1527,61 @@ async function writePracticeAndOdl(page, job, args) {
     },
   };
 
-  let practiceLink = await clickAppointmentPopupPractice(page);
-  if (!practiceLink?.clicked) {
-    const fallbackPractice = page.locator(".gwt-DecoratedPopupPanel button, .gwt-DecoratedPopupPanel a, .gwt-DecoratedPopupPanel [role='button']").filter({ hasText: /gestione pratica|apri pratica|\bpratica\b/i }).first();
-    if (await fallbackPractice.count()) {
-      await fallbackPractice.click().catch(() => {});
-      practiceLink = { clicked: true, label: "fallback:gestione_pratica" };
+  // G1 — Hard guard: scrive SOLO se il cliente contiene il marker di test
+  const testMarker = (process.env.YAP_TEST_CUSTOMER_MARKER || "").trim();
+  if (testMarker) {
+    const customerName = String(job.customer?.name || "").trim().toLowerCase();
+    if (!customerName.includes(testMarker.toLowerCase())) {
+      writeReport.attempted = false;
+      writeReport.odl.error = "refused_non_test_customer";
+      writeReport.reason = `G1_guard: cliente "${job.customer?.name}" non corrisponde al marker "${testMarker}"`;
+      return writeReport;
     }
   }
+
+  const practiceLink = await openPracticeFromAppointment(page, job);
   if (!practiceLink?.clicked) {
     writeReport.attempted = false;
     writeReport.reason = "practice_link_not_found";
+    writeReport.practiceOpenState = practiceLink?.state || "agenda_shell";
+    if (args.debug) writeReport.practiceOpenAttempts = practiceLink?.attempts || [];
     return writeReport;
   }
   writeReport.openedPractice = true;
+  writeReport.practiceOpenStrategy = practiceLink.strategy || practiceLink.label || null;
+  if (args.debug) writeReport.practiceDirectUrl = practiceLink.url || null;
+  if (args.debug && practiceLink.loadingDone != null) writeReport.practiceOpenLoadingDone = practiceLink.loadingDone;
+  if (args.debug) writeReport.practiceOpenAttempts = practiceLink.attempts || [];
   logPhase("odl_practice", "opened");
   await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
   await waitForPracticeWorkspaceReady(page, 1800);
+  const practiceLoadingDone = await waitForPracticeLoadingToFinish(page, 12000);
+  if (args.debug) writeReport.practiceLoadingDone = practiceLoadingDone;
+  const vehicleOverlayDismissed = await dismissVehicleSearchOverlay(page);
+  if (args.debug) writeReport.vehicleOverlayDismissed = vehicleOverlayDismissed;
+  // F2-ter: pausa per automatismi YAP (creazione ODL in background) - adaptive, max 60s
+  logPhase("automatismi_wait", "starting");
   let workspaceState = await getPracticeWorkspaceState(page);
+  let autoAttempts = 0;
+  const maxAutoAttempts = 20; // 20 x 3s = 60s max, ma early-exit se pronto
+  while ((workspaceState === "loading_shell" || workspaceState === "unknown") && autoAttempts < maxAutoAttempts) {
+    await page.waitForTimeout(3000); // 3s per iterazione (più responsivo)
+    workspaceState = await getPracticeWorkspaceState(page);
+    autoAttempts++;
+    // Early exit se ODL pronto o pratica pronta
+    if (workspaceState === "odl_full" || workspaceState === "detail_form") {
+      logPhase("automatismi_early_exit", workspaceState, { attempts: autoAttempts });
+      break;
+    }
+  }
+  // Se ancora loading, prova refresh e riprova
+  if (workspaceState === "loading_shell" || workspaceState === "unknown") {
+    logPhase("automatismi_refresh", "attempting");
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(5000);
+    workspaceState = await getPracticeWorkspaceState(page);
+  }
+  logPhase("automatismi_wait", "done", { attempts: autoAttempts, finalState: workspaceState });
   if (args.debug) {
     const practiceShot = path.join(args.artifactDir, `practice-open-${job.practiceId || "payload"}-${Date.now()}.png`);
     await page.screenshot({ path: practiceShot, fullPage: true }).catch(() => {});
@@ -1058,52 +1623,113 @@ async function writePracticeAndOdl(page, job, args) {
     }
   }
 
-  let odlTab = await clickOdlSection(page);
-  if (!odlTab?.clicked) {
-    await page.waitForTimeout(200);
-    odlTab = await clickOdlSection(page);
-  }
-  if (!odlTab?.clicked) {
-    const fallbackOdl = page.locator("button, a, [role='button'], .gwt-Label, span, div, td").filter({ hasText: /ordini di lavoro|\bodl\b/i }).first();
-    if (await fallbackOdl.count()) {
-      await fallbackOdl.click().catch(() => {});
-      odlTab = { clicked: true, label: "fallback:odl" };
+  // F5: guard "no veicolo" — blocca tutte le scritture ODL se la pratica è un guscio
+  const noVehicle = await isPracticeShellWithoutVehicle(page);
+  if (args.debug) writeReport.noVehicleDetected = noVehicle;
+  if (noVehicle) {
+    writeReport.odl.error = "odl_unavailable_no_vehicle";
+    logPhase("odl_tab", "skipped_no_vehicle");
+    if (args.debug) {
+      const noVehicleShot = path.join(args.artifactDir, `no-vehicle-${job.practiceId || "payload"}-${Date.now()}.png`);
+      await page.screenshot({ path: noVehicleShot, fullPage: true }).catch(() => {});
+      writeReport.noVehicleScreenshot = noVehicleShot;
     }
-  }
-  if (odlTab?.clicked) {
-    writeReport.openedOdl = true;
-    logPhase("odl_tab", "opened", { label: odlTab.label });
-    await waitForOdlWorkspaceReady(page, 1800);
-    workspaceState = await getPracticeWorkspaceState(page);
-    if (workspaceState === "detail_form" || workspaceState === "practice_shell" || workspaceState === "agenda_shell") {
-      const secondOdl = await clickOdlSection(page);
-      if (secondOdl?.clicked) {
-        logPhase("odl_tab", "opening", { label: secondOdl.label, hop: 2 });
-        await waitForOdlWorkspaceReady(page, 2200);
+  } else {
+    // F3+F4: naviga all'ODL via hash in-place + gating su RPC
+    let odlNavigated = false;
+    const practiceUrl = page.url();
+    if (/#!pratica/i.test(practiceUrl)) {
+      // Prepara la promise RPC PRIMA della navigazione (includi tutte le azioni ODL possibili)
+      const odlReadyPromise = page.waitForResponse(
+        (r) => /\/yap\/action\/(OdlGetAnagraficheDepositoVeicoloAction|OdlGetAction|OdlTableAction|PraticaOdlGetOverviewAction)/.test(r.url()) && r.status() === 200,
+        { timeout: 20000 },
+      ).then(() => true).catch(() => false);
+      const routeResult = await openOdlByRoute(page, practiceUrl);
+      if (args.debug) writeReport.odlRouteResult = routeResult;
+      logPhase("odl_route", routeResult.navigated ? "navigated" : "failed", { reason: routeResult.reason, idCompanyFolder: routeResult.idCompanyFolder });
+      if (routeResult.navigated) {
+        odlNavigated = true;
+        writeReport.openedOdl = true;
+        logPhase("odl_tab", "route_navigated", { idCompanyFolder: routeResult.idCompanyFolder });
+        const odlRpcReady = await odlReadyPromise;
+        if (args.debug) writeReport.odlRpcReady = odlRpcReady;
+        // Attendi caricamento ODL (più tempo se RPC non intercettata)
+        if (!odlRpcReady) await waitForOdlWorkspaceReady(page, 10000);
+        await page.waitForTimeout(800);
         workspaceState = await getPracticeWorkspaceState(page);
+        // Se ancora in caricamento, aspetta e riprova
+        let odlWaitAttempts = 0;
+        while (workspaceState === "loading_shell" && odlWaitAttempts < 5) {
+          await page.waitForTimeout(600);
+          workspaceState = await getPracticeWorkspaceState(page);
+          odlWaitAttempts++;
+        }
+        if (args.debug) writeReport.odlWaitAttempts = odlWaitAttempts;
       }
     }
+
+    // Fallback: click sul tab (se la route non era disponibile o la navigazione è fallita)
+    if (!odlNavigated) {
+      let odlTab = await clickOdlSection(page);
+      if (!odlTab?.clicked) {
+        if (args.debug) writeReport.odlTopCandidatesBeforeRetry = await snapshotTopOdlCandidates(page);
+        await dismissVehicleSearchOverlay(page);
+        await page.waitForTimeout(200);
+        odlTab = await clickOdlSection(page);
+      }
+      if (!odlTab?.clicked) {
+        const fallbackOdl = page.locator("button, a, [role='button'], .gwt-Label, span, div, td").filter({ hasText: /ordini di lavoro|\bodl\b/i }).first();
+        if (await fallbackOdl.count()) {
+          await fallbackOdl.click().catch(() => {});
+          odlTab = { clicked: true, label: "fallback:odl" };
+        }
+      }
+      if (odlTab?.clicked) {
+        odlNavigated = true;
+        writeReport.openedOdl = true;
+        if (args.debug) writeReport.odlTopCandidates = await snapshotTopOdlCandidates(page);
+        logPhase("odl_tab", "click_opened", { label: odlTab.label });
+        await waitForOdlWorkspaceReady(page, 12000);
+        workspaceState = await getPracticeWorkspaceState(page);
+        // Secondo hop se ancora non siamo in odl_full
+        if (workspaceState !== "odl_full") {
+          await dismissVehicleSearchOverlay(page);
+          const secondOdl = await clickOdlSection(page);
+          if (secondOdl?.clicked) {
+            logPhase("odl_tab", "click_hop2", { label: secondOdl.label });
+            await waitForOdlWorkspaceReady(page, 12000);
+            workspaceState = await getPracticeWorkspaceState(page);
+          }
+        }
+      } else if (writeReport.odl.attempted) {
+        writeReport.odl.error = "odl_tab_not_found";
+        logPhase("odl_tab", "not_found");
+      }
+    }
+
     if (args.debug) {
       const odlShot = path.join(args.artifactDir, `odl-open-${job.practiceId || "payload"}-${Date.now()}.png`);
       await page.screenshot({ path: odlShot, fullPage: true }).catch(() => {});
       writeReport.odlScreenshot = odlShot;
       writeReport.workspaceState = workspaceState;
+      if (!odlNavigated) {
+        const noOdlShot = path.join(args.artifactDir, `odl-not-found-${job.practiceId || "payload"}-${Date.now()}.png`);
+        await page.screenshot({ path: noOdlShot, fullPage: true }).catch(() => {});
+        writeReport.odlNotFoundScreenshot = noOdlShot;
+      }
     }
-  } else if (writeReport.odl.attempted) {
-    writeReport.odl.error = "odl_tab_not_found";
-    logPhase("odl_tab", "not_found");
-    if (args.debug) {
-      const noOdlShot = path.join(args.artifactDir, `odl-not-found-${job.practiceId || "payload"}-${Date.now()}.png`);
-      await page.screenshot({ path: noOdlShot, fullPage: true }).catch(() => {});
-      writeReport.odlNotFoundScreenshot = noOdlShot;
-    }
-  }
 
   const noteSummaryBlock = buildOdlSummaryText(job);
   if (writeReport.openedOdl) {
+    if (args.debug) {
+      writeReport.bottomTabsBeforeNote = await snapshotBottomSectionTabs(page);
+    }
     const noteTabOpened = await clickBottomSectionTab(page, "Note interne");
     if (noteTabOpened) {
       await page.waitForTimeout(120);
+      if (args.debug) {
+        writeReport.bottomTabsAfterNote = await snapshotBottomSectionTabs(page);
+      }
       if (args.debug) {
         const noteTabShot = path.join(args.artifactDir, `note-tab-${job.practiceId || "payload"}-${Date.now()}.png`);
         await page.screenshot({ path: noteTabShot, fullPage: true }).catch(() => {});
@@ -1131,7 +1757,12 @@ async function writePracticeAndOdl(page, job, args) {
       }
       await page.waitForTimeout(60);
     }
-    const sectionSummary = buildSectionSummary(section);
+    const sectionSummaryParts = [];
+    if (job.internalNotes && !writeReport.notes.success && writeReport.odl.sections.length === 0) {
+      sectionSummaryParts.push(`Note interne: ${String(job.internalNotes).trim()}`);
+    }
+    sectionSummaryParts.push(buildSectionSummary(section));
+    const sectionSummary = sectionSummaryParts.join("\n");
     const sectionWritten = await fillWithRetry(
       page,
       [
@@ -1229,6 +1860,8 @@ async function writePracticeAndOdl(page, job, args) {
       }
     }
   }
+
+  } // Close else block from line 1609 (noVehicle guard)
 
   // Fallback generico: se proprio nessun campo ODL funziona, metti il blocco completo nella prima textarea.
   if (
@@ -1372,6 +2005,44 @@ async function fillAppointmentPopup(page, job) {
   const notes = buildNotesForPopup(jobToMapping(job));
 
   await fillVisibleInput(page, cosaInput.index, cosaValue);
+
+  // F2-bis: gestione dropdown autocomplete veicolo dopo aver scritto la targa in "Cosa"
+  if (job.customer?.plate) {
+    await page.waitForTimeout(300).catch(() => {});
+    const plateSelected = await safeEvaluate(page, (targetPlate) => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      // Cerca dropdown di autocomplete (suggestion popup o lista risultati)
+      const suggestions = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox'], .dropdown, .autocomplete")]
+        .filter(isVisible);
+      for (const popup of suggestions) {
+        const items = [...popup.querySelectorAll("div, span, td, tr, li, [role='option']")]
+          .filter(isVisible)
+          .filter((el) => el.textContent.toUpperCase().includes(targetPlate.toUpperCase()));
+        if (items.length > 0) {
+          items[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+          return { selected: true, match: items[0].textContent.trim() };
+        }
+      }
+      // Fallback: cerca qualsiasi elemento visibile con la targa (risultato ricerca)
+      const matches = [...document.querySelectorAll("div, span, td, tr")]
+        .filter(isVisible)
+        .filter((el) => el.textContent.toUpperCase().includes(targetPlate.toUpperCase()));
+      if (matches.length > 0) {
+        const best = matches.sort((a, b) => b.getBoundingClientRect().y - a.getBoundingClientRect().y)[0];
+        best.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+        return { selected: true, match: best.textContent.trim() };
+      }
+      return { selected: false };
+    }, job.customer.plate).catch(() => ({ selected: false }));
+    if (plateSelected?.selected) {
+      await page.waitForTimeout(200).catch(() => {});
+    }
+  }
+
   await fillVisibleInput(page, dateIndex, toItalianDate(job.appointment.date));
   await fillVisibleInput(page, timeIndexes[0], toYapTime(job.appointment.time));
   await fillVisibleInput(page, timeIndexes[1], toYapTime(endTime));
@@ -1385,6 +2056,11 @@ async function fillAppointmentPopup(page, job) {
 
   const yapTags = pickYapTagsFromJob(job);
   await addYapTagChips(page, yapTags);
+
+  // F2: prova a selezionare il veicolo tramite il widget Veicolo del popup (non-fatal)
+  if (job.customer?.plate) {
+    await selectVehicleByPlate(page, job.customer.plate).catch(() => {});
+  }
 }
 
 async function scanAgendaEvents(page) {
@@ -1455,6 +2131,16 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 2 } = {}) {
   return { putResponse, saveAttemptsUsed };
 }
 
+async function summarizeResponseBody(response, limit = 1200) {
+  if (!response) return null;
+  try {
+    const text = await response.text();
+    return String(text || "").replace(/\s+/g, " ").trim().slice(0, limit);
+  } catch {
+    return null;
+  }
+}
+
 async function runYapAutomation(job, args) {
   const username = ensureEnv("YAP_USERNAME");
   const password = ensureEnv("YAP_PASSWORD");
@@ -1496,20 +2182,36 @@ async function runYapAutomation(job, args) {
   page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
 
   async function openAgendaWithRecovery(dateIso) {
-    try {
-      await openAgenda(page, dateIso);
-      return;
-    } catch (error) {
-      if (!/agenda_redirected_to_login/i.test(String(error?.message || ""))) throw error;
-      logPhase("agenda", "relogin");
-      await context.clearCookies().catch(() => {});
-      await page.evaluate(() => {
-        try { window.localStorage?.clear?.(); } catch {}
-        try { window.sessionStorage?.clear?.(); } catch {}
-      }).catch(() => {});
-      await page.goto(process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it", { waitUntil: "domcontentloaded" }).catch(() => {});
-      await loginYap(page, username, password);
-      await openAgenda(page, dateIso);
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await openAgenda(page, dateIso);
+        return;
+      } catch (error) {
+        const message = String(error?.message || "");
+        const needsRelogin = /agenda_redirected_to_login/i.test(message);
+        const wrongDate = /agenda_date_not_reached:/i.test(message);
+        if (!needsRelogin && !wrongDate) throw error;
+        logPhase("agenda", needsRelogin ? "relogin" : "date_retry", { attempt, error: message.slice(0, 180) });
+        await context.clearCookies().catch(() => {});
+        await page.evaluate(() => {
+          try { window.localStorage?.clear?.(); } catch {}
+          try { window.sessionStorage?.clear?.(); } catch {}
+        }).catch(() => {});
+        await page.goto(process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it", { waitUntil: "domcontentloaded" }).catch(() => {});
+        try {
+          await loginYap(page, username, password);
+        } catch (retryError) {
+          if (attempt === 3) throw retryError;
+          logPhase("agenda", "relogin_retry", { attempt, error: String(retryError?.message || retryError).slice(0, 180) });
+          await page.waitForTimeout(500 * attempt).catch(() => {});
+          continue;
+        }
+        if (attempt === 3) {
+          await openAgenda(page, dateIso);
+          return;
+        }
+        await page.waitForTimeout(350 * attempt).catch(() => {});
+      }
     }
   }
 
@@ -1620,11 +2322,13 @@ async function runYapAutomation(job, args) {
       let putResponse = null;
       let saveAttemptsUsed = 0;
       let popupSaveError = null;
+      let putResponseSummary = null;
       try {
         await fillAppointmentPopup(page, job);
         const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
         putResponse = popupSave.putResponse;
         saveAttemptsUsed = popupSave.saveAttemptsUsed;
+        putResponseSummary = args.debug ? await summarizeResponseBody(putResponse) : null;
         await page.waitForTimeout(220);
       } catch (saveErr) {
         popupSaveError = saveErr?.message || "Salvataggio popup duplicato non confermato";
@@ -1646,6 +2350,8 @@ async function runYapAutomation(job, args) {
         putAction: {
           detected: Boolean(putResponse),
           status: putResponse?.status(),
+          url: putResponse?.url?.(),
+          body_excerpt: putResponseSummary,
         },
         telemetry: {
           saveAttempts: saveAttemptsUsed,
@@ -1685,6 +2391,7 @@ async function runYapAutomation(job, args) {
     logPhase("save", "starting");
     const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
     logPhase("save", "done", { detected: Boolean(putResponse) });
+    const putResponseSummary = args.debug ? await summarizeResponseBody(putResponse) : null;
     await page.waitForTimeout(240);
     let afterSavePath = null;
     if (args.debug) {
@@ -1707,6 +2414,8 @@ async function runYapAutomation(job, args) {
       putAction: {
         detected: Boolean(putResponse),
         status: putResponse?.status(),
+        url: putResponse?.url?.(),
+        body_excerpt: putResponseSummary,
       },
       screenshot: afterSavePath,
       telemetry: {
@@ -1730,6 +2439,40 @@ async function runYapAutomation(job, args) {
   } finally {
     await context.close();
     await browser.close();
+  }
+}
+
+// Cleanup automatico: rimuove screenshot vecchi di test falliti (più di 7 giorni)
+async function cleanupOldArtifacts(artifactDir, maxAgeDays = 7) {
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    
+    const entries = await fs.promises.readdir(artifactDir, { withFileTypes: true });
+    let cleaned = 0;
+    
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      // Pattern: error-* o *-test-*.png più vecchi di maxAgeDays
+      if (!entry.name.match(/error-|test-.*\.png$/)) continue;
+      
+      const filePath = path.join(artifactDir, entry.name);
+      const stats = await fs.promises.stat(filePath);
+      const age = now - stats.mtimeMs;
+      
+      if (age > maxAgeMs) {
+        await fs.promises.unlink(filePath);
+        cleaned++;
+      }
+    }
+    
+    if (cleaned > 0) {
+      console.log(`[cleanup] Rimossi ${cleaned} file vecchi da ${artifactDir}`);
+    }
+  } catch (err) {
+    // Silenzioso: cleanup non è critico
   }
 }
 
@@ -1778,6 +2521,9 @@ async function main() {
   const job = args.payloadFile ? await readPayloadFile(args.payloadFile, args) : await readPracticeFromApi(args);
   validateJob(job);
 
+  // Cleanup vecchi screenshot prima di eseguire (manutenzione automatica)
+  await cleanupOldArtifacts(args.artifactDir, 7);
+  
   const result = await runYapAutomation(job, args);
   console.log(JSON.stringify({
     ok: true,

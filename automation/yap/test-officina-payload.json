@@ -1,0 +1,37 @@
+{
+  "_README": "PAYLOAD OFFICINA per test ODL",
+  "mapping": {
+    "anagrafica": {
+      "cliente_nome": "TEST AUTOMAZIONE - NON USARE",
+      "cliente_telefono": "+390000000000",
+      "cliente_tipo": "privato",
+      "targa": "ZZ555ZZ"
+    },
+    "agenda": {
+      "data": "2026-12-27",
+      "ora": "07:00",
+      "durata_minuti": 20,
+      "tipo_pratica": "officina"
+    },
+    "lavorazioni": [
+      {
+        "reparto": "officina",
+        "descrizioni": ["TEST AUTOMAZIONE - riga ODL di prova"],
+        "ore_man": 1,
+        "ore_mac": 0.5,
+        "materiali_euro": 12.5,
+        "smaltimento_applica": true,
+        "smaltimento_percentuale": 2,
+        "ricambi": [
+          {"name": "Filtro olio TEST", "quantity": "1"},
+          {"name": "Lampadina TEST", "quantity": "2"}
+        ]
+      }
+    ],
+    "note_interne": "TEST AUTOMAZIONE - note interne di prova - CANCELLARE",
+    "meta": {
+      "practice_id": "test-officina-001",
+      "external_id": null
+    }
+  }
+}
