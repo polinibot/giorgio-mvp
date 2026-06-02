@@ -2345,7 +2345,7 @@ async function runYapAutomation(job, args) {
       let putResponseSummary = null;
       try {
         await fillAppointmentPopup(page, job);
-        const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
+        const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 3 });
         putResponse = popupSave.putResponse;
         saveAttemptsUsed = popupSave.saveAttemptsUsed;
         putResponseSummary = args.debug ? await summarizeResponseBody(putResponse) : null;
@@ -2409,7 +2409,7 @@ async function runYapAutomation(job, args) {
 
     logPhase("popup", "filled");
     logPhase("save", "starting");
-    const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 2 });
+    const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 3 });
     logPhase("save", "done", { detected: Boolean(putResponse) });
     const putResponseSummary = args.debug ? await summarizeResponseBody(putResponse) : null;
     await page.waitForTimeout(240);

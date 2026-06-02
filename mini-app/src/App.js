@@ -3975,7 +3975,7 @@ function App() {
     const n = ids.length;
     setConfirmModal({
       title: `🗑 Eliminare ${n} pratica${n > 1 ? 'e' : ''}?`,
-      message: `Le pratiche verranno rimosse localmente. Se sincronizzate su YAP, l'appuntamento YAP rimarrà intatto (potrai eliminarlo manualmente). Operazione non reversibile.`,
+      message: `Le pratiche verranno rimosse sia su YAP che localmente. Se l'appuntamento YAP è protetto da ODL, l'eliminazione YAP fallirà ma la pratica locale verrà comunque rimossa. Operazione non reversibile.`,
       onConfirm: async () => {
         setConfirmModal(null);
         setSelectionMode(false);
@@ -3985,11 +3985,27 @@ function App() {
         startYapActionProgress('batch_delete', null, `Eliminazione in corso… 0/${n}`);
         for (let i = 0; i < ids.length; i++) {
           const id = ids[i];
-          updateYapActionProgress({ percent: Math.round(((i) / n) * 100), label: `Eliminazione ${i + 1}/${n}…` });
+          updateYapActionProgress({ percent: Math.round(((i) / n) * 100), label: `Eliminazione ${i + 1}/${n} su YAP e locale…` });
           try {
             if (browserPreviewMode) {
               setPractices(prev => prev.filter(pr => String(pr.id) !== String(id)));
             } else {
+              // 1. Prima elimina appuntamento YAP (se esiste)
+              try {
+                await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, {
+                  data: { skip_audit: true },
+                  params: getAuthParams(),
+                  headers: getHeaders(),
+                  timeout: 60000,
+                });
+              } catch (yapErr) {
+                // Se non trovato su YAP, continua comunque
+                if (!yapErr?.response?.data?.detail?.includes('not_found') && 
+                    !yapErr?.response?.data?.detail?.includes('non trovato')) {
+                  console.warn(`YAP delete warning for ${id}:`, yapErr?.response?.data?.detail || yapErr.message);
+                }
+              }
+              // 2. Poi elimina pratica locale
               await axios.delete(`${API_BASE_URL}/practices/${id}`, {
                 params: { ...getAuthParams(), skip_yap: true },
                 headers: getHeaders(),
@@ -4000,6 +4016,7 @@ function App() {
             }
             deleted++;
           } catch (err) {
+            console.error(`Delete failed for ${id}:`, err);
             failed++;
           }
         }

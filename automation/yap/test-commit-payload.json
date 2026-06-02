@@ -1,0 +1,33 @@
+{
+  "mapping": {
+    "anagrafica": {
+      "cliente_nome": "TEST CLAUDE DELETE ME",
+      "cliente_telefono": "+393331112233",
+      "cliente_tipo": "privato",
+      "targa": "ZZ999ZZ"
+    },
+    "agenda": {
+      "data": "2026-06-15",
+      "ora": "08:00",
+      "durata_minuti": 20,
+      "tipo_pratica": "preventivo"
+    },
+    "lavorazioni": [
+      {
+        "reparto": "officina",
+        "descrizioni": ["TEST - cancellare"],
+        "ore_man": 0.5,
+        "ore_mac": null,
+        "materiali_euro": null,
+        "smaltimento_applica": false,
+        "smaltimento_percentuale": null,
+        "ricambi": []
+      }
+    ],
+    "note_interne": "TEST CLAUDE - CANCELLARE",
+    "meta": {
+      "practice_id": "test-claude-001",
+      "external_id": null
+    }
+  }
+}
