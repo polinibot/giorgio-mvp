@@ -12,7 +12,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { loginYap, openAgendaInApp, gotoAgendaDate, yapContextOptions } from "./lib/yap-shared.mjs";
+import {
+  loginYap,
+  openAgendaWithRecovery,
+  readAgendaViewportState,
+  scanVisibleAgendaEvents,
+  yapContextOptions,
+} from "./lib/yap-shared.mjs";
 
 const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
 const { chromium } = requireFromYap("playwright");
@@ -109,7 +115,7 @@ function decodeDayFromTable(table, date) {
   return records;
 }
 
-async function capturePrenotazioneForDate(page, date) {
+async function capturePrenotazioneForDate(page, date, credentials) {
   let captured = null;
   const handler = async (res) => {
     const url = res.url();
@@ -121,34 +127,16 @@ async function capturePrenotazioneForDate(page, date) {
   };
   page.on("response", handler);
   try {
-    await gotoAgendaDate(page, date);
+    await openAgendaWithRecovery(page, {
+      dateIso: date,
+      username: credentials?.username || "",
+      password: credentials?.password || "",
+    });
     await page.waitForTimeout(2000);
   } finally {
     page.off("response", handler);
   }
   return captured;
-}
-
-async function scanDomEvents(page) {
-  return page.evaluate(() => {
-    const rows = [];
-    const seen = new Set();
-    for (const el of document.querySelectorAll(".fc-time-grid-event, .fc-event")) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 2) continue;
-      const title = (el.querySelector(".fc-title") || el).textContent.replace(/\s+/g, " ").trim();
-      const time = (el.querySelector(".fc-time")?.textContent || "").trim();
-      const key = `${time}|${title}`;
-      if (!title || seen.has(key)) continue;
-      seen.add(key);
-      const repartoClass =
-        String(el.className || "")
-          .split(/\s+/)
-          .find((c) => /^LCWVQRD-b-[a-z]$/.test(c)) || "";
-      rows.push({ time, title, repartoClass });
-    }
-    return rows.sort((a, b) => a.time.localeCompare(b.time));
-  });
 }
 
 async function main() {
@@ -171,12 +159,13 @@ async function main() {
 
   try {
     await loginYap(page, user, pass);
-    await openAgendaInApp(page);
+    await openAgendaWithRecovery(page, { username: user, password: pass });
 
     for (const date of dates) {
       console.log(`📅 ${date}…`);
-      const raw = await capturePrenotazioneForDate(page, date);
-      const domEvents = await scanDomEvents(page);
+      const raw = await capturePrenotazioneForDate(page, date, { username: user, password: pass });
+      const viewport = await readAgendaViewportState(page);
+      const domEvents = await scanVisibleAgendaEvents(page);
       let rpcRecords = [];
       if (raw) {
         const table = findStringTable(parseGwt(raw));
@@ -184,6 +173,7 @@ async function main() {
       }
       days.push({
         date,
+        viewport,
         domEventCount: domEvents.length,
         domEvents,
         rpcRecordCount: rpcRecords.length,

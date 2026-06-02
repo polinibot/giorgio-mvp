@@ -8,7 +8,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { loginYap, openAgendaInApp, gotoAgendaDate, ROOT_DIR, yapContextOptions } from "./lib/yap-shared.mjs";
+import {
+  loginYap,
+  openAgendaWithRecovery,
+  readAgendaViewportState,
+  ROOT_DIR,
+  scanVisibleAgendaEvents,
+  yapContextOptions,
+} from "./lib/yap-shared.mjs";
 
 const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
 const { chromium } = requireFromYap("playwright");
@@ -36,43 +43,6 @@ function parseArgs(argv) {
   return args;
 }
 
-async function scanDayEvents(page) {
-  return page.evaluate(() => {
-    const events = [...document.querySelectorAll(".fc-time-grid-event, .fc-event")];
-    const seen = new Set();
-    const rows = [];
-
-    for (const el of events) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 2 || rect.height < 2) continue;
-
-      const titleEl = el.querySelector(".fc-title") || el;
-      const timeEl = el.querySelector(".fc-time");
-      const title = (titleEl.textContent || "").replace(/\s+/g, " ").trim();
-      const time = (timeEl?.textContent || "").trim();
-      const key = `${time}|${title}`;
-      if (!title || seen.has(key)) continue;
-      seen.add(key);
-
-      const classes = String(el.className || "").split(/\s+/);
-      const repartoClass = classes.find((c) => /^LCWVQRD-b-[a-z]$/.test(c)) || "";
-      const style = window.getComputedStyle(el);
-
-      rows.push({
-        time,
-        title,
-        repartoClass,
-        bgColor: style.backgroundColor,
-        borderColor: style.borderColor,
-        left: style.left,
-        width: style.width,
-      });
-    }
-
-    return rows.sort((a, b) => a.time.localeCompare(b.time) || a.title.localeCompare(b.title));
-  });
-}
-
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const user = process.env.YAP_USERNAME;
@@ -90,10 +60,10 @@ async function main() {
 
   try {
     await loginYap(page, user, pass);
-    await openAgendaInApp(page);
-    await gotoAgendaDate(page, args.date);
+    await openAgendaWithRecovery(page, { dateIso: args.date, username: user, password: pass });
 
-    const events = await scanDayEvents(page);
+    const viewport = await readAgendaViewportState(page);
+    const events = await scanVisibleAgendaEvents(page, { includeStyle: true });
     let screenshotPath = null;
     if (args.debug) {
       screenshotPath = path.join(
@@ -112,6 +82,7 @@ async function main() {
       date: args.date,
       mode: "readonly",
       eventCount: events.length,
+      viewport,
       events,
       screenshot: screenshotPath,
     };

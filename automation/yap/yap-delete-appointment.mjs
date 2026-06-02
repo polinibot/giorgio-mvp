@@ -14,10 +14,10 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import {
   loginYap,
-  openAgendaInApp,
-  gotoAgendaDate,
+  openAgendaWithRecovery,
   waitForAgendaReady,
   ROOT_DIR,
+  scanVisibleAgendaEventTargets,
   waitForYapAction,
   yapContextOptions,
   launchChromiumWithFallback,
@@ -166,8 +166,7 @@ async function handleOdlBlockingAndRetry(page, event, dateIso, searchTerm, trace
     }
     
     // Torna all'agenda
-    await openAgendaInApp(page);
-    await gotoAgendaDate(page, dateIso);
+    await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
     await page.waitForTimeout(1500);
     trace?.mark("odl_fix_back_to_agenda");
     
@@ -230,25 +229,7 @@ async function clickDeleteAndAcceptNativeDialog(page, locator) {
 }
 
 async function listVisibleAgendaEvents(page) {
-  return page.evaluate(() => {
-    return [...document.querySelectorAll(".fc-time-grid-event, .fc-event")]
-      .filter((el) => {
-        const rect = el.getBoundingClientRect();
-        return rect.width > 2 && rect.height > 2;
-      })
-      .map((el) => {
-        const titleEl = el.querySelector(".fc-title") || el;
-        const timeEl = el.querySelector(".fc-time");
-        const rect = el.getBoundingClientRect();
-        return {
-          title: (titleEl.textContent || "").replace(/\s+/g, " ").trim(),
-          time: (timeEl?.textContent || "").trim(),
-          x: rect.x + rect.width / 2,
-          y: rect.y + rect.height / 2,
-        };
-      })
-      .filter((ev) => ev.title);
-  });
+  return scanVisibleAgendaEventTargets(page);
 }
 
 async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug = false, trace = null) {
@@ -265,9 +246,11 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     trace?.mark("appointment_not_found_in_visible_events", { visible_titles: events.map((event) => event.title).slice(0, 12) });
     return { found: false, searched: searchTerm, events: events.map((e) => e.title) };
   }
+  const initialMatchCount = events.filter((event) => normalizeText(event.title).includes(needle)).length;
   trace?.mark("appointment_match_found", {
     matched_title: match.title,
     matched_time: match.time || null,
+    initial_match_count: initialMatchCount,
   });
 
   if (dryRun) {
@@ -381,19 +364,23 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   page.off("response", onResponse);
 
   let afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
-  let stillPresent = afterEvents.some((event) => event.title.toLowerCase().includes(searchTerm.toLowerCase()));
-  if (stillPresent || !page.url().includes("#!agenda")) {
+  let remainingMatches = afterEvents.filter((event) => normalizeText(event.title).includes(needle)).length;
+  let deletedCount = Math.max(0, initialMatchCount - remainingMatches);
+  let targetDeleted = deletedCount >= 1;
+  if (!targetDeleted || !page.url().includes("#!agenda")) {
     trace?.mark("reopening_agenda_for_verification", {
-      still_present_before_reopen: stillPresent,
+      remaining_matches_before_reopen: remainingMatches,
+      deleted_count_before_reopen: deletedCount,
       current_url: page.url(),
     });
-    await openAgendaInApp(page);
-    await gotoAgendaDate(page, dateIso);
+    await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
     await page.waitForTimeout(250);
     afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
-    stillPresent = afterEvents.some((event) => event.title.toLowerCase().includes(searchTerm.toLowerCase()));
+    remainingMatches = afterEvents.filter((event) => normalizeText(event.title).includes(needle)).length;
+    deletedCount = Math.max(0, initialMatchCount - remainingMatches);
+    targetDeleted = deletedCount >= 1;
   }
-  const failureStatus = stillPresent
+  let failureStatus = !targetDeleted
     ? classifyDeleteFailure(deleteRpcResponse?.body || visibleMessage)
     : null;
   // Gestione automatica ODL: se bloccato, apri pratica, elimina ODL, riprova
@@ -405,15 +392,16 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
       if (odlAutoFixed) {
         trace?.mark("odl_auto_fix_success");
         // Riverifica eliminazione
-        await openAgendaInApp(page);
-        await gotoAgendaDate(page, dateIso);
+        await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
         await page.waitForTimeout(400);
         const finalEvents = await listVisibleAgendaEvents(page).catch(() => []);
-        const finallyGone = !finalEvents.some((event) => event.title.toLowerCase().includes(searchTerm.toLowerCase()));
-        if (finallyGone) {
-          stillPresent = false;
+        remainingMatches = finalEvents.filter((event) => normalizeText(event.title).includes(needle)).length;
+        deletedCount = Math.max(0, initialMatchCount - remainingMatches);
+        targetDeleted = deletedCount >= 1;
+        if (targetDeleted) {
           failureStatus = null;
         }
+        afterEvents = finalEvents;
       }
     } catch (odlErr) {
       trace?.mark("odl_auto_fix_failed", { error: odlErr.message });
@@ -428,7 +416,10 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     : null;
 
   trace?.mark("delete_verification_completed", {
-    still_present: stillPresent,
+    initial_match_count: initialMatchCount,
+    remaining_match_count: remainingMatches,
+    deleted_count: deletedCount,
+    target_deleted: targetDeleted,
     failure_status: failureStatus,
     response_status: deleteRpcResponse?.status ?? null,
     verified_event_count: afterEvents.length,
@@ -436,8 +427,8 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
 
   return {
     found: true,
-    deleted: !stillPresent,
-    status: stillPresent ? (failureStatus || "not_deleted") : "deleted",
+    deleted: targetDeleted,
+    status: targetDeleted ? "deleted" : (failureStatus || "not_deleted"),
     confirmed: !!deleteRpcRequest,
     deleteAction: {
       detected: !!deleteRpcRequest,
@@ -445,13 +436,18 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
       responseStatus: deleteRpcResponse?.status,
       failureStatus,
     },
+    deletedCount,
+    remainingMatches,
     event: match,
     yapMessage: visibleMessage || undefined,
-    note: stillPresent
-      ? failureStatus === "blocked_by_odl"
+    note: targetDeleted
+      ? remainingMatches > 0
+        ? `Richiesta delete confermata: eliminata ${deletedCount} occorrenza, ${remainingMatches} slot omonimi ancora presenti in agenda.`
+        : undefined
+      : failureStatus === "blocked_by_odl"
         ? "YAP blocca la cancellazione perche l'appuntamento e' associato a un ordine di lavoro."
         : "Richiesta delete inviata ma evento ancora visibile in agenda."
-      : undefined,
+      ,
     repairHint,
     telemetry: {
       dialogMessages,
@@ -459,7 +455,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
       trace: trace?.snapshot({
         rpc_request_detected: !!deleteRpcRequest,
         rpc_response_status: deleteRpcResponse?.status ?? null,
-        final_status: stillPresent ? (failureStatus || "not_deleted") : "deleted",
+        final_status: targetDeleted ? "deleted" : (failureStatus || "not_deleted"),
       }),
     },
   };
@@ -550,11 +546,16 @@ async function main() {
     trace.mark("agenda_ready_check_completed", { ready: agendaReady });
     if (!agendaReady) {
       trace.mark("agenda_open_requested");
-      await openAgendaInApp(page);
+      await openAgendaWithRecovery(page, {
+        dateIso: args.date,
+        username: user,
+        password: pass,
+        onRetry: ({ attempt, error, reason }) => {
+          trace.mark("agenda_recovery_retry", { attempt, error: error.slice(0, 180), reason });
+        },
+      });
       trace.mark("agenda_open_completed");
     }
-    trace.mark("agenda_date_navigation_started", { date: args.date });
-    await gotoAgendaDate(page, args.date);
     trace.mark("agenda_date_navigation_completed", { date: args.date });
 
     const result = await findAndDeleteAppointment(page, args.search, args.dryRun, args.date, args.debug, trace);

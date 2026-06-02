@@ -196,6 +196,48 @@ export async function persistYapSession(context) {
   await context.storageState({ path: YAP_SESSION_STATE });
 }
 
+async function waitForYapBootSurface(page, timeout = 25000) {
+  const started = Date.now();
+  while ((Date.now() - started) < timeout) {
+    const state = await page.evaluate(() => {
+      const isVisible = (node) => {
+        if (!node) return false;
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      const loginUser = document.querySelector('input[name="u"]');
+      const agendaMarkers = [
+        document.querySelector(".fc-time-grid"),
+        document.querySelector(".fc-view-container"),
+        document.querySelector(".view-switch"),
+        document.querySelector(".fc-agenda-view"),
+      ].some(isVisible);
+      const appShellMarkers = [
+        ...document.querySelectorAll("a, span, div"),
+      ].filter(isVisible).some((node) => {
+        const text = (node.textContent || "").trim();
+        return /^(Dashboard|Agenda|Nuovo|Revisioni|Banche dati|Analisi|Archivi|Configurazioni|Aiuto)$/i.test(text)
+          || /@offcarchiuduno/i.test(text);
+      });
+      const bodyText = (document.body?.innerText || "").toLowerCase();
+      const loadingVisible = [...document.querySelectorAll("div, span, td")]
+        .filter(isVisible)
+        .some((node) => /caricamento|loading|attendere/i.test(node.textContent || ""));
+      if (isVisible(loginUser)) return "login";
+      if (agendaMarkers) return "agenda";
+      if (appShellMarkers) return "app_shell";
+      if (loadingVisible) return "loading";
+      if (/\bagenda\b/.test(bodyText)) return "app_shell";
+      return "unknown";
+    }).catch(() => "unknown");
+
+    if (state === "login" || state === "agenda" || state === "app_shell") return state;
+    await page.waitForTimeout(250).catch(() => {});
+  }
+  return "timeout";
+}
+
 export async function waitForAgendaReady(page, timeout = 20000) {
   await page.locator(".fc-time-grid, .fc-view-container, .view-switch, .fc-agenda-view").first().waitFor({
     state: "visible",
@@ -205,6 +247,96 @@ export async function waitForAgendaReady(page, timeout = 20000) {
 
 export async function isYapLoginPage(page, timeout = 1200) {
   return page.locator('input[name="u"]').first().isVisible({ timeout }).catch(() => false);
+}
+
+async function hasYapAppShell(page, timeout = 2000) {
+  return page.evaluate(() => {
+    const isVisible = (node) => {
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    return [...document.querySelectorAll("a, span, div")]
+      .filter(isVisible)
+      .some((node) => {
+        const text = (node.textContent || "").trim();
+        return /^(Dashboard|Agenda|Nuovo|Revisioni|Banche dati|Analisi|Archivi|Configurazioni|Aiuto)$/i.test(text)
+          || /@offcarchiuduno/i.test(text);
+      });
+  }).catch(() => false);
+}
+
+async function openAgendaFromAppShell(page, timeout = 15000) {
+  const agendaLink = page.getByText("Agenda", { exact: true }).first();
+  if (await agendaLink.isVisible({ timeout: 1500 }).catch(() => false)) {
+    await agendaLink.click().catch(() => {});
+  } else {
+    await page.evaluate(() => {
+      const nodes = [...document.querySelectorAll("a, button, span, div")];
+      const target = nodes.find((node) => (node.textContent || "").trim() === "Agenda");
+      target?.click?.();
+    }).catch(() => {});
+  }
+  await waitForYapBootSurface(page, 5000).catch(() => {});
+  await waitForAgendaReady(page, timeout);
+}
+
+async function dismissUnsupportedBrowserWarningRobust(page, { timeout = 6000 } = {}) {
+  const started = Date.now();
+  let dismissed = false;
+  while ((Date.now() - started) < timeout) {
+    const handled = await page.evaluate(() => {
+      const isVisible = (node) => {
+        if (!node) return false;
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      const dialogs = [...document.querySelectorAll(".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel")]
+        .filter(isVisible);
+      const warning = dialogs.find((dialog) => {
+        const text = (dialog.textContent || "").toLowerCase();
+        return text.includes("versione del browser")
+          || text.includes("browser in uso")
+          || text.includes("non è più supportata")
+          || text.includes("non e piu supportata")
+          || text.includes("safari - null");
+      });
+      if (!warning) return false;
+      const okBtn = [...warning.querySelectorAll("button, .gwt-Button, [role='button'], a")]
+        .find((node) => isVisible(node) && (node.textContent || "").trim().toUpperCase() === "OK");
+      if (!okBtn) return false;
+      okBtn.click();
+      return true;
+    }).catch(() => false);
+    if (handled) {
+      dismissed = true;
+      await page.waitForTimeout(250).catch(() => {});
+      continue;
+    }
+    const stillVisible = await page.evaluate(() => {
+      const isVisible = (node) => {
+        if (!node) return false;
+        const rect = node.getBoundingClientRect();
+        const style = window.getComputedStyle(node);
+        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      return [...document.querySelectorAll(".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel")]
+        .filter(isVisible)
+        .some((dialog) => {
+          const text = (dialog.textContent || "").toLowerCase();
+          return text.includes("versione del browser")
+            || text.includes("browser in uso")
+            || text.includes("non è più supportata")
+            || text.includes("non e piu supportata")
+            || text.includes("safari - null");
+        });
+    }).catch(() => false);
+    if (!stillVisible) return dismissed;
+    await page.waitForTimeout(250).catch(() => {});
+  }
+  return dismissed;
 }
 
 async function dismissUnsupportedBrowserWarning(page) {
@@ -283,26 +415,9 @@ export async function gotoAgendaDate(page, isoDate) {
     return Number(yearText) * 12 + months[monthName];
   };
   const agendaShowsTargetDate = async () => {
-    return page.evaluate((needle) => {
-      const normalizeText = (value) => String(value || "")
-        .normalize("NFD")
-        .replace(/\p{Diacritic}/gu, "")
-        .toLowerCase()
-        .replace(/\s+/g, " ")
-        .trim();
-      const targetNeedle = normalizeText(needle);
-      const isVisible = (node) => {
-        const rect = node.getBoundingClientRect();
-        const style = window.getComputedStyle(node);
-        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
-      };
-      return [...document.querySelectorAll("h1, h2, h3, div, span, td")]
-        .filter(isVisible)
-        .some((node) => {
-          const text = normalizeText((node.textContent || "").slice(0, 80));
-          return text.includes(targetNeedle);
-        });
-    }, targetNeedle).catch(() => false);
+    const state = await readAgendaViewportState(page).catch(() => null);
+    if (!state) return false;
+    return normalize(state.centerDateLabel || "").includes(normalize(targetNeedle));
   };
   const agendaLoadingVisible = async () => {
     return page.evaluate(() => {
@@ -317,78 +432,301 @@ export async function gotoAgendaDate(page, isoDate) {
     }).catch(() => false);
   };
 
+  for (let settle = 0; settle < 20; settle += 1) {
+    if (!(await agendaLoadingVisible())) break;
+    await page.waitForTimeout(250).catch(() => {});
+  }
+
   for (let guard = 0; guard < 36; guard += 1) {
     const currentIndex = await currentMonthIndex();
     if (currentIndex == null || currentIndex === targetIndex) break;
     await page.locator(currentIndex > targetIndex ? ".prev-button" : ".next-button").first().click();
-    await page.waitForTimeout(50);
+    await page.waitForTimeout(120);
   }
+  await page.waitForTimeout(250).catch(() => {});
 
-  const moved = await page.evaluate((dayText) => {
+  const dayTarget = await page.evaluate(({ dayText, isoDate }) => {
     const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const normalizeClass = (value) => String(value || "").toLowerCase();
     const isVisible = (node) => {
       const rect = node.getBoundingClientRect();
       const style = window.getComputedStyle(node);
       return rect.width > 10 && rect.height > 10 && style.display !== "none" && style.visibility !== "hidden";
     };
-    const calendars = [...document.querySelectorAll("table, div")]
-      .filter(isVisible)
-      .filter((node) => {
-        const text = normalizeText((node.textContent || "").slice(0, 240));
-        return /lu ma me gi ve sa do/i.test(text) || /gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre/i.test(text);
-      });
-    const scope = calendars[0] || document.body;
+    const titleButton = document.querySelector(".view-switch");
+    const scope = titleButton?.parentElement?.parentElement?.parentElement || document.body;
     const candidates = [...scope.querySelectorAll("button, div, span, td, a")]
       .filter(isVisible)
       .filter((node) => normalizeText(node.textContent || "") === dayText)
       .filter((node) => {
         const rect = node.getBoundingClientRect();
-        const classes = String(node.className || "").toLowerCase();
-        return rect.width > 12 && rect.height > 12 && !classes.includes("disabled") && !classes.includes("other") && !classes.includes("outside");
+        const selfClasses = normalizeClass(node.className || "");
+        const parentClasses = normalizeClass(node.parentElement?.className || "");
+        const containerClasses = normalizeClass(node.closest("td, div, span, a, button")?.className || "");
+        const dataDate = String(node.getAttribute?.("data-date") || node.parentElement?.getAttribute?.("data-date") || "");
+        const title = String(node.getAttribute?.("title") || node.parentElement?.getAttribute?.("title") || "");
+        const parsedDataDate = /^\d{10,13}$/.test(dataDate)
+          ? new Date(Number(dataDate))
+          : null;
+        const dataDateIso = parsedDataDate && !Number.isNaN(parsedDataDate.getTime())
+          ? `${parsedDataDate.getFullYear()}-${String(parsedDataDate.getMonth() + 1).padStart(2, "0")}-${String(parsedDataDate.getDate()).padStart(2, "0")}`
+          : "";
+        const blocked = [selfClasses, parentClasses, containerClasses].some((classes) =>
+          classes.includes("disabled") || classes.includes("other") || classes.includes("outside"),
+        );
+        const dateMismatch = (dataDateIso && dataDateIso !== isoDate) || (title && title.includes("/") && !title.includes(dayText));
+        return rect.width > 12 && rect.height > 12 && !blocked && !dateMismatch;
       });
-    const candidate = candidates.sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x)[0];
-    if (!candidate) return false;
-    candidate.click();
-    return true;
-  }, targetDay).catch(() => false);
+    const candidate = candidates.sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return ar.y - br.y || ar.x - br.x;
+    })[0];
+    if (!candidate) return null;
+    const rect = candidate.getBoundingClientRect();
+    return {
+      x: rect.left + (rect.width / 2),
+      y: rect.top + (rect.height / 2),
+    };
+  }, { dayText: targetDay, isoDate }).catch(() => false);
 
-  if (!moved) await page.keyboard.press("Home").catch(() => {});
+  const moved = Boolean(dayTarget && Number.isFinite(dayTarget.x) && Number.isFinite(dayTarget.y));
+  if (moved) {
+    await page.mouse.click(dayTarget.x, dayTarget.y).catch(() => {});
+    await page.waitForTimeout(250).catch(() => {});
+  } else {
+    await page.keyboard.press("Home").catch(() => {});
+  }
   await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
   await waitForAgendaReady(page, 10000).catch(() => {});
   for (let loadingGuard = 0; loadingGuard < 24; loadingGuard += 1) {
-    if (!(await agendaLoadingVisible())) break;
     if (await agendaShowsTargetDate()) return true;
+    const state = await readAgendaViewportState(page).catch(() => null);
+    const selectedMatches = state?.selectedMiniDay === targetDay;
+    const centerMentionsTargetMonth = normalize(state?.centerDateLabel || "").includes(normalize(`${Object.keys(months)[target.getMonth()]} ${target.getFullYear()}`));
+    const loadingVisible = await agendaLoadingVisible();
+    if (!loadingVisible && !selectedMatches && !centerMentionsTargetMonth) break;
     await page.waitForTimeout(500);
   }
-  for (let verify = 0; verify < 4; verify += 1) {
+  for (let verify = 0; verify < 12; verify += 1) {
     if (await agendaShowsTargetDate()) return true;
-    await page.waitForTimeout(250);
-    if (verify === 1 && moved) {
-      await page.evaluate((dayText) => {
-        const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim();
-        const nodes = [...document.querySelectorAll("button, div, span, td, a")]
-          .filter((node) => normalizeText(node.textContent || "") === dayText);
-        nodes[0]?.click();
-      }, targetDay).catch(() => {});
+    await page.waitForTimeout(500);
+    if ((verify === 2 || verify === 6) && moved) {
+      await page.mouse.dblclick(dayTarget.x, dayTarget.y).catch(() => {});
     }
   }
   await page.waitForTimeout(200);
-  throw new Error(`agenda_date_not_reached:${isoDate}`);
+  const finalState = await readAgendaViewportState(page).catch(() => null);
+  const stateSuffix = finalState
+    ? `:view=${encodeURIComponent(finalState.viewSwitchLabel || "")}:center=${encodeURIComponent(finalState.centerDateLabel || "")}:selected=${encodeURIComponent(finalState.selectedMiniDay || "")}:events=${finalState.visibleEventCount ?? 0}`
+    : "";
+  throw new Error(`agenda_date_not_reached:${isoDate}${stateSuffix}`);
+}
+
+export async function readAgendaViewportState(page) {
+  return page.evaluate(() => {
+    const normalizeText = (value) => String(value || "")
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const normalizeClass = (value) => String(value || "").toLowerCase();
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 6
+        && rect.height > 6
+        && style.display !== "none"
+        && style.visibility !== "hidden"
+        && style.opacity !== "0";
+    };
+    const roots = [
+      ...document.querySelectorAll(".fc-view-container, .fc-agenda-view, .fc-time-grid"),
+    ].filter(isVisible);
+    const primaryRoot = roots[0] || document.body;
+    const allNodes = [...document.querySelectorAll("h1, h2, h3, div, span, td")].filter(isVisible);
+    const headerNodes = allNodes
+      .map((node) => {
+        const rect = node.getBoundingClientRect();
+        return {
+          text: normalizeText((node.textContent || "").slice(0, 120)),
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        };
+      })
+      .filter((node) =>
+        node.x > 220
+        && node.y < 260
+        && /\b\d{1,2}\b.*\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b.*\b20\d{2}\b/i.test(node.text),
+      )
+      .sort((a, b) => (b.width * b.height) - (a.width * a.height));
+    const calendarRoot = document.querySelector(".view-switch")?.parentElement?.parentElement?.parentElement || document.body;
+    const selectedMiniDay = [...calendarRoot.querySelectorAll("button, div, span, td, a")]
+      .filter(isVisible)
+      .map((node) => ({
+        text: normalizeText(node.textContent || ""),
+        classes: [
+          normalizeClass(node.className || ""),
+          normalizeClass(node.parentElement?.className || ""),
+        ].join(" "),
+      }))
+      .find((node) =>
+        /^\d{1,2}$/.test(node.text)
+        && /\b(selected|active|current|today)\b/.test(node.classes),
+      )?.text || null;
+    const events = [...primaryRoot.querySelectorAll(".fc-time-grid-event, .fc-event")]
+      .filter((el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.x > 220
+          && rect.width > 20
+          && rect.height > 6
+          && style.display !== "none"
+          && style.visibility !== "hidden"
+          && style.opacity !== "0";
+      })
+      .map((el) => {
+        const titleEl = el.querySelector(".fc-title") || el;
+        const timeEl = el.querySelector(".fc-time");
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const repartoClass =
+          String(el.className || "")
+            .split(/\s+/)
+            .find((c) => /^LCWVQRD-b-[a-z]$/.test(c)) || "";
+        return {
+          time: normalizeText(timeEl?.textContent || ""),
+          title: normalizeText(titleEl.textContent || ""),
+          repartoClass,
+          bgColor: style.backgroundColor,
+          borderColor: style.borderColor,
+          left: `${Math.round(rect.left)}px`,
+          width: `${Math.round(rect.width)}px`,
+        };
+      })
+      .filter((ev) => ev.title);
+    const uniqueEvents = [];
+    const seen = new Set();
+    for (const ev of events) {
+      const key = `${ev.time}|${ev.title}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueEvents.push(ev);
+    }
+    return {
+      viewSwitchLabel: normalizeText(document.querySelector(".view-switch")?.textContent || ""),
+      centerDateLabel: headerNodes[0]?.text || "",
+      selectedMiniDay,
+      visibleEventCount: uniqueEvents.length,
+      visibleEvents: uniqueEvents,
+    };
+  });
+}
+
+export async function scanVisibleAgendaEvents(page, { includeStyle = false } = {}) {
+  const state = await readAgendaViewportState(page);
+  return state.visibleEvents.map((event) => (
+    includeStyle
+      ? event
+      : {
+          time: event.time,
+          title: event.title,
+          repartoClass: event.repartoClass,
+        }
+  ));
+}
+
+export async function scanVisibleAgendaEventTargets(page, { includeStyle = false } = {}) {
+  return page.evaluate((wantStyle) => {
+    const normalizeText = (value) => String(value || "")
+      .normalize("NFD")
+      .replace(/\p{Diacritic}/gu, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 8
+        && rect.height > 6
+        && rect.x > 220
+        && style.display !== "none"
+        && style.visibility !== "hidden"
+        && style.opacity !== "0";
+    };
+    const roots = [
+      ...document.querySelectorAll(".fc-view-container, .fc-agenda-view, .fc-time-grid"),
+    ].filter(isVisible);
+    const primaryRoot = roots[0] || document.body;
+    const rows = [...primaryRoot.querySelectorAll(".fc-time-grid-event, .fc-event")]
+      .filter(isVisible)
+      .map((el) => {
+        const titleEl = el.querySelector(".fc-title") || el;
+        const timeEl = el.querySelector(".fc-time");
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        const repartoClass =
+          String(el.className || "")
+            .split(/\s+/)
+            .find((c) => /^LCWVQRD-b-[a-z]$/.test(c)) || "";
+        return {
+          title: normalizeText(titleEl.textContent || ""),
+          time: normalizeText(timeEl?.textContent || ""),
+          repartoClass,
+          x: rect.x + (rect.width / 2),
+          y: rect.y + (rect.height / 2),
+          ...(wantStyle ? {
+            bgColor: style.backgroundColor,
+            borderColor: style.borderColor,
+            left: `${Math.round(rect.left)}px`,
+            width: `${Math.round(rect.width)}px`,
+          } : {}),
+        };
+      })
+      .filter((row) => row.title);
+    const deduped = [];
+    const seen = new Set();
+    for (const row of rows) {
+      const key = `${row.time}|${row.title}|${Math.round(row.x)}|${Math.round(row.y)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push(row);
+    }
+    return deduped.sort((a, b) => a.time.localeCompare(b.time) || a.title.localeCompare(b.title));
+  }, includeStyle);
 }
 
 export async function loginYap(page, username, password) {
   await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
-  await dismissUnsupportedBrowserWarning(page);
+  await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
 
-  const loginInputVisible = await page.locator('input[name="u"]').first().isVisible({ timeout: 2500 }).catch(() => false);
+  const bootSurface = await waitForYapBootSurface(page, 30000);
+  if (bootSurface === "agenda") {
+    await persistYapSession(page.context()).catch(() => {});
+    return;
+  }
+  if (bootSurface === "app_shell") {
+    try {
+      await openAgendaFromAppShell(page, 12000);
+      await persistYapSession(page.context()).catch(() => {});
+      return;
+    } catch {}
+  }
+
+  const loginInputVisible = bootSurface === "login"
+    || await page.locator('input[name="u"]').first().isVisible({ timeout: 2500 }).catch(() => false);
   if (!loginInputVisible) {
-    const alreadyIn = await page.getByText("Agenda", { exact: true }).first().isVisible({ timeout: 3000 }).catch(() => false);
+    const alreadyIn = await hasYapAppShell(page, 3000).catch(() => false);
     if (alreadyIn) {
+      try {
+        await openAgendaFromAppShell(page, 12000);
+      } catch {}
       await persistYapSession(page.context()).catch(() => {});
       return;
     }
     await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
-    await dismissUnsupportedBrowserWarning(page);
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
     const agendaReady = await waitForAgendaReady(page, 5000).then(() => true).catch(() => false);
     if (agendaReady) {
       await persistYapSession(page.context()).catch(() => {});
@@ -409,8 +747,8 @@ export async function loginYap(page, username, password) {
   }
 
   await page.waitForTimeout(100);
-  await dismissUnsupportedBrowserWarning(page);
-  await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 12000 });
+  await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+  await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 20000 });
   const filled = await page.evaluate(({ u, p }) => {
     const userEl = document.querySelector('input[name="u"]');
     const passEl = document.querySelector('input[name="pw"]');
@@ -447,19 +785,35 @@ export async function loginYap(page, username, password) {
       if (btn) btn.click();
     });
   }
-  await page.waitForTimeout(400);
-  await dismissUnsupportedBrowserWarning(page);
-  await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
-  await page.getByText("Agenda", { exact: true }).first().waitFor({ state: "visible", timeout: 20000 }).catch(() => {});
+
+  const postLoginState = await waitForYapBootSurface(page, 30000);
+  if (postLoginState === "app_shell") {
+    await openAgendaFromAppShell(page, 20000).catch(() => {});
+  } else if (postLoginState !== "agenda") {
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+    await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+    await waitForAgendaReady(page, 20000).catch(() => {});
+  }
   await persistYapSession(page.context()).catch(() => {});
 }
 
 export async function openAgendaInApp(page) {
   await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(200);
-  await dismissUnsupportedBrowserWarning(page);
+  const initialSurface = await waitForYapBootSurface(page, 15000).catch(() => "unknown");
+  await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+  if (initialSurface === "app_shell") {
+    await openAgendaFromAppShell(page, 12000).catch(() => {});
+  }
   if (await isYapLoginPage(page, 1000)) {
-    throw new Error("agenda_redirected_to_login");
+    await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+    const recoveredSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
+    if (recoveredSurface === "app_shell") {
+      await openAgendaFromAppShell(page, 12000).catch(() => {});
+    }
+    if (await isYapLoginPage(page, 1000)) {
+      throw new Error("agenda_redirected_to_login");
+    }
   }
 
   const selectors = [".fc-time-grid", ".fc-view-container", ".view-switch", ".fc-agenda-view"];
@@ -469,16 +823,30 @@ export async function openAgendaInApp(page) {
       if (visible) return;
     }
     if (await isYapLoginPage(page, 800)) {
+      await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+      const recoveredSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
+      if (recoveredSurface === "app_shell") {
+        await openAgendaFromAppShell(page, 12000).catch(() => {});
+        continue;
+      }
       throw new Error("agenda_redirected_to_login");
     }
-    const agendaLink = page.getByText("Agenda", { exact: true }).first();
-    if (await agendaLink.isVisible().catch(() => false)) {
-      await agendaLink.click().catch(() => {});
+    if (await hasYapAppShell(page, 1500).catch(() => false)) {
+      await openAgendaFromAppShell(page, 12000).catch(() => {});
+      continue;
     }
-    await page.waitForTimeout(300);
+    await waitForYapBootSurface(page, 5000).catch(() => {});
     await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
-    await dismissUnsupportedBrowserWarning(page);
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
     if (await isYapLoginPage(page, 800)) {
+      await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+      const recoveredSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
+      if (recoveredSurface === "app_shell") {
+        await openAgendaFromAppShell(page, 12000).catch(() => {});
+        continue;
+      }
       throw new Error("agenda_redirected_to_login");
     }
     await waitForAgendaReady(page, 8000).catch(() => {});
@@ -488,6 +856,57 @@ export async function openAgendaInApp(page) {
     throw new Error("agenda_redirected_to_login");
   }
   await waitForAgendaReady(page, 20000);
+}
+
+export async function openAgendaWithRecovery(
+  page,
+  {
+    dateIso = null,
+    username = "",
+    password = "",
+    maxAttempts = 3,
+    onRetry = null,
+  } = {},
+) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await openAgendaInApp(page);
+      if (dateIso) {
+        await gotoAgendaDate(page, dateIso);
+      }
+      return;
+    } catch (error) {
+      const message = String(error?.message || "");
+      const needsRelogin = /agenda_redirected_to_login/i.test(message);
+      const wrongDate = /agenda_date_not_reached:/i.test(message);
+      const recoverable = needsRelogin || wrongDate;
+      if (!recoverable) throw error;
+      if (!username || !password) throw error;
+      if (typeof onRetry === "function") {
+        await onRetry({
+          attempt,
+          error: message,
+          reason: needsRelogin ? "relogin" : "date_retry",
+        });
+      }
+      const context = page.context();
+      await context.clearCookies().catch(() => {});
+      await page.evaluate(() => {
+        try { window.localStorage?.clear?.(); } catch {}
+        try { window.sessionStorage?.clear?.(); } catch {}
+      }).catch(() => {});
+      await page.goto(YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await loginYap(page, username, password);
+      if (attempt === maxAttempts) {
+        await openAgendaInApp(page);
+        if (dateIso) {
+          await gotoAgendaDate(page, dateIso);
+        }
+        return;
+      }
+      await page.waitForTimeout(350 * attempt).catch(() => {});
+    }
+  }
 }
 
 export function matchEventText(text, terms) {

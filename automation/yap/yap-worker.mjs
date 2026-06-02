@@ -36,6 +36,15 @@ const { chromium } = requireFromYap("playwright");
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DEFAULT_ARTIFACT_DIR = path.join(ROOT_DIR, "automation", "artifacts", "yap");
+const WORKSPACE_STATES = Object.freeze({
+  AGENDA: "agenda_shell",
+  LOADING: "loading_shell",
+  PRACTICE: "practice_shell",
+  DETAIL: "detail_form",
+  ODL_LOADING: "odl_loading",
+  ODL_FULL: "odl_full",
+  UNKNOWN: "unknown",
+});
 
 const _workerStart = Date.now();
 function logPhase(phase, status, extra = {}) {
@@ -283,6 +292,92 @@ function normalizeLoose(value) {
   return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function formatManNeedle(value) {
+  return `MAN: ${value}`;
+}
+
+function formatMacNeedle(value) {
+  return `MAC: ${value}`;
+}
+
+function isEffectiveOdlState(state) {
+  return state === WORKSPACE_STATES.ODL_FULL;
+}
+
+function extractTrailingJsonBlock(text) {
+  const source = String(text || "");
+  for (let i = source.length - 1; i >= 0; i -= 1) {
+    if (source[i] !== "{") continue;
+    const candidate = source.slice(i).trim();
+    if (!candidate) continue;
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      // Keep scanning backward.
+    }
+  }
+  return null;
+}
+
+function parsePraticaHashPayload(rawUrl) {
+  const raw = String(rawUrl || "").trim();
+  const hashRaw = raw.replace(/^[^#]*/, "");
+  let hashDecoded = hashRaw;
+  try {
+    hashDecoded = decodeURIComponent(hashRaw);
+  } catch {
+    // Leave raw hash when it is already decoded or malformed.
+  }
+  const match = hashDecoded.match(/#!pratica\|(.+)$/);
+  if (!match) {
+    return {
+      ok: false,
+      reason: "no_pratica_hash",
+      hashRaw,
+      hashDecoded,
+      preview: hashDecoded.slice(0, 160),
+      payload: null,
+      idCompanyFolder: null,
+      pageEnum: null,
+    };
+  }
+
+  let payload = null;
+  let idCompanyFolder = null;
+  try {
+    payload = JSON.parse(match[1]);
+    idCompanyFolder = payload?.IdCompanyFolder ?? null;
+  } catch {
+    const idMatch = /IdCompanyFolder[^0-9]*(\d+)/.exec(match[1]);
+    idCompanyFolder = idMatch ? Number(idMatch[1]) : null;
+  }
+
+  if (!idCompanyFolder) {
+    return {
+      ok: false,
+      reason: "no_idcompanyfolder",
+      hashRaw,
+      hashDecoded,
+      preview: hashDecoded.slice(0, 160),
+      payload,
+      idCompanyFolder: null,
+      pageEnum: payload?.Page ?? null,
+    };
+  }
+
+  return {
+    ok: true,
+    reason: null,
+    hashRaw,
+    hashDecoded,
+    preview: hashDecoded.slice(0, 160),
+    payload,
+    idCompanyFolder: Number(idCompanyFolder),
+    pageEnum: payload?.Page ?? null,
+  };
+}
+
 function buildOdlNeedles(job) {
   const needles = [];
   if (job.internalNotes) needles.push(job.internalNotes);
@@ -292,8 +387,8 @@ function buildOdlNeedles(job) {
     for (const row of section.descrizioni || []) {
       if (row) needles.push(String(row));
     }
-    if (section.ore_man != null) needles.push(`MAN ${section.ore_man}`);
-    if (section.ore_mac != null) needles.push(`MAC ${section.ore_mac}`);
+    if (section.ore_man != null) needles.push(formatManNeedle(section.ore_man));
+    if (section.ore_mac != null) needles.push(formatMacNeedle(section.ore_mac));
     if (section.materiali_euro != null) needles.push(String(section.materiali_euro));
     if (section.smaltimento_applica) needles.push(String(section.smaltimento_percentuale ?? 2));
     for (const part of section.ricambi || []) {
@@ -314,8 +409,8 @@ function buildSectionSummary(section) {
   for (const row of section.descrizioni || []) {
     if (row) lines.push(`- ${String(row).trim()}`);
   }
-  if (section.ore_man != null) lines.push(`MAN: ${section.ore_man}`);
-  if (section.ore_mac != null) lines.push(`MAC: ${section.ore_mac}`);
+  if (section.ore_man != null) lines.push(formatManNeedle(section.ore_man));
+  if (section.ore_mac != null) lines.push(formatMacNeedle(section.ore_mac));
   if (section.materiali_euro != null) lines.push(`Materiali: ${section.materiali_euro}`);
   if (section.smaltimento_applica) lines.push(`Smaltimento: ${section.smaltimento_percentuale ?? 2}%`);
   for (const part of section.ricambi || []) {
@@ -881,14 +976,19 @@ async function waitForPracticeWorkspaceReady(page, timeout = 1800) {
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
-      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      return rect.width > 8 && rect.height > 8
+        && style.display !== "none" && style.visibility !== "hidden"
+        && rect.left > -200 && rect.top > -200;
     };
     const bodyText = (document.body?.innerText || "").toLowerCase();
     const popup = document.querySelector(".gwt-DecoratedPopupPanel");
     const popupVisible = Boolean(popup && isVisible(popup));
     if (popupVisible && /dettagli appuntamento/.test(popup.textContent || "")) return false;
     if (/giornaliere|filtro appuntamenti|numero appuntamenti/.test(bodyText)) return false;
-    if (loadingRe.test(bodyText)) return false;
+    const loadingVisible = [...document.querySelectorAll("div, span, td, label")]
+      .filter(isVisible)
+      .some((el) => loadingRe.test((el.textContent || "").toLowerCase()));
+    if (loadingVisible) return false;
     const editables = [...document.querySelectorAll("textarea, input[type='text'], input[type='number'], input:not([type]), [contenteditable='true'], [role='textbox']")]
       .filter(isVisible)
       .filter((el) => !el.disabled && !el.readOnly);
@@ -1030,9 +1130,10 @@ async function waitForPracticeLoadingToFinish(page, timeout = 12000) {
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
-      return rect.width > 20 && rect.height > 20 && style.display !== "none" && style.visibility !== "hidden";
+      return rect.width > 20 && rect.height > 20
+        && style.display !== "none" && style.visibility !== "hidden"
+        && rect.left > -200 && rect.top > -200;
     };
-    // F4: controlla il loading SOLO se l'elemento è visibile (non su bodyText globale che persiste)
     const loadingVisible = [...document.querySelectorAll("div, span, td, label")]
       .filter(isVisible)
       .some((el) => loadingRe.test(normalizeText(el.textContent || "")));
@@ -1085,27 +1186,33 @@ async function isCourtesyCommunicationPopup(page) {
 // F3: naviga all'ODL cambiando hash in-place (niente page.goto → GWT non fa full-reload)
 async function openOdlByRoute(page, currentUrl) {
   try {
-    const rawHash = decodeURIComponent(String(currentUrl || page.url()).replace(/^[^#]*/, ""));
-    const hashMatch = rawHash.match(/#!pratica\|(.+)$/);
-    if (!hashMatch) return { navigated: false, reason: "no_pratica_hash", rawHashPreview: rawHash.slice(0, 100) };
-    let idCompanyFolder = null;
-    try {
-      const jsonStr = decodeURIComponent(hashMatch[1]);
-      idCompanyFolder = JSON.parse(jsonStr)?.IdCompanyFolder ?? null;
-    } catch {
-      const idMatch = /IdCompanyFolder[^0-9]*(\d+)/.exec(hashMatch[1]);
-      idCompanyFolder = idMatch ? Number(idMatch[1]) : null;
+    const parsed = parsePraticaHashPayload(currentUrl || page.url());
+    if (!parsed.ok) {
+      return {
+        attempted: false,
+        navigated: false,
+        reason: parsed.reason,
+        preview: parsed.preview,
+        idCompanyFolder: parsed.idCompanyFolder,
+        pageEnum: parsed.pageEnum,
+      };
     }
-    if (!idCompanyFolder) return { navigated: false, reason: "no_idcompanyfolder" };
+
     const token = JSON.stringify({
-      IdCompanyFolder: Number(idCompanyFolder),
+      IdCompanyFolder: parsed.idCompanyFolder,
       Page: "ODL",
       ShowOdlMarcatempo: true,
     });
     await page.evaluate((t) => { window.location.hash = `#!pratica|${t}`; }, token);
-    return { navigated: true, idCompanyFolder };
+    return {
+      attempted: true,
+      navigated: true,
+      reason: null,
+      idCompanyFolder: parsed.idCompanyFolder,
+      pageEnum: "ODL",
+    };
   } catch (error) {
-    return { navigated: false, reason: String(error?.message || "error") };
+    return { attempted: true, navigated: false, reason: String(error?.message || "error") };
   }
 }
 
@@ -1230,9 +1337,10 @@ async function waitForOdlWorkspaceReady(page, timeout = 1800) {
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
-      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      return rect.width > 8 && rect.height > 8
+        && style.display !== "none" && style.visibility !== "hidden"
+        && rect.left > -200 && rect.top > -200; // esclude pannelli GWT off-screen
     };
-    // F4: controlla loading SOLO su elementi visibili (bodyText globale dà falsi positivi)
     const loadingVisible = [...document.querySelectorAll("div, span, td, label")]
       .filter(isVisible)
       .some((el) => loadingRe.test(normalizeText(el.textContent || "")));
@@ -1250,29 +1358,33 @@ async function waitForOdlWorkspaceReady(page, timeout = 1800) {
 
 async function getPracticeWorkspaceState(page) {
   return safeEvaluate(page, () => {
-    // F5: detection a scope ristretto — non usare bodyText globale
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
-      return rect.width > 3 && rect.height > 3 && style.display !== "none" && style.visibility !== "hidden";
+      return rect.width > 3 && rect.height > 3
+        && style.display !== "none" && style.visibility !== "hidden"
+        && rect.left > -200 && rect.top > -200;
     };
     const bodyText = (document.body?.innerText || "").toLowerCase();
 
-    // Agenda: non siamo in una pratica
     if (/giornaliere|filtro appuntamenti|numero appuntamenti/.test(bodyText)
         && !/pratica veicolo|gestione pratica/i.test(bodyText)) return "agenda_shell";
 
-    // Loading: SOLO se elemento visibile (bodyText può contenere testo nascosto)
+    const odlMarkerRe = /descrizione danni|smaltimento rifiuti|materiali di consumo|note interne|tempi|totali|ordini cliente|prospetti/;
+    const odlMarkersVisible = [...document.querySelectorAll("button, a, span, div, td")]
+      .filter(isVisible)
+      .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase())
+      .filter((t) => odlMarkerRe.test(t));
+    if (odlMarkersVisible.length >= 2) return "odl_full";
+
     const loadingRe = /caricamento .* in corso|recupero dettagli pratica in corso/;
     const loadingVisible = [...document.querySelectorAll("div, span, td, label")]
       .filter(isVisible)
       .some((el) => loadingRe.test((el.textContent || "").toLowerCase()));
     if (loadingVisible) return "loading_shell";
 
-    // Non in pratica
     if (!/pratica veicolo|gestione pratica/i.test(bodyText)) return "unknown";
 
-    // F5: trovare il tab attivo nel header della pratica (y < 140)
     const topTabs = [...document.querySelectorAll("td, span, a, div, button")]
       .filter(isVisible)
       .filter((el) => el.getBoundingClientRect().y < 140)
@@ -1283,14 +1395,12 @@ async function getPracticeWorkspaceState(page) {
         tag: el.tagName,
       }));
 
-    // Tab attivo = ha classe "selected"/"active" o aria-selected="true"
     const activeTab = topTabs.find((t) =>
       /\bselected\b|\bactive\b|gwt-selected/i.test(t.cls) || t.ariaSel === "true"
     );
 
     if (activeTab) {
       if (/ordini di lavoro/.test(activeTab.text)) {
-        // Siamo sul tab ODL — cercare i marker ODL nel contenuto
         const odlMarkers = /descrizione danni|smaltimento rifiuti|materiali di consumo|note interne|tempi|totali|ordini cliente|prospetti/;
         const visibleTabTexts = [...document.querySelectorAll("button, a, span, div, td")]
           .filter(isVisible)
@@ -1302,11 +1412,9 @@ async function getPracticeWorkspaceState(page) {
       if (/preventivi/.test(activeTab.text)) return "preventivi";
     }
 
-    // Fallback: ODL markers visibili nel body
     const odlMarkersInBody = /descrizione danni|smaltimento rifiuti|materiali di consumo|note interne|tempi|totali/.test(bodyText);
     if (odlMarkersInBody) return "odl_full";
 
-    // Fallback: dettagli pratica attivo (tab senza classe selected)
     const dettagliPraticaVisible = topTabs.some((t) => /dettagli pratica/.test(t.text));
     const odlTabVisible = topTabs.some((t) => /ordini di lavoro/.test(t.text));
     if (dettagliPraticaVisible && !odlMarkersInBody) return "detail_form";
@@ -1482,10 +1590,10 @@ function buildFieldWriteReport(job, writeReport) {
       pushField(`odl.${reparto}.descrizione`, String(row || "").trim(), sectionHit, "Apri ODL e verifica le righe descrizione.");
     }
     if (section.ore_man != null) {
-      pushField(`odl.${reparto}.man`, `MAN ${section.ore_man}`, Boolean(writeReport?.hours?.man?.success), "Apri ODL e verifica MAN.");
+      pushField(`odl.${reparto}.man`, formatManNeedle(section.ore_man), Boolean(writeReport?.hours?.man?.success), "Apri ODL e verifica MAN.");
     }
     if (section.ore_mac != null) {
-      pushField(`odl.${reparto}.mac`, `MAC ${section.ore_mac}`, Boolean(writeReport?.hours?.mac?.success), "Apri ODL e verifica MAC.");
+      pushField(`odl.${reparto}.mac`, formatMacNeedle(section.ore_mac), Boolean(writeReport?.hours?.mac?.success), "Apri ODL e verifica MAC.");
     }
     if (section.materiali_euro != null) {
       pushField(`odl.${reparto}.materiali`, String(section.materiali_euro), Boolean(writeReport?.materials?.success), "Apri Materiali di consumo e verifica importo.");
@@ -1496,7 +1604,7 @@ function buildFieldWriteReport(job, writeReport) {
     for (const part of section.ricambi || []) {
       const name = String(part?.name || part?.nome || "").trim();
       const qty = String(part?.quantity || part?.quantita || "").trim();
-      const expected = [name, qty].filter(Boolean).join(" ").trim();
+      const expected = `${name}${qty ? ` x ${qty}` : ""}`.trim();
       if (!expected) continue;
       pushField(`odl.${reparto}.ricambio.${name || "item"}`, expected, Boolean(writeReport?.parts?.success), "Apri Ricambi/Articoli e verifica nome + quantita.");
     }
@@ -1510,6 +1618,9 @@ async function writePracticeAndOdl(page, job, args) {
     attempted: true,
     openedPractice: false,
     openedOdl: false,
+    odlRouteAttempted: false,
+    odlRouteEffective: false,
+    odlFallbackClickUsed: false,
     agenda: { attempted: false, success: false, error: null },
     tags: { attempted: false, success: false, error: null },
     notes: { attempted: Boolean(job.internalNotes), success: false, error: null },
@@ -1525,6 +1636,7 @@ async function writePracticeAndOdl(page, job, args) {
       matched: 0,
       total: 0,
     },
+    workspaceState: WORKSPACE_STATES.UNKNOWN,
   };
 
   // G1 — Hard guard: scrive SOLO se il cliente contiene il marker di test
@@ -1582,6 +1694,7 @@ async function writePracticeAndOdl(page, job, args) {
     workspaceState = await getPracticeWorkspaceState(page);
   }
   logPhase("automatismi_wait", "done", { attempts: autoAttempts, finalState: workspaceState });
+  writeReport.workspaceState = workspaceState;
   if (args.debug) {
     const practiceShot = path.join(args.artifactDir, `practice-open-${job.practiceId || "payload"}-${Date.now()}.png`);
     await page.screenshot({ path: practiceShot, fullPage: true }).catch(() => {});
@@ -1628,96 +1741,124 @@ async function writePracticeAndOdl(page, job, args) {
   if (args.debug) writeReport.noVehicleDetected = noVehicle;
   if (noVehicle) {
     writeReport.odl.error = "odl_unavailable_no_vehicle";
+    writeReport.ok = false;
+    writeReport.workspaceState = workspaceState;
     logPhase("odl_tab", "skipped_no_vehicle");
     if (args.debug) {
       const noVehicleShot = path.join(args.artifactDir, `no-vehicle-${job.practiceId || "payload"}-${Date.now()}.png`);
       await page.screenshot({ path: noVehicleShot, fullPage: true }).catch(() => {});
       writeReport.noVehicleScreenshot = noVehicleShot;
     }
-  } else {
-    // F3+F4: naviga all'ODL via hash in-place + gating su RPC
-    let odlNavigated = false;
-    const practiceUrl = page.url();
-    if (/#!pratica/i.test(practiceUrl)) {
-      // Prepara la promise RPC PRIMA della navigazione (includi tutte le azioni ODL possibili)
-      const odlReadyPromise = page.waitForResponse(
-        (r) => /\/yap\/action\/(OdlGetAnagraficheDepositoVeicoloAction|OdlGetAction|OdlTableAction|PraticaOdlGetOverviewAction)/.test(r.url()) && r.status() === 200,
-        { timeout: 20000 },
-      ).then(() => true).catch(() => false);
-      const routeResult = await openOdlByRoute(page, practiceUrl);
-      if (args.debug) writeReport.odlRouteResult = routeResult;
-      logPhase("odl_route", routeResult.navigated ? "navigated" : "failed", { reason: routeResult.reason, idCompanyFolder: routeResult.idCompanyFolder });
-      if (routeResult.navigated) {
-        odlNavigated = true;
-        writeReport.openedOdl = true;
-        logPhase("odl_tab", "route_navigated", { idCompanyFolder: routeResult.idCompanyFolder });
-        const odlRpcReady = await odlReadyPromise;
-        if (args.debug) writeReport.odlRpcReady = odlRpcReady;
-        // Attendi caricamento ODL (più tempo se RPC non intercettata)
-        if (!odlRpcReady) await waitForOdlWorkspaceReady(page, 10000);
-        await page.waitForTimeout(800);
+    writeReport.fields = buildFieldWriteReport(job, writeReport);
+    return writeReport; // early return — niente da scrivere senza veicolo
+  }
+  // F3+F4: naviga all'ODL via hash in-place + gating su RPC
+  let odlNavigated = false;
+  const practiceUrl = page.url();
+  if (/#!pratica/i.test(practiceUrl)) {
+    writeReport.odlRouteAttempted = true;
+    const odlReadyPromise = page.waitForResponse(
+      (r) => /\/yap\/action\/(OdlGetAnagraficheDepositoVeicoloAction|OdlGetAction|OdlTableAction|PraticaOdlGetOverviewAction)/.test(r.url()) && r.status() === 200,
+      { timeout: 20000 },
+    ).then(() => true).catch(() => false);
+    const routeResult = await openOdlByRoute(page, practiceUrl);
+    if (args.debug) writeReport.odlRouteResult = routeResult;
+    logPhase("odl_route", routeResult.navigated ? "navigated" : "failed", { reason: routeResult.reason, idCompanyFolder: routeResult.idCompanyFolder });
+    if (routeResult.navigated) {
+      logPhase("odl_tab", "route_navigated", { idCompanyFolder: routeResult.idCompanyFolder });
+      const odlRpcReady = await odlReadyPromise;
+      if (args.debug) writeReport.odlRpcReady = odlRpcReady;
+      await waitForOdlWorkspaceReady(page, 25000);
+      await page.waitForTimeout(600);
+      workspaceState = await getPracticeWorkspaceState(page);
+      let odlWaitAttempts = 0;
+      while ((workspaceState === WORKSPACE_STATES.LOADING || workspaceState === WORKSPACE_STATES.UNKNOWN || workspaceState === WORKSPACE_STATES.ODL_LOADING) && odlWaitAttempts < 20) {
+        await page.waitForTimeout(1000);
         workspaceState = await getPracticeWorkspaceState(page);
-        // Se ancora in caricamento, aspetta e riprova
-        let odlWaitAttempts = 0;
-        while (workspaceState === "loading_shell" && odlWaitAttempts < 5) {
-          await page.waitForTimeout(600);
-          workspaceState = await getPracticeWorkspaceState(page);
-          odlWaitAttempts++;
-        }
-        if (args.debug) writeReport.odlWaitAttempts = odlWaitAttempts;
+        odlWaitAttempts++;
       }
-    }
-
-    // Fallback: click sul tab (se la route non era disponibile o la navigazione è fallita)
-    if (!odlNavigated) {
-      let odlTab = await clickOdlSection(page);
-      if (!odlTab?.clicked) {
-        if (args.debug) writeReport.odlTopCandidatesBeforeRetry = await snapshotTopOdlCandidates(page);
-        await dismissVehicleSearchOverlay(page);
-        await page.waitForTimeout(200);
-        odlTab = await clickOdlSection(page);
-      }
-      if (!odlTab?.clicked) {
-        const fallbackOdl = page.locator("button, a, [role='button'], .gwt-Label, span, div, td").filter({ hasText: /ordini di lavoro|\bodl\b/i }).first();
-        if (await fallbackOdl.count()) {
-          await fallbackOdl.click().catch(() => {});
-          odlTab = { clicked: true, label: "fallback:odl" };
-        }
-      }
-      if (odlTab?.clicked) {
-        odlNavigated = true;
-        writeReport.openedOdl = true;
-        if (args.debug) writeReport.odlTopCandidates = await snapshotTopOdlCandidates(page);
-        logPhase("odl_tab", "click_opened", { label: odlTab.label });
-        await waitForOdlWorkspaceReady(page, 12000);
-        workspaceState = await getPracticeWorkspaceState(page);
-        // Secondo hop se ancora non siamo in odl_full
-        if (workspaceState !== "odl_full") {
-          await dismissVehicleSearchOverlay(page);
-          const secondOdl = await clickOdlSection(page);
-          if (secondOdl?.clicked) {
-            logPhase("odl_tab", "click_hop2", { label: secondOdl.label });
-            await waitForOdlWorkspaceReady(page, 12000);
-            workspaceState = await getPracticeWorkspaceState(page);
-          }
-        }
-      } else if (writeReport.odl.attempted) {
-        writeReport.odl.error = "odl_tab_not_found";
-        logPhase("odl_tab", "not_found");
-      }
-    }
-
-    if (args.debug) {
-      const odlShot = path.join(args.artifactDir, `odl-open-${job.practiceId || "payload"}-${Date.now()}.png`);
-      await page.screenshot({ path: odlShot, fullPage: true }).catch(() => {});
-      writeReport.odlScreenshot = odlShot;
+      if (args.debug) writeReport.odlWaitAttempts = odlWaitAttempts;
       writeReport.workspaceState = workspaceState;
-      if (!odlNavigated) {
-        const noOdlShot = path.join(args.artifactDir, `odl-not-found-${job.practiceId || "payload"}-${Date.now()}.png`);
-        await page.screenshot({ path: noOdlShot, fullPage: true }).catch(() => {});
-        writeReport.odlNotFoundScreenshot = noOdlShot;
+      const urlAfterRoute = page.url();
+      writeReport.urlAfterOdlRoute = urlAfterRoute;
+      const parsedAfterRoute = parsePraticaHashPayload(urlAfterRoute);
+      writeReport.pageEnumAfterRoute = parsedAfterRoute.pageEnum ?? (parsedAfterRoute.ok ? "no_page_field" : parsedAfterRoute.reason);
+      if (isEffectiveOdlState(workspaceState)) {
+        odlNavigated = true;
+        writeReport.odlRouteEffective = true;
+        writeReport.openedOdl = true;
+      } else {
+        writeReport.odlRouteEffective = false;
+        writeReport.odl.error = "odl_route_ineffective";
+        writeReport.odlRouteReason = `state_after_route:${workspaceState}`;
+        logPhase("odl_route", "ineffective", { workspaceState, pageEnum: writeReport.pageEnumAfterRoute });
+      }
+    } else {
+      writeReport.odlRouteReason = routeResult.reason || "odl_route_failed";
+    }
+  }
+
+  // Fallback: click sul tab (se la route non era disponibile o la navigazione è fallita)
+  if (!odlNavigated) {
+    writeReport.odlFallbackClickUsed = true;
+    let odlTab = await clickOdlSection(page);
+    if (!odlTab?.clicked) {
+      if (args.debug) writeReport.odlTopCandidatesBeforeRetry = await snapshotTopOdlCandidates(page);
+      await dismissVehicleSearchOverlay(page);
+      await page.waitForTimeout(200);
+      odlTab = await clickOdlSection(page);
+    }
+    if (!odlTab?.clicked) {
+      const fallbackOdl = page.locator("button, a, [role='button'], .gwt-Label, span, div, td").filter({ hasText: /ordini di lavoro|\bodl\b/i }).first();
+      if (await fallbackOdl.count()) {
+        await fallbackOdl.click().catch(() => {});
+        odlTab = { clicked: true, label: "fallback:odl" };
       }
     }
+    if (odlTab?.clicked) {
+      if (args.debug) writeReport.odlTopCandidates = await snapshotTopOdlCandidates(page);
+      logPhase("odl_tab", "click_opened", { label: odlTab.label });
+      await waitForOdlWorkspaceReady(page, 12000);
+      workspaceState = await getPracticeWorkspaceState(page);
+      if (!isEffectiveOdlState(workspaceState)) {
+        await dismissVehicleSearchOverlay(page);
+        const secondOdl = await clickOdlSection(page);
+        if (secondOdl?.clicked) {
+          logPhase("odl_tab", "click_hop2", { label: secondOdl.label });
+          await waitForOdlWorkspaceReady(page, 12000);
+          workspaceState = await getPracticeWorkspaceState(page);
+        }
+      }
+      writeReport.workspaceState = workspaceState;
+      if (isEffectiveOdlState(workspaceState)) {
+        odlNavigated = true;
+        writeReport.openedOdl = true;
+        writeReport.odl.error = null;
+      } else if (writeReport.odl.attempted) {
+        writeReport.odl.error = "odl_tab_ineffective";
+        logPhase("odl_tab", "ineffective", { workspaceState });
+      }
+    } else if (writeReport.odl.attempted) {
+      writeReport.odl.error = writeReport.odl.error || "odl_tab_not_found";
+      logPhase("odl_tab", "not_found");
+    }
+  }
+
+  if (args.debug) {
+    const odlShot = path.join(args.artifactDir, `odl-open-${job.practiceId || "payload"}-${Date.now()}.png`);
+    await page.screenshot({ path: odlShot, fullPage: true }).catch(() => {});
+    writeReport.odlScreenshot = odlShot;
+    writeReport.workspaceState = workspaceState;
+    const urlFinal = page.url();
+    writeReport.urlAfterOdl = urlFinal;
+    const parsedFinalRoute = parsePraticaHashPayload(urlFinal);
+    writeReport.pageEnumAfterOdl = parsedFinalRoute.pageEnum ?? (parsedFinalRoute.ok ? "no_page_field" : parsedFinalRoute.reason);
+    if (!odlNavigated) {
+      const noOdlShot = path.join(args.artifactDir, `odl-not-found-${job.practiceId || "payload"}-${Date.now()}.png`);
+      await page.screenshot({ path: noOdlShot, fullPage: true }).catch(() => {});
+      writeReport.odlNotFoundScreenshot = noOdlShot;
+    }
+  }
 
   const noteSummaryBlock = buildOdlSummaryText(job);
   if (writeReport.openedOdl) {
@@ -1861,8 +2002,6 @@ async function writePracticeAndOdl(page, job, args) {
     }
   }
 
-  } // Close else block from line 1609 (noVehicle guard)
-
   // Fallback generico: se proprio nessun campo ODL funziona, metti il blocco completo nella prima textarea.
   if (
     !writeReport.notes.success
@@ -1920,11 +2059,11 @@ async function writePracticeAndOdl(page, job, args) {
     writeReport.notes.error = null;
   }
   for (const section of job.sections || []) {
-    if (section.ore_man != null && !writeReport.hours.man.success && hasNeedle(`MAN ${section.ore_man}`)) {
+    if (section.ore_man != null && !writeReport.hours.man.success && hasNeedle(formatManNeedle(section.ore_man))) {
       writeReport.hours.man.success = true;
       writeReport.hours.man.error = null;
     }
-    if (section.ore_mac != null && !writeReport.hours.mac.success && hasNeedle(`MAC ${section.ore_mac}`)) {
+    if (section.ore_mac != null && !writeReport.hours.mac.success && hasNeedle(formatMacNeedle(section.ore_mac))) {
       writeReport.hours.mac.success = true;
       writeReport.hours.mac.error = null;
     }
@@ -1956,16 +2095,20 @@ async function writePracticeAndOdl(page, job, args) {
     total: needles.length,
     ratio: needles.length ? Number((matched / needles.length).toFixed(3)) : 1,
   };
-  writeReport.odl.success = writeReport.odl.success || writeReport.verify.matched > 0;
+  writeReport.odl.success = writeReport.odl.success || (writeReport.openedOdl && writeReport.verify.matched > 0);
+  const anyOdlFieldSuccess = Boolean(
+    writeReport.odl.success
+    || writeReport.materials.success
+    || writeReport.parts.success
+    || writeReport.waste.success
+    || writeReport.hours.man.success
+    || writeReport.hours.mac.success
+  );
+  const odlRequested = shouldWriteOdlFromWorker() && Boolean((job.sections || []).length);
   writeReport.ok = Boolean(
     writeReport.openedPractice
-    && (
-      writeReport.odl.success
-      || writeReport.notes.success
-      || writeReport.materials.success
-      || writeReport.parts.success
-      || writeReport.waste.success
-    )
+    && (job.internalNotes ? writeReport.notes.success || anyOdlFieldSuccess : true)
+    && (!odlRequested || (writeReport.openedOdl && anyOdlFieldSuccess))
   );
   if (args.debug) {
     writeReport.summary = summary;
@@ -2236,12 +2379,27 @@ async function runYapAutomation(job, args) {
   }
 
   try {
-    logPhase("login", "starting");
-    await loginYap(page, username, password);
-    logPhase("login", "done");
-    logPhase("agenda", "starting", { date: job.appointment.date });
-    await openAgendaWithRecovery(job.appointment.date);
-    logPhase("agenda", "ready");
+    logPhase("session", "restoring");
+    let didExplicitLogin = false;
+    try {
+      await openAgendaWithRecovery(job.appointment.date);
+      logPhase("session", "restored");
+    } catch (restoreError) {
+      const message = String(restoreError?.message || "");
+      const recoverable = /agenda_redirected_to_login|Timeout|ERR_FAILED|ERR_ABORTED|waiting for locator|agenda_date_not_reached/i.test(message);
+      if (!recoverable) throw restoreError;
+      logPhase("session", "restore_failed", { error: message.slice(0, 180) });
+      logPhase("login", "starting");
+      await loginYap(page, username, password);
+      didExplicitLogin = true;
+      logPhase("login", "done");
+      logPhase("agenda", "starting", { date: job.appointment.date, mode: "post_login" });
+      await openAgendaWithRecovery(job.appointment.date);
+      logPhase("agenda", "ready");
+    }
+    if (!didExplicitLogin) {
+      logPhase("agenda", "ready");
+    }
 
     const yapTags = pickYapTagsFromJob(job);
     if (args.debug) {
@@ -2558,23 +2716,41 @@ async function main() {
   }, null, 2));
 }
 
-main().catch(async (error) => {
-  // Prova a notificare l'errore al backend (se possibile)
-  try {
-    const args = parseArgs(process.argv.slice(2));
-    const job = args.payloadFile
-      ? await readPayloadFile(args.payloadFile, args).catch(() => null)
-      : await readPracticeFromApi(args).catch(() => null);
-    await notifyError(error, job, args);
-  } catch {
-    // Ignora errori nella notifica
-  }
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-  console.error(JSON.stringify({
-    ok: false,
-    error: error.message,
-    stack: error.stack,
-    screenshot: error.screenshotPath || null,
-  }, null, 2));
-  process.exit(1);
-});
+if (isMainModule) {
+  main().catch(async (error) => {
+    // Prova a notificare l'errore al backend (se possibile)
+    try {
+      const args = parseArgs(process.argv.slice(2));
+      const job = args.payloadFile
+        ? await readPayloadFile(args.payloadFile, args).catch(() => null)
+        : await readPracticeFromApi(args).catch(() => null);
+      await notifyError(error, job, args);
+    } catch {
+      // Ignora errori nella notifica
+    }
+
+    console.error(JSON.stringify({
+      ok: false,
+      error: error.message,
+      stack: error.stack,
+      screenshot: error.screenshotPath || null,
+    }, null, 2));
+    process.exit(1);
+  });
+}
+
+export {
+  WORKSPACE_STATES,
+  buildFieldWriteReport,
+  buildOdlNeedles,
+  buildOdlSummaryText,
+  buildSectionSummary,
+  extractTrailingJsonBlock,
+  formatMacNeedle,
+  formatManNeedle,
+  isEffectiveOdlState,
+  normalizeLoose,
+  parsePraticaHashPayload,
+};

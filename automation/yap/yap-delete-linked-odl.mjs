@@ -12,9 +12,9 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import {
   loginYap,
-  openAgendaInApp,
-  gotoAgendaDate,
+  openAgendaWithRecovery,
   ROOT_DIR,
+  scanVisibleAgendaEventTargets,
   YAP_ODL_DELETE_CONFIRM,
   yapContextOptions,
 } from "./lib/yap-shared.mjs";
@@ -110,25 +110,7 @@ async function clickOdlSection(page) {
 
 async function findAppointmentEvent(page, searchTerm) {
   const needle = normalize(searchTerm);
-  const events = await page.evaluate(() => {
-    return [...document.querySelectorAll(".fc-time-grid-event, .fc-event")]
-      .filter((el) => {
-        const rect = el.getBoundingClientRect();
-        return rect.width > 2 && rect.height > 2;
-      })
-      .map((el) => {
-        const titleEl = el.querySelector(".fc-title") || el;
-        const timeEl = el.querySelector(".fc-time");
-        const rect = el.getBoundingClientRect();
-        return {
-          title: (titleEl.textContent || "").replace(/\s+/g, " ").trim(),
-          time: (timeEl?.textContent || "").trim(),
-          x: rect.x + rect.width / 2,
-          y: rect.y + rect.height / 2,
-        };
-      })
-      .filter((ev) => ev.title);
-  });
+  const events = await scanVisibleAgendaEventTargets(page);
   return events.find((ev) => normalize(ev.title).includes(needle)) || null;
 }
 
@@ -270,8 +252,11 @@ async function main() {
 
   try {
     await loginYap(page, user, pass);
-    await openAgendaInApp(page);
-    await gotoAgendaDate(page, args.date);
+    await openAgendaWithRecovery(page, {
+      dateIso: args.date,
+      username: user,
+      password: pass,
+    });
 
     const event = await findAppointmentEvent(page, args.search);
     if (!event) {

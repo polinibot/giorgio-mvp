@@ -173,10 +173,39 @@ async function tryClickOdlSection(page) {
 async function extractPageOdlHints(page) {
   return page.evaluate(() => {
     const body = document.body.innerText || "";
-    const lower = body.toLowerCase();
+    const hash = String(window.location.hash || "");
+    // Estrae Page enum dall'hash GWT (#!pratica|{...})
+    let pageEnum = null;
+    let idCompanyFolder = null;
+    try {
+      const match = hash.match(/#!pratica\|(.+)$/);
+      if (match) {
+        const parsed = JSON.parse(decodeURIComponent(match[1]));
+        pageEnum = parsed?.Page ?? null;
+        idCompanyFolder = parsed?.IdCompanyFolder ?? null;
+      }
+    } catch {}
+    // Tab attivo nella pratica
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const activeTab = [...document.querySelectorAll("td, span, a, div, button")]
+      .filter(isVisible)
+      .filter((el) => el.getBoundingClientRect().y < 140)
+      .find((el) => /\bselected\b|\bactive\b|gwt-selected/i.test(String(el.className || "")) || el.getAttribute("aria-selected") === "true");
+    const activeTabText = activeTab ? (activeTab.textContent || "").replace(/\s+/g, " ").trim() : null;
+    // Badge ODL (U = ha contenuto)
+    const hasOdlBadge = /ordini di lavoro\s*U\b/.test(body);
     return {
       pageHasOdl: /\bodl\b|ordine di lavoro|manodopera|materiali di consumo/i.test(body),
       pageHasPratica: /gestione pratica|\bpratica\b/i.test(body),
+      urlHash: hash.slice(0, 300),
+      pageEnum,
+      idCompanyFolder,
+      activeTab: activeTabText,
+      hasOdlBadge,
       snippet: body.slice(0, 2500),
     };
   });
@@ -287,8 +316,25 @@ async function main() {
       await page.screenshot({ path: path.join(ARTIFACTS, `${args.date}-after-pratica-click.png`), fullPage: true });
       stage = "open-odl";
       findings.odlClick = await tryClickOdlSection(page);
-      await page.waitForTimeout(3500);
+      // Cattura hash immediato (prima del caricamento completo)
+      findings.hashImmediateAfterOdlClick = await page.evaluate(() => String(window.location.hash || "")).catch(() => null);
+      await page.waitForTimeout(4000);
       findings.pageAfterOdl = await extractPageOdlHints(page);
+      // F1: tenta navigazione route diretta con Page:"ODL" per validare l'enum
+      findings.odlRouteProbe = await page.evaluate(() => {
+        const hash = String(window.location.hash || "");
+        const match = hash.match(/#!pratica\|(.+)$/);
+        if (!match) return { tried: false, reason: "no_pratica_hash" };
+        try {
+          const parsed = JSON.parse(decodeURIComponent(match[1]));
+          const idCF = parsed?.IdCompanyFolder;
+          if (!idCF) return { tried: false, reason: "no_idcompanyfolder" };
+          const testHash = `#!pratica|${JSON.stringify({ IdCompanyFolder: idCF, Page: "ODL", ShowOdlMarcatempo: true })}`;
+          return { tried: true, testHash, currentPageEnum: parsed?.Page };
+        } catch (e) {
+          return { tried: false, reason: e.message };
+        }
+      }).catch(() => ({ tried: false, reason: "eval_error" }));
       await page.screenshot({ path: path.join(ARTIFACTS, `${args.date}-after-odl-click.png`), fullPage: true });
       stage = "after-pratica";
     }
@@ -335,7 +381,18 @@ async function main() {
       "utf8",
     );
 
-    console.log(JSON.stringify({ popup: findings.popup, praticaClick: findings.praticaClick, conclusion: findings.conclusion }, null, 2));
+    console.log(JSON.stringify({
+      mode: "readonly_pratica_odl_probe",
+      popup: findings.popup,
+      praticaClick: findings.praticaClick,
+      odlClick: findings.odlClick,
+      pageAfterPratica: findings.pageAfterPratica,
+      pageAfterOdl: findings.pageAfterOdl,
+      hashImmediateAfterOdlClick: findings.hashImmediateAfterOdlClick || null,
+      odlRouteProbe: findings.odlRouteProbe || null,
+      conclusion: findings.conclusion,
+      outputFile: outPath,
+    }));
     console.log(`\n📄 ${outPath}`);
     await browser.close().catch(() => {});
   }
