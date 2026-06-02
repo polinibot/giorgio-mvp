@@ -87,3 +87,5 @@ storage/photos/
 # Railway
 # NOTE: railway.toml IS tracked for build/deploy settings only. Keep real
 # secrets in Railway service variables, never in repo files.
+automation/yap/analysis/odl-test-results/
+err.tmp

@@ -1369,6 +1369,26 @@ def _extract_yap_phases(stderr_text: str) -> list:
     return phases
 
 
+def _yap_appointment_saved_from_detail(detail: Any) -> bool:
+    """True se le fasi del worker indicano che l'appuntamento è già stato scritto su YAP.
+
+    Serve quando il worker viene interrotto (timeout/errore) DOPO aver salvato l'agenda
+    ma DURANTE la scrittura dell'ODL: in quel caso l'appuntamento esiste già su YAP e la
+    pratica non va declassata a 'sync_failed', ma lasciata 'agenda_synced' (verifica in attesa).
+    """
+    if not isinstance(detail, dict):
+        return False
+    phases = detail.get("worker_phases")
+    if not phases and isinstance(detail.get("runner"), dict):
+        phases = detail["runner"].get("worker_phases")
+    if not isinstance(phases, list):
+        return False
+    for ph in phases:
+        if isinstance(ph, dict) and str(ph.get("phase")) == "save" and str(ph.get("status")) == "done":
+            return True
+    return False
+
+
 def _extract_json_blob(text: str) -> Optional[dict]:
     if not text:
         return None
@@ -2438,10 +2458,53 @@ async def sync_practice_to_yap(
 
         # Budget hardening: timeout contenuto per evitare attese eccessive lato UI.
         try:
-            result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=150, db=db)
+            sync_timeout_s = int(os.getenv("YAP_SYNC_TIMEOUT_S", "150") or "150")
+            result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=sync_timeout_s, db=db)
         except HTTPException as worker_exc:
-            close_phase("write", "failed", "Scrittura YAP non riuscita.")
             detail = worker_exc.detail if isinstance(worker_exc.detail, dict) else {"message": str(worker_exc.detail)}
+            # Se l'agenda è già stata scritta su YAP (fase 'save'/'done') ma il worker è stato
+            # interrotto durante la scrittura ODL (es. timeout a budget esaurito), NON marcare la
+            # pratica come fallita: l'appuntamento esiste. Stato 'agenda_synced' + Verifica YAP.
+            if _yap_appointment_saved_from_detail(detail):
+                close_phase("write", "partial", "Agenda salvata su YAP; ODL interrotto.")
+                practice.synced = True
+                practice.management_sync_status = "agenda_synced"
+                practice.management_last_sync_at = datetime.now(timezone.utc)
+                practice.updated_by_telegram_id = user_data["id"]
+                db.commit()
+                _cache_invalidate_practice(practice.id)
+                close_phase("finalize", "completed", "Stato finale persistito.")
+                return APIResponse(
+                    success=True,
+                    data={
+                        "status": "agenda_synced",
+                        "message": "Appuntamento scritto su YAP. La scrittura ODL si è interrotta (timeout): premi Verifica YAP per completare i controlli.",
+                        "status_reason": "audit_deferred",
+                        "error_code": None,
+                        "next_action": "Verifica YAP",
+                        "action_target": "audit",
+                        "retryable": True,
+                        "failed_phase": detail.get("failed_phase"),
+                        "debug_ref": detail.get("debug_ref"),
+                        "worker_phases": detail.get("worker_phases") or [],
+                        "runner": detail.get("runner"),
+                        "stderr_tail": detail.get("stderr_tail"),
+                        "audit": None,
+                        "preSync": check,
+                        "phase_timeline": phase_timeline,
+                        "write_report": None,
+                        "yap": {"ok": False, "partial": True, "error": detail},
+                        "practice": {
+                            "id": practice.id,
+                            "synced": practice.synced,
+                            "management_sync_status": practice.management_sync_status,
+                            "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
+                            "management_external_id": practice.management_external_id,
+                            "management_audit_result": serialize(practice).get("management_audit_result"),
+                        },
+                    },
+                )
+            close_phase("write", "failed", "Scrittura YAP non riuscita.")
             action_meta = _build_yap_action_from_error(str(detail.get("reason") or detail.get("message") or ""))
             practice.synced = False
             practice.management_sync_status = "sync_failed"
@@ -2641,7 +2704,8 @@ async def audit_practice_yap(
         if body.fresh_login:
             args.append("--fresh-login")
 
-        audit_result = await _run_yap_script("yap-audit-appointment.mjs", args, timeout_seconds=240, db=db)
+        audit_timeout_s = int(os.getenv("YAP_AUDIT_TIMEOUT_S", "240") or "240")
+        audit_result = await _run_yap_script("yap-audit-appointment.mjs", args, timeout_seconds=audit_timeout_s, db=db)
         audit_status = _audit_status_from_result(audit_result)
         if body.persist:
             audit_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
@@ -2670,15 +2734,26 @@ async def audit_practice_yap(
             },
         )
     except HTTPException as exc:
+        # La Verifica (audit) che fallisce per timeout/errore transitorio NON deve declassare
+        # la pratica: l'appuntamento resta scritto su YAP. Manteniamo lo stato precedente
+        # (es. agenda_synced) e registriamo solo l'esito audit come "in attesa".
         if body.persist:
             try:
-                failed_audit = {
+                exc_detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                prev_status = practice.management_sync_status or "agenda_synced"
+                deferred_audit = {
                     "ok": False,
-                    "status": "sync_failed",
-                    "message": "Audit YAP non completato.",
-                    "error": exc.detail,
+                    "completed": False,
+                    "status": prev_status,
+                    "status_reason": "audit_deferred",
+                    "message": "Verifica YAP non completata (timeout/errore transitorio). L'appuntamento resta su YAP: riprova la Verifica.",
+                    "error": exc_detail,
                 }
-                _persist_yap_audit_result(db, practice, failed_audit, user_data["id"])
+                practice.management_audit_result = _json.dumps(deferred_audit, ensure_ascii=False)
+                practice.management_last_sync_at = datetime.now(timezone.utc)
+                practice.updated_by_telegram_id = user_data["id"]
+                db.commit()
+                _cache_invalidate_practice(practice.id)
             except Exception:
                 db.rollback()
         raise

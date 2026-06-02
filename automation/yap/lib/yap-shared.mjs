@@ -173,6 +173,36 @@ export async function launchChromiumWithFallback(chromium, baseLaunchOptions, { 
   }
 }
 
+// Directory profilo Chrome persistente: i cookie IAP sopravvivono tra i run senza dover
+// catturare manualmente il cookie di sessione (che è HttpOnly e non esposto da storageState).
+export const YAP_CHROME_PROFILE_DIR = process.env.YAP_CHROME_PROFILE_DIR
+  || path.join(ROOT_DIR, "automation", "artifacts", "yap", "chrome-profile");
+
+// Lancia Chromium con un profilo persistente su disco usando launchPersistentContext.
+// Restituisce { browser: null, context } — nessun browser object separato come in launch().
+export async function launchPersistentContextWithFallback(
+  chromium,
+  userDataDir,
+  contextOptions,
+  { resolveModule, cwd = ROOT_DIR } = {},
+) {
+  const preferredPath = await pickChromiumExecutablePath();
+  const options = preferredPath
+    ? { ...contextOptions, executablePath: preferredPath }
+    : { ...contextOptions };
+
+  const tryLaunch = (opts) => chromium.launchPersistentContext(userDataDir, opts);
+
+  try {
+    const context = await tryLaunch(options);
+    return context;
+  } catch (error) {
+    if (!resolveModule || !isMissingPlaywrightBrowserError(error)) throw error;
+    await installPlaywrightChromium(resolveModule, cwd);
+    return tryLaunch(contextOptions);
+  }
+}
+
 async function exists(filePath) {
   try {
     await fs.access(filePath);
@@ -182,18 +212,136 @@ async function exists(filePath) {
   }
 }
 
+// --- Riuso sessione YAP -------------------------------------------------------
+// Playwright `storageState` salva solo cookie + localStorage, NON il sessionStorage,
+// dove YAP tiene il token di sessione: per questo, pur ripristinando lo storageState,
+// l'agenda veniva rimandata al login (agenda_redirected_to_login) costringendo a rifare
+// tutto il login (~30-45s). Qui salviamo un "bundle" {playwright, sessionStorage} e
+// ripristiniamo anche il sessionStorage via addInitScript PRIMA della prima navigazione.
+async function readYapSessionBundle() {
+  try {
+    const raw = await fs.readFile(YAP_SESSION_STATE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.__yapBundle) return parsed;                         // formato nuovo
+    if (parsed && (parsed.cookies || parsed.origins)) {                      // formato legacy Playwright
+      return { __yapBundle: 0, playwright: parsed, sessionStorage: null };
+    }
+  } catch {
+    // file assente o illeggibile -> nessuna sessione da riusare
+  }
+  return null;
+}
+
 export async function yapContextOptions({ viewport = { width: 1440, height: 950 }, locale = "it-IT", freshLogin = false } = {}) {
   const options = { viewport };
   if (locale) options.locale = locale;
-  if (!freshLogin && await exists(YAP_SESSION_STATE)) {
-    options.storageState = YAP_SESSION_STATE;
+  if (!freshLogin) {
+    const bundle = await readYapSessionBundle();
+    if (bundle && bundle.playwright) options.storageState = bundle.playwright;
   }
   return options;
 }
 
+// Ripristina il sessionStorage salvato iniettandolo prima del boot dell'app YAP.
+// Va chiamata SUBITO dopo newContext() e PRIMA del primo page.goto().
+export async function applyYapSessionStorage(context, { freshLogin = false } = {}) {
+  if (freshLogin) return false;
+  const bundle = await readYapSessionBundle();
+  // Invalida bundle legacy (formato Playwright puro senza sessionStorage catturato)
+  if (!bundle || !bundle.__yapBundle) return false;
+  const ss = bundle.sessionStorage;
+  if (!ss || !ss.origin || !ss.data || Object.keys(ss.data).length === 0) {
+    process.stderr.write(JSON.stringify({
+      event: "yap:session",
+      status: "no_session_storage",
+      savedAt: bundle.savedAt || null,
+      ts: new Date().toISOString(),
+    }) + "\n");
+    return false;
+  }
+  const keyCount = Object.keys(ss.data).length;
+  await context.addInitScript((payload) => {
+    try {
+      if (window.location.origin === payload.origin && window.sessionStorage) {
+        for (const key of Object.keys(payload.data)) {
+          if (window.sessionStorage.getItem(key) == null) {
+            window.sessionStorage.setItem(key, payload.data[key]);
+          }
+        }
+      }
+    } catch (_) { /* no-op */ }
+  }, ss);
+  process.stderr.write(JSON.stringify({
+    event: "yap:session",
+    status: "session_storage_injected",
+    keyCount,
+    origin: ss.origin,
+    savedAt: bundle.savedAt || null,
+    ts: new Date().toISOString(),
+  }) + "\n");
+  return true;
+}
+
 export async function persistYapSession(context) {
-  await fs.mkdir(path.dirname(YAP_SESSION_STATE), { recursive: true });
-  await context.storageState({ path: YAP_SESSION_STATE });
+  try {
+    await fs.mkdir(path.dirname(YAP_SESSION_STATE), { recursive: true });
+    const playwright = await context.storageState();
+    // Cattura anche i cookie direttamente dal contesto (più completo di storageState in alcuni casi)
+    const allCookies = await context.cookies().catch(() => []);
+    const yapOrigin = new URL(YAP_BASE_URL).origin;
+    const yapBaseHost = new URL(YAP_BASE_URL).hostname;
+    // Cookie sull'host YAP principale o su sottodomini .mmbsoftware.it
+    const yapCookies = allCookies.filter((c) =>
+      c.domain === yapBaseHost
+      || c.domain === `.${yapBaseHost.split(".").slice(-2).join(".")}`
+      || c.domain === yapBaseHost.split(".").slice(-2).join(".")
+      || (c.domain && c.domain.endsWith(".mmbsoftware.it"))
+      || (c.domain && c.domain.endsWith("yap.mmbsoftware.it")),
+    );
+    // Merge: aggiunge i yapCookies non già presenti in playwright.cookies
+    const playwrightCookieKeys = new Set(
+      (playwright.cookies || []).map((c) => `${c.domain}|${c.name}`),
+    );
+    const mergedCookies = [
+      ...(playwright.cookies || []),
+      ...yapCookies.filter((c) => !playwrightCookieKeys.has(`${c.domain}|${c.name}`)),
+    ];
+    if (mergedCookies.length !== (playwright.cookies || []).length) {
+      playwright.cookies = mergedCookies;
+    }
+    process.stderr.write(JSON.stringify({
+      event: "yap:session",
+      status: "persist_cookies",
+      total: allCookies.length,
+      yapCookies: yapCookies.length,
+      merged: mergedCookies.length,
+      domains: [...new Set(allCookies.map((c) => c.domain))],
+      ts: new Date().toISOString(),
+    }) + "\n");
+    let sessionStorage = null;
+    const pages = (typeof context.pages === "function" ? context.pages() : []) || [];
+    // Cerca prima una pagina sull'origine YAP; fallback alla prima non chiusa
+    const yapPage = pages.find((p) => {
+      try { return !p.isClosed() && p.url().startsWith(yapOrigin); } catch { return false; }
+    }) || pages.find((p) => { try { return !p.isClosed(); } catch { return false; } }) || null;
+    if (yapPage) {
+      sessionStorage = await yapPage.evaluate((origin) => {
+        try {
+          if (window.location.origin !== origin) return null;
+          const data = {};
+          for (let i = 0; i < window.sessionStorage.length; i += 1) {
+            const key = window.sessionStorage.key(i);
+            if (key != null) data[key] = window.sessionStorage.getItem(key);
+          }
+          return Object.keys(data).length > 0 ? { origin: window.location.origin, data } : null;
+        } catch (_) { return null; }
+      }, yapOrigin).catch(() => null);
+    }
+    const bundle = { __yapBundle: 1, savedAt: new Date().toISOString(), playwright, sessionStorage };
+    await fs.writeFile(YAP_SESSION_STATE, JSON.stringify(bundle), "utf-8");
+  } catch (_) {
+    // best-effort: la persistenza della sessione non deve mai far fallire il login
+  }
 }
 
 async function waitForYapBootSurface(page, timeout = 25000) {
@@ -499,19 +647,19 @@ export async function gotoAgendaDate(page, isoDate) {
   }
   await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
   await waitForAgendaReady(page, 10000).catch(() => {});
-  for (let loadingGuard = 0; loadingGuard < 24; loadingGuard += 1) {
+  for (let loadingGuard = 0; loadingGuard < 20; loadingGuard += 1) {
     if (await agendaShowsTargetDate()) return true;
     const state = await readAgendaViewportState(page).catch(() => null);
     const selectedMatches = state?.selectedMiniDay === targetDay;
     const centerMentionsTargetMonth = normalize(state?.centerDateLabel || "").includes(normalize(`${Object.keys(months)[target.getMonth()]} ${target.getFullYear()}`));
     const loadingVisible = await agendaLoadingVisible();
     if (!loadingVisible && !selectedMatches && !centerMentionsTargetMonth) break;
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(350);
   }
-  for (let verify = 0; verify < 12; verify += 1) {
+  for (let verify = 0; verify < 8; verify += 1) {
     if (await agendaShowsTargetDate()) return true;
-    await page.waitForTimeout(500);
-    if ((verify === 2 || verify === 6) && moved) {
+    await page.waitForTimeout(350);
+    if ((verify === 2 || verify === 5) && moved) {
       await page.mouse.dblclick(dayTarget.x, dayTarget.y).catch(() => {});
     }
   }
@@ -698,10 +846,40 @@ export async function scanVisibleAgendaEventTargets(page, { includeStyle = false
 }
 
 export async function loginYap(page, username, password) {
+  const _cookieLog = [];
+  const _cookieListener = (response) => {
+    try {
+      const setCookie = response.headers()["set-cookie"];
+      if (setCookie) {
+        const url = response.url();
+        _cookieLog.push({ url: url.slice(0, 120), setCookie: setCookie.slice(0, 300) });
+      }
+    } catch (_) {}
+  };
+  page.on("response", _cookieListener);
   await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
   await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
 
   const bootSurface = await waitForYapBootSurface(page, 30000);
+  const ssSnapshot = await page.evaluate((origin) => {
+    try {
+      if (window.location.origin !== origin) return { origin: window.location.origin, keys: [] };
+      const keys = [];
+      for (let i = 0; i < window.sessionStorage.length; i += 1) {
+        const key = window.sessionStorage.key(i);
+        if (key != null) keys.push(key);
+      }
+      return { origin: window.location.origin, keys };
+    } catch (_) { return null; }
+  }, new URL(YAP_BASE_URL).origin).catch(() => null);
+  process.stderr.write(JSON.stringify({
+    event: "yap:session",
+    status: "boot_surface_detected",
+    surface: bootSurface,
+    sessionStorageKeys: ssSnapshot?.keys?.length ?? 0,
+    sessionStorageOrigin: ssSnapshot?.origin ?? null,
+    ts: new Date().toISOString(),
+  }) + "\n");
   if (bootSurface === "agenda") {
     await persistYapSession(page.context()).catch(() => {});
     return;
@@ -731,6 +909,53 @@ export async function loginYap(page, username, password) {
     if (agendaReady) {
       await persistYapSession(page.context()).catch(() => {});
       return;
+    }
+  }
+
+  if (loginInputVisible && ssSnapshot?.keys?.length === 0) {
+    const bundle = await readYapSessionBundle();
+    const ss = bundle?.__yapBundle && bundle.sessionStorage;
+    if (ss && ss.origin && ss.data && Object.keys(ss.data).length > 0) {
+      const injected = await page.evaluate((payload) => {
+        try {
+          if (window.location.origin !== payload.origin) return 0;
+          let count = 0;
+          for (const key of Object.keys(payload.data)) {
+            if (window.sessionStorage.getItem(key) == null) {
+              window.sessionStorage.setItem(key, payload.data[key]);
+              count += 1;
+            }
+          }
+          return count;
+        } catch (_) { return -1; }
+      }, ss).catch(() => -1);
+      process.stderr.write(JSON.stringify({
+        event: "yap:session",
+        status: "reinject_attempt",
+        injected,
+        origin: ss.origin,
+        ts: new Date().toISOString(),
+      }) + "\n");
+      if (injected > 0) {
+        await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+        await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+        const reinjectedSurface = await waitForYapBootSurface(page, 20000).catch(() => "unknown");
+        process.stderr.write(JSON.stringify({
+          event: "yap:session",
+          status: "reinject_surface",
+          surface: reinjectedSurface,
+          ts: new Date().toISOString(),
+        }) + "\n");
+        if (reinjectedSurface === "agenda") {
+          await persistYapSession(page.context()).catch(() => {});
+          return;
+        }
+        if (reinjectedSurface === "app_shell") {
+          await openAgendaFromAppShell(page, 12000).catch(() => {});
+          await persistYapSession(page.context()).catch(() => {});
+          return;
+        }
+      }
     }
   }
 
@@ -786,7 +1011,17 @@ export async function loginYap(page, username, password) {
     });
   }
 
-  const postLoginState = await waitForYapBootSurface(page, 30000);
+  // Attendi che la navigazione post-login parta prima di rilevare la superficie
+  await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+  const _loginSubmitMs = Date.now();
+  const postLoginState = await waitForYapBootSurface(page, 20000);
+  process.stderr.write(JSON.stringify({
+    event: "yap:session",
+    status: "post_login_surface",
+    surface: postLoginState,
+    elapsed_ms: Date.now() - _loginSubmitMs,
+    ts: new Date().toISOString(),
+  }) + "\n");
   if (postLoginState === "app_shell") {
     await openAgendaFromAppShell(page, 20000).catch(() => {});
   } else if (postLoginState !== "agenda") {
@@ -794,12 +1029,28 @@ export async function loginYap(page, username, password) {
     await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
     await waitForAgendaReady(page, 20000).catch(() => {});
   }
+  page.off("response", _cookieListener);
+  if (_cookieLog.length > 0) {
+    process.stderr.write(JSON.stringify({
+      event: "yap:session",
+      status: "set_cookie_trace",
+      count: _cookieLog.length,
+      entries: _cookieLog,
+      ts: new Date().toISOString(),
+    }) + "\n");
+  }
   await persistYapSession(page.context()).catch(() => {});
 }
 
 export async function openAgendaInApp(page) {
   await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
-  const initialSurface = await waitForYapBootSurface(page, 15000).catch(() => "unknown");
+  // Early-exit: se l'URL post-navigazione non è sull'origine YAP (redirect IAP/auth), è già login.
+  const postNavUrl = page.url();
+  const yapOrigin = new URL(YAP_BASE_URL).origin;
+  if (!postNavUrl.startsWith(yapOrigin)) {
+    throw new Error("agenda_redirected_to_login");
+  }
+  const initialSurface = await waitForYapBootSurface(page, 10000).catch(() => "unknown");
   await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
   if (initialSurface === "app_shell") {
     await openAgendaFromAppShell(page, 12000).catch(() => {});

@@ -17,6 +17,9 @@ import {
   waitForAgendaReady,
   waitForYapAction,
   launchChromiumWithFallback,
+  launchPersistentContextWithFallback,
+  YAP_CHROME_PROFILE_DIR,
+  applyYapSessionStorage,
 } from "./lib/yap-shared.mjs";
 import {
   pickCosaFromJob,
@@ -83,6 +86,7 @@ function parseArgs(argv) {
     else if (arg === "--headed") args.headed = true;
     else if (arg === "--debug") args.debug = true;
     else if (arg === "--fresh-login") args.freshLogin = true;
+    else if (arg === "--no-persist-profile") args.noPersistProfile = true;
     else if (arg === "--payload-file") args.payloadFile = next();
     else if (arg === "--practice-id") args.practiceId = next();
     else if (arg === "--api-base-url") args.apiBaseUrl = next();
@@ -1050,7 +1054,7 @@ async function openPracticeFromAppointment(page, job) {
     }
     const state = await waitForPracticeTransition(page, 6500);
     if (state !== "agenda_shell") {
-      const loadingDone = await waitForPracticeLoadingToFinish(page, 12000);
+      const loadingDone = await waitForPracticeLoadingToFinish(page, Number(process.env.YAP_PRACTICE_LOADING_MS) || 8000);
       const url = page.url();
       const isDirectPracticeRoute = /#!pratica/i.test(url) && /IdCompanyFolder/i.test(url);
       const blankShell = isDirectPracticeRoute ? false : await isBlankNewPracticeShell(page);
@@ -1498,7 +1502,7 @@ async function fillWithRetry(page, attempts, value, options = {}, { debug = fals
       if (debug) logPhase("fill_success", fieldId, { plan: i, keywords: keywords.slice(0, 3) });
       return true;
     }
-    await page.waitForTimeout(120).catch(() => {});
+    await page.waitForTimeout(60).catch(() => {});
   }
   if (debug) logPhase("fill_failed", fieldId, { attempts: plans.length });
   return false;
@@ -1651,6 +1655,7 @@ async function writePracticeAndOdl(page, job, args) {
     }
   }
 
+  logPhase("odl_practice", "opening");
   const practiceLink = await openPracticeFromAppointment(page, job);
   if (!practiceLink?.clicked) {
     writeReport.attempted = false;
@@ -1667,17 +1672,21 @@ async function writePracticeAndOdl(page, job, args) {
   logPhase("odl_practice", "opened");
   await page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {});
   await waitForPracticeWorkspaceReady(page, 1800);
-  const practiceLoadingDone = await waitForPracticeLoadingToFinish(page, 12000);
+  const practiceLoadingDone = await waitForPracticeLoadingToFinish(page, Number(process.env.YAP_PRACTICE_LOADING_MS) || 8000);
   if (args.debug) writeReport.practiceLoadingDone = practiceLoadingDone;
   const vehicleOverlayDismissed = await dismissVehicleSearchOverlay(page);
   if (args.debug) writeReport.vehicleOverlayDismissed = vehicleOverlayDismissed;
-  // F2-ter: pausa per automatismi YAP (creazione ODL in background) - adaptive, max 60s
-  logPhase("automatismi_wait", "starting");
+  // F2-ter: pausa per automatismi YAP (creazione ODL in background) - adaptive, env-tunable.
+  // Poll più frequente => early-exit più rapido quando l'ODL è pronto; budget ridotto perché
+  // gli step ODL successivi hanno comunque i propri retry di readiness (waitForOdlWorkspaceReady).
+  logPhase("automatismi_wait", "starting", { state: await getPracticeWorkspaceState(page) });
   let workspaceState = await getPracticeWorkspaceState(page);
   let autoAttempts = 0;
-  const maxAutoAttempts = 20; // 20 x 3s = 60s max, ma early-exit se pronto
+  const autoPollMs = Number(process.env.YAP_AUTOMATISMI_POLL_MS) || 1000;
+  const autoMaxMs = Math.max(4000, Number(process.env.YAP_AUTOMATISMI_MAX_MS) || 20000);
+  const maxAutoAttempts = Math.ceil(autoMaxMs / autoPollMs); // default 20s / 1s = 20 tentativi, early-exit se pronto
   while ((workspaceState === "loading_shell" || workspaceState === "unknown") && autoAttempts < maxAutoAttempts) {
-    await page.waitForTimeout(3000); // 3s per iterazione (più responsivo)
+    await page.waitForTimeout(autoPollMs);
     workspaceState = await getPracticeWorkspaceState(page);
     autoAttempts++;
     // Early exit se ODL pronto o pratica pronta
@@ -1768,12 +1777,13 @@ async function writePracticeAndOdl(page, job, args) {
       logPhase("odl_tab", "route_navigated", { idCompanyFolder: routeResult.idCompanyFolder });
       const odlRpcReady = await odlReadyPromise;
       if (args.debug) writeReport.odlRpcReady = odlRpcReady;
-      await waitForOdlWorkspaceReady(page, 25000);
-      await page.waitForTimeout(600);
+      logPhase("odl_route", "waiting_ready", { rpcReady: odlRpcReady });
+      await waitForOdlWorkspaceReady(page, 15000);
+      await page.waitForTimeout(400);
       workspaceState = await getPracticeWorkspaceState(page);
       let odlWaitAttempts = 0;
-      while ((workspaceState === WORKSPACE_STATES.LOADING || workspaceState === WORKSPACE_STATES.UNKNOWN || workspaceState === WORKSPACE_STATES.ODL_LOADING) && odlWaitAttempts < 20) {
-        await page.waitForTimeout(1000);
+      while ((workspaceState === WORKSPACE_STATES.LOADING || workspaceState === WORKSPACE_STATES.UNKNOWN || workspaceState === WORKSPACE_STATES.ODL_LOADING) && odlWaitAttempts < 10) {
+        await page.waitForTimeout(800);
         workspaceState = await getPracticeWorkspaceState(page);
         odlWaitAttempts++;
       }
@@ -1818,14 +1828,14 @@ async function writePracticeAndOdl(page, job, args) {
     if (odlTab?.clicked) {
       if (args.debug) writeReport.odlTopCandidates = await snapshotTopOdlCandidates(page);
       logPhase("odl_tab", "click_opened", { label: odlTab.label });
-      await waitForOdlWorkspaceReady(page, 12000);
+      await waitForOdlWorkspaceReady(page, 10000);
       workspaceState = await getPracticeWorkspaceState(page);
       if (!isEffectiveOdlState(workspaceState)) {
         await dismissVehicleSearchOverlay(page);
         const secondOdl = await clickOdlSection(page);
         if (secondOdl?.clicked) {
           logPhase("odl_tab", "click_hop2", { label: secondOdl.label });
-          await waitForOdlWorkspaceReady(page, 12000);
+          await waitForOdlWorkspaceReady(page, 10000);
           workspaceState = await getPracticeWorkspaceState(page);
         }
       }
@@ -1865,6 +1875,7 @@ async function writePracticeAndOdl(page, job, args) {
     if (args.debug) {
       writeReport.bottomTabsBeforeNote = await snapshotBottomSectionTabs(page);
     }
+    logPhase("odl_notes_tab", "opening");
     const noteTabOpened = await clickBottomSectionTab(page, "Note interne");
     if (noteTabOpened) {
       await page.waitForTimeout(120);
@@ -1885,6 +1896,7 @@ async function writePracticeAndOdl(page, job, args) {
     }
   }
 
+  logPhase("odl_sections", "starting", { count: (job.sections || []).length });
   for (const section of job.sections || []) {
     const reparto = String(section.reparto || "").trim();
     // Su YAP non esiste la sezione "carrozzeria": si naviga/compila "pneumatici".
@@ -2015,8 +2027,9 @@ async function writePracticeAndOdl(page, job, args) {
     if (fallbackOk && writeReport.notes.error === "notes_field_not_found") writeReport.notes.error = null;
   }
 
+  logPhase("odl_sections", "done");
   await clickGenericSaveInPractice(page).catch(() => false);
-  await page.waitForTimeout(180);
+  await page.waitForTimeout(120);
 
   const needles = buildOdlNeedles(job);
   const scopedText = await safeEvaluate(page, () => {
@@ -2330,16 +2343,35 @@ async function runYapAutomation(job, args) {
   }
 
   logPhase("browser", "starting");
-  const browser = await launchChromiumWithFallback(
-    chromium,
-    {
+  const usePersistProfile = !args.noPersistProfile && !args.freshLogin;
+  let browser = null;
+  let context;
+  if (usePersistProfile) {
+    const profileDir = process.env.YAP_CHROME_PROFILE_DIR || YAP_CHROME_PROFILE_DIR;
+    await fs.mkdir(profileDir, { recursive: true });
+    logPhase("session", "profile_dir", { dir: profileDir });
+    const contextOptions = {
       headless: !args.headed,
       args: launchArgs,
-    },
-    { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
-  );
-  logPhase("browser", "ready");
-  const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
+      viewport: { width: 1440, height: 950 },
+      locale: "it-IT",
+    };
+    context = await launchPersistentContextWithFallback(
+      chromium,
+      profileDir,
+      contextOptions,
+      { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
+    );
+  } else {
+    browser = await launchChromiumWithFallback(
+      chromium,
+      { headless: !args.headed, args: launchArgs },
+      { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
+    );
+    context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
+    await applyYapSessionStorage(context, { freshLogin: args.freshLogin });
+  }
+  const _iapCookieLog = [];
   const page = await context.newPage();
   let _pageCrashError = null;
   page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
@@ -2399,6 +2431,15 @@ async function runYapAutomation(job, args) {
     }
     if (!didExplicitLogin) {
       logPhase("agenda", "ready");
+    }
+    if (_iapCookieLog.length > 0) {
+      process.stderr.write(JSON.stringify({
+        event: "yap:session",
+        status: "iap_set_cookie_trace",
+        count: _iapCookieLog.length,
+        entries: _iapCookieLog,
+        ts: new Date().toISOString(),
+      }) + "\n");
     }
 
     const yapTags = pickYapTagsFromJob(job);
@@ -2615,8 +2656,8 @@ async function runYapAutomation(job, args) {
     }
     throw error;
   } finally {
-    await context.close();
-    await browser.close();
+    await context.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
   }
 }
 

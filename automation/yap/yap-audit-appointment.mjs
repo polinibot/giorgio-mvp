@@ -21,6 +21,7 @@ import {
   yapContextOptions,
   ROOT_DIR,
   launchChromiumWithFallback,
+  applyYapSessionStorage,
 } from "./lib/yap-shared.mjs";
 import { buildManagementPlan, normalizeMappingInput } from "./lib/yap-mapping.mjs";
 
@@ -748,6 +749,7 @@ async function runAudit(mapping, args) {
   );
   logPhase("browser", "ready");
   const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
+  await applyYapSessionStorage(context, { freshLogin: args.freshLogin });
   const page = await context.newPage();
 
   let screenshot = null;

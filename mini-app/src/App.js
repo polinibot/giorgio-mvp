@@ -226,25 +226,29 @@ function getYapProgressLabel(action, startedAt, fallback = '') {
   const elapsed = formatProgressElapsed(startedAt);
   const hints = {
     sync: [
-      [0, 'YAP: precheck e avvio sincronizzazione...'],
-      [12, 'YAP: scrittura appuntamento e pratica in corso...'],
-      [30, 'YAP: salvataggio agenda/popup in verifica...'],
-      [55, 'YAP: audit post-sync su campi e tag in corso...'],
-      [85, 'YAP: fase lunga, possibile attesa del portale. Non chiudere.'],
+      [0,   'YAP: avvio browser e ripristino sessione...'],
+      [8,   'YAP: accesso al portale in corso...'],
+      [22,  'YAP: login completato, navigazione agenda...'],
+      [32,  'YAP: apertura slot appuntamento...'],
+      [38,  'YAP: popup compilato, salvataggio agenda...'],
+      [42,  'YAP: apertura pratica veicolo...'],
+      [62,  'YAP: scrittura ODL e campi pratica...'],
+      [85,  'YAP: fase lunga, possibile attesa del portale. Non chiudere.'],
       [120, 'YAP: ancora in risposta. Se fallisce mostro codice errore e prossima azione.'],
     ],
     audit: [
-      [0, 'YAP: verifica appuntamento avviata...'],
-      [15, 'YAP: lettura campi appuntamento e tag...'],
-      [35, 'YAP: confronto audit strict in corso...'],
-      [60, 'YAP: verifica lenta, attendo risposta del portale...'],
+      [0,  'YAP: avvio browser e ripristino sessione...'],
+      [8,  'YAP: accesso al portale in corso...'],
+      [22, 'YAP: lettura campi appuntamento e tag...'],
+      [45, 'YAP: confronto audit strict in corso...'],
+      [70, 'YAP: verifica lenta, attendo risposta del portale...'],
     ],
     delete: [
-      [0, 'YAP: ricerca appuntamento da eliminare...'],
-      [6, 'YAP: apertura dettagli appuntamento...'],
-      [14, 'YAP: conferma eliminazione in corso...'],
-      [24, 'YAP: verifica rimozione appuntamento...'],
-      [40, 'YAP: pulizia locale e refresh lista...'],
+      [0,  'YAP: ricerca appuntamento da eliminare...'],
+      [8,  'YAP: accesso al portale in corso...'],
+      [18, 'YAP: apertura dettagli appuntamento...'],
+      [28, 'YAP: conferma eliminazione in corso...'],
+      [40, 'YAP: verifica rimozione appuntamento...'],
       [60, 'YAP: eliminazione lenta, attendo risposta del portale...'],
     ],
   };
@@ -1606,7 +1610,7 @@ function App() {
       practiceId,
       label,
       status: 'running',
-      percent: 6,
+      percent: 4,
       startedAt: now,
     });
     yapActionProgressTimerRef.current = setInterval(() => {
@@ -1614,7 +1618,7 @@ function App() {
         if (!current || current.status !== 'running') return current;
         const caps = { sync: 90, delete: 88, audit: 86 };
         const cap = caps[current.action] ?? 88;
-        const increment = current.percent < 20 ? 4 : current.percent < 60 ? 1.9 : 0.7;
+        const increment = current.percent < 15 ? 2.5 : current.percent < 40 ? 1.2 : current.percent < 70 ? 0.6 : 0.25;
         const nextPercent = Math.min(cap, Number((current.percent + increment).toFixed(1)));
         const nextLabel = getYapProgressLabel(current.action, current.startedAt, current.label);
         if (nextPercent === current.percent && nextLabel === current.label) return current;
@@ -2379,8 +2383,7 @@ function App() {
       return { status: 'synced', simulated: true };
     }
     if (!silent) {
-      startYapActionProgress('sync', id, 'YAP: precheck e avvio sincronizzazione...');
-      updateYapActionProgress({ percent: 12, label: 'YAP: precheck e avvio sincronizzazione...' });
+      startYapActionProgress('sync', id, 'YAP: avvio browser e ripristino sessione...');
     }
     setYapSyncLoading(true);
     setYapLastResult(null);
@@ -2389,9 +2392,6 @@ function App() {
     yapAbortControllerRef.current = abortController;
     try {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
-      if (!silent) {
-        updateYapActionProgress({ percent: 30, label: 'YAP: scrittura appuntamento e pratica in corso...' });
-      }
       const res = await fetchWithRetry(() =>
         axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 180000, signal: abortController.signal })
       );
@@ -2459,11 +2459,11 @@ function App() {
       setYapLastResult(null);
       setYapLastPracticeId(id);
     });
-    updateYapActionProgress({ percent: 14, label: 'Ricerca appuntamento su YAP...' });
+    updateYapActionProgress({ percent: 10, label: 'YAP: avvio browser e ripristino sessione...' });
     await waitForNextPaint();
     try {
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders() });
-      updateYapActionProgress({ percent: 42, label: 'Eliminazione in corso su YAP...' });
+      updateYapActionProgress({ percent: 22, label: 'YAP: accesso al portale in corso...' });
       const res = await fetchWithRetry(() =>
         axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: options, params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
       );
@@ -2522,7 +2522,7 @@ function App() {
       setYapLastResult(simulated);
       return simulated;
     }
-    startYapActionProgress('audit', id, 'YAP: verifica appuntamento avviata...');
+    startYapActionProgress('audit', id, 'YAP: avvio browser e ripristino sessione...');
     setYapAuditLoading(true);
     setYapLastResult(null);
     setYapLastPracticeId(id);
@@ -2530,7 +2530,6 @@ function App() {
     yapAbortControllerRef.current = auditAbortController;
     try {
       rememberRequest('yap.audit', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/audit`, params: getAuthParams(), headers: getHeaders() });
-      updateYapActionProgress({ percent: 20, label: 'YAP: lettura campi appuntamento e tag...' });
       const res = await fetchWithRetry(() =>
         axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 255000, signal: auditAbortController.signal })
       );
@@ -2563,7 +2562,7 @@ function App() {
       yapAbortControllerRef.current = null;
       setYapAuditLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
 
   const renderGlobalYapActionProgressBar = () => {
