@@ -109,6 +109,79 @@ async function visibleYapMessage(page) {
   }).catch(() => "");
 }
 
+/**
+ * Gestisce ODL bloccante: apre pratica, naviga ODL, elimina, torna ad agenda
+ */
+async function handleOdlBlockingAndRetry(page, event, dateIso, searchTerm, trace) {
+  trace?.mark("odl_fix_open_practice", { event: event.title });
+  try {
+    // Clicca sull'appuntamento per aprire popup
+    await page.mouse.click(event.x, event.y);
+    await page.waitForTimeout(800);
+    
+    // Cerca link "Gestione pratica" o "Dettagli"
+    const praticaLink = await page.locator("a.gwt-Anchor, button").filter({ hasText: /Gestione pratica|Dettagli|Apri pratica/i }).first();
+    if (await praticaLink.isVisible().catch(() => false)) {
+      await praticaLink.click();
+      await page.waitForTimeout(2000);
+      trace?.mark("odl_fix_practice_opened");
+    } else {
+      // Prova doppio click per aprire diretto
+      await page.mouse.dblclick(event.x, event.y);
+      await page.waitForTimeout(2000);
+    }
+    
+    // Attendi caricamento pratica
+    await page.waitForTimeout(3000);
+    
+    // Cerca tab "Ordini di lavoro" o "ODL"
+    const odlTab = await page.locator("[role='tab'], .gwt-TabBarItem, .tab").filter({ hasText: /Ordini di lavoro|ODL|Lavori/i }).first();
+    if (await odlTab.isVisible().catch(() => false)) {
+      await odlTab.click();
+      await page.waitForTimeout(2500);
+      trace?.mark("odl_fix_odl_tab_opened");
+    } else {
+      // Prova URL hash navigation
+      const currentUrl = page.url();
+      if (currentUrl.includes("pratica")) {
+        await page.evaluate(() => { window.location.hash = window.location.hash.replace(/Page":"[^"]+"/, 'Page":"ODL"'); });
+        await page.waitForTimeout(2500);
+        trace?.mark("odl_fix_hash_navigated");
+      }
+    }
+    
+    // Cerca bottone elimina in ODL
+    const eliminaOdl = await page.locator("button, a.gwt-Anchor, .gwt-Button").filter({ hasText: /Elimina|Rimuovi|Cancella|Delete/i }).first();
+    if (await eliminaOdl.isVisible().catch(() => false)) {
+      await eliminaOdl.click();
+      await page.waitForTimeout(1000);
+      
+      // Conferma eliminazione
+      const conferma = await page.locator("button, .gwt-Button").filter({ hasText: /Sì|Conferma|OK|Elimina/i }).first();
+      if (await conferma.isVisible().catch(() => false)) {
+        await conferma.click();
+        await page.waitForTimeout(3000);
+        trace?.mark("odl_fix_odl_deleted");
+      }
+    }
+    
+    // Torna all'agenda
+    await openAgendaInApp(page);
+    await gotoAgendaDate(page, dateIso);
+    await page.waitForTimeout(1500);
+    trace?.mark("odl_fix_back_to_agenda");
+    
+    // Riprova eliminazione appuntamento
+    const retryResult = await findAndDeleteAppointment(page, searchTerm, false, dateIso, false, null);
+    trace?.mark("odl_fix_retry_completed", { deleted: retryResult.deleted });
+    
+    return retryResult.deleted;
+  } catch (err) {
+    trace?.mark("odl_fix_error", { error: err.message });
+    return false;
+  }
+}
+
 async function clickDeleteConfirmIfPresent(page) {
   // Cerca un dialog di conferma visibile con testo conferma/elimina/sì
   const confirmLocator = page.locator(
@@ -323,9 +396,31 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   const failureStatus = stillPresent
     ? classifyDeleteFailure(deleteRpcResponse?.body || visibleMessage)
     : null;
-  // Quando YAP blocca l'appuntamento per ODL, la correzione e' a due passi:
-  // cancellare prima l'ordine di lavoro e poi rilanciare questo script.
-  const repairHint = failureStatus === "blocked_by_odl"
+  // Gestione automatica ODL: se bloccato, apri pratica, elimina ODL, riprova
+  let odlAutoFixed = false;
+  if (failureStatus === "blocked_by_odl" && !dryRun) {
+    trace?.mark("odl_auto_fix_started");
+    try {
+      odlAutoFixed = await handleOdlBlockingAndRetry(page, match, dateIso, searchTerm, trace);
+      if (odlAutoFixed) {
+        trace?.mark("odl_auto_fix_success");
+        // Riverifica eliminazione
+        await openAgendaInApp(page);
+        await gotoAgendaDate(page, dateIso);
+        await page.waitForTimeout(400);
+        const finalEvents = await listVisibleAgendaEvents(page).catch(() => []);
+        const finallyGone = !finalEvents.some((event) => event.title.toLowerCase().includes(searchTerm.toLowerCase()));
+        if (finallyGone) {
+          stillPresent = false;
+          failureStatus = null;
+        }
+      }
+    } catch (odlErr) {
+      trace?.mark("odl_auto_fix_failed", { error: odlErr.message });
+    }
+  }
+
+  const repairHint = (failureStatus === "blocked_by_odl" && !odlAutoFixed)
     ? {
       script: `node automation/yap/yap-delete-linked-odl.mjs --date ${dateIso} --search ${searchTerm}`,
       reason: "L'appuntamento e' collegato a un ordine di lavoro. Prima elimina l'ODL, poi rilancia questo script.",
