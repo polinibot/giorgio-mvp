@@ -85,14 +85,14 @@ function extractErrorDetail(detail) {
 function classifyError(err) {
   if (!err.response) {
     if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-      return 'Automazione YAP non risponde entro i tempi. Il portale YAP potrebbe essere lento. Riprova tra qualche minuto.';
+      return 'Verifica YAP in corso da troppo tempo. Il portale potrebbe essere lento: riprova tra qualche minuto.';
     }
     return 'Errore di rete. Controlla la connessione internet e riprova.';
   }
   const status = err.response.status;
   const detail = extractErrorDetail(err.response.data?.detail || err.response.data?.message || err.response.data?.error);
   if (status === 429) return detail || 'Operazione YAP già in corso. Attendi il completamento e riprova.';
-  if (status === 504) return detail || 'Automazione YAP scaduta: il portale non ha risposto in tempo. Riprova tra qualche minuto.';
+  if (status === 504) return detail || 'Verifica YAP scaduta. Il portale YAP era irraggiungibile: riprova tra qualche minuto.';
   if (status === 422 || status === 400) return detail || 'Dati non validi. Controlla i campi e riprova.';
   if (status === 403) return detail || 'Utente non autorizzato. Contatta l\'amministratore.';
   if (status === 401) {
@@ -325,8 +325,9 @@ function getYapProgressLabel(action, startedAt, fallback = '') {
       [32,  'YAP: apertura slot e compilazione popup...'],
       [42,  'YAP: salvataggio agenda in corso...'],
       [52,  'YAP: scrittura pratica e ODL...'],
-      [75,  'YAP: attesa risposta portale...'],
-      [100, 'YAP: elaborazione in corso...'],
+      [75,  'YAP: elaborazione in corso (ci vuole un po\')...'],
+      [110, 'YAP: quasi pronto, attendere...'],
+      [150, 'YAP: operazione lunga, non chiudere...'],
     ],
     audit: [
       [0,  'YAP: avvio browser...'],
@@ -334,7 +335,9 @@ function getYapProgressLabel(action, startedAt, fallback = '') {
       [15, 'YAP: apertura appuntamento in agenda...'],
       [30, 'YAP: lettura campi e tag...'],
       [50, 'YAP: confronto audit in corso...'],
-      [75, 'YAP: attesa risposta portale...'],
+      [75, 'YAP: verifica completamento campi...'],
+      [110, 'YAP: quasi pronto, attendere...'],
+      [150, 'YAP: operazione lunga, non chiudere...'],
     ],
     delete: [
       [0,  'YAP: avvio browser...'],
@@ -2687,7 +2690,7 @@ function App() {
     try {
       rememberRequest('yap.audit', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/audit`, params: getAuthParams(), headers: getHeaders() });
       // NON ritentare in automatico: l'audit apre il browser; un retry lanciava un secondo run.
-      const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 255000, signal: auditAbortController.signal });
+      const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 275000, signal: auditAbortController.signal });
       const data = normalizeYapOutcome(res.data?.data || {});
       rememberResponse('yap.audit');
       invalidatePracticeCaches(id);
