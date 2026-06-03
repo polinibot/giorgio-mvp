@@ -1376,6 +1376,44 @@ function postClientDiagnostics(payload) {
   }
 }
 
+function YapCrashLogButton({ initData, telegramUserId }) {
+  const [loading, setLoading] = useState(false);
+  const [crash, setCrash] = useState(null);
+  const [err, setErr] = useState('');
+  const load = async () => {
+    setLoading(true); setErr(''); setCrash(null);
+    try {
+      const params = {};
+      if (initData) params['init_data'] = initData;
+      else if (telegramUserId) params['user_id'] = telegramUserId;
+      const res = await fetch(`${API_BASE_URL}/yap/last-crash?${new URLSearchParams(params).toString()}`, {
+        headers: initData ? { 'X-Telegram-Init-Data': initData } : {},
+      });
+      const json = await res.json();
+      if (!json?.data?.found) { setErr('Nessun crash dump salvato.'); return; }
+      setCrash(json.data);
+    } catch (e) { setErr(String(e?.message || e)); }
+    finally { setLoading(false); }
+  };
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button type="button" className="debug-panel-action" onClick={load} disabled={loading}>
+        {loading ? 'Caricamento...' : 'Crash log YAP'}
+      </button>
+      {err && <div className="debug-panel-line" style={{ color: '#f66' }}>{err}</div>}
+      {crash && (
+        <div style={{ marginTop: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#111', color: '#eee', padding: 8, borderRadius: 4, maxHeight: 400, overflowY: 'auto' }}>
+          <b>ts:</b> {crash.ts}{'\n'}
+          <b>script:</b> {crash.script}  <b>timeout:</b> {crash.timeout_seconds}s{'\n'}
+          <b>last_phase:</b> {crash.last_phase}{'\n'}
+          <b>phases:</b> {crash.phase_summary}{'\n\n'}
+          <b>stderr:</b>{'\n'}{crash.stderr}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DebugPanel({ authMode, browserPreviewMode, errorMessage, initData, telegramUserId, practiceAccessToken, lastApiDebug }) {
   const [copyStatus, setCopyStatus] = useState('');
   const payloadRef = useRef(null);
@@ -1432,6 +1470,7 @@ function DebugPanel({ authMode, browserPreviewMode, errorMessage, initData, tele
         <button type="button" className="debug-panel-action" onClick={copyDebug}>Copia debug</button>
         {copyStatus && <span className="debug-panel-copy-status">{copyStatus}</span>}
       </div>
+      <YapCrashLogButton initData={initData} telegramUserId={telegramUserId} />
       <textarea
         ref={payloadRef}
         className="debug-panel-payload"

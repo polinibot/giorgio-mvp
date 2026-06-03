@@ -1638,6 +1638,24 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                     " -> ".join(_phase_parts) or "none",
                     err_text[-2000:],
                 )
+                try:
+                    _dump_dir = os.path.join(_project_root(), "automation", "artifacts", "yap", "crash-dumps")
+                    os.makedirs(_dump_dir, exist_ok=True)
+                    _dump_path = os.path.join(_dump_dir, "last-timeout.json")
+                    with open(_dump_path, "w", encoding="utf-8") as _fh:
+                        _json.dump({
+                            "script": script_name,
+                            "attempt": attempt_name,
+                            "timeout_seconds": timeout_seconds,
+                            "ts": _utc_now_iso(),
+                            "last_phase": f"{last_phase.get('phase')}:{last_phase.get('status')}",
+                            "phases": worker_phases,
+                            "phase_summary": " -> ".join(_phase_parts) or "none",
+                            "stderr": err_text,
+                            "stdout": out_text,
+                        }, _fh, ensure_ascii=False, indent=2)
+                except Exception as _dump_err:
+                    logger.warning("Failed to write crash dump: %s", _dump_err)
                 raise _YapScriptTimeout(
                     {
                         "message": "Timeout automazione YAP",
@@ -3029,6 +3047,24 @@ async def get_yap_mapping_preview_from_form(
     except Exception as e:
         logger.error("Error building YAP preview from form: %s", e, exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Errore anteprima YAP da form")
+
+
+@app.get("/yap/last-crash")
+@limiter.limit("30/minute")
+async def get_yap_last_crash(
+    request: Request,
+    _auth: dict = Depends(require_yap_internal_auth),
+):
+    """Restituisce l'ultimo crash dump del worker YAP (timeout)."""
+    _dump_path = os.path.join(_project_root(), "automation", "artifacts", "yap", "crash-dumps", "last-timeout.json")
+    if not os.path.exists(_dump_path):
+        return APIResponse(success=True, data={"found": False, "message": "Nessun crash dump disponibile."})
+    try:
+        with open(_dump_path, "r", encoding="utf-8") as _fh:
+            dump = _json.load(_fh)
+        return APIResponse(success=True, data={"found": True, **dump})
+    except Exception as _e:
+        raise HTTPException(status_code=500, detail=f"Errore lettura crash dump: {_e}")
 
 
 @app.get("/yap/error-channel-status")
