@@ -278,6 +278,37 @@ function buildYapTelemetryDetails(telemetry, status) {
   return details;
 }
 
+function extractYapTechnicalDiagnostics(result) {
+  const candidates = [
+    result,
+    result?.error,
+    result?.yap?.error,
+    result?.yap?.result,
+  ].filter(Boolean);
+  const pick = (key) => candidates.find((candidate) => candidate && candidate[key] != null)?.[key];
+  const workerPhases = pick('worker_phases');
+  const runner = pick('runner');
+  const failedPhase = pick('failed_phase');
+  const stderrTail = pick('stderr_tail');
+  const stdoutTail = pick('stdout_tail');
+  if (!failedPhase && !runner && !stderrTail && !stdoutTail && !Array.isArray(workerPhases)) return null;
+  return {
+    failedPhase: failedPhase || null,
+    runner: runner && typeof runner === 'object' ? runner : null,
+    workerPhases: Array.isArray(workerPhases) ? workerPhases : [],
+    stderrTail: stderrTail ? String(stderrTail) : '',
+    stdoutTail: stdoutTail ? String(stdoutTail) : '',
+  };
+}
+
+function summarizeWorkerPhases(workerPhases) {
+  const phases = Array.isArray(workerPhases) ? workerPhases : [];
+  if (!phases.length) return '';
+  return phases
+    .map((phase) => `${phase?.phase || '?'}:${phase?.status || '?'}`)
+    .join(' -> ');
+}
+
 function formatProgressElapsed(startedAt) {
   const elapsedMs = Date.now() - (Number(startedAt) || Date.now());
   return Math.max(0, Math.round(elapsedMs / 1000));
@@ -2794,6 +2825,7 @@ function App() {
       }
     }
     const workerPhaseLabel = workerPhasesToLabel(safeResult.worker_phases);
+    const technicalDiagnostics = extractYapTechnicalDiagnostics(safeResult);
     if (workerPhaseLabel) {
       diagnosticItems.push(workerPhaseLabel);
     } else {
@@ -2820,7 +2852,7 @@ function App() {
     if (errorCode && errorCode !== 'YAP_TIMEOUT') diagnosticItems.push(`Codice ${errorCode}`);
     if (statusReason) {
       const reasonStr = String(statusReason).trim().toLowerCase();
-      if (reasonStr !== 'audit_deferred' && !reasonStr.startsWith('timeout')) {
+      if (!reasonStr.startsWith('timeout')) {
         const prefix = reasonStr === 'audit_deferred' ? 'Stato' : 'Causa';
         diagnosticItems.push(`${prefix} ${formatYapStatusReason(statusReason)}`);
       }
@@ -2857,7 +2889,47 @@ function App() {
                 ))}
               </div>
             )}
-            {status === 'sync_failed' && ['YAP_TIMEOUT', 'YAP_GENERIC_ERROR'].includes(errorCode) && (
+            {technicalDiagnostics && (
+              <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed'}>
+                <summary>Crash log YAP</summary>
+                <div className="yap-result-tech-body">
+                  {technicalDiagnostics.runner?.finished_at && (
+                    <div><strong>ts:</strong> {technicalDiagnostics.runner.finished_at}</div>
+                  )}
+                  {(technicalDiagnostics.runner?.script || technicalDiagnostics.runner?.timeout_seconds) && (
+                    <div>
+                      <strong>script:</strong> {technicalDiagnostics.runner?.script || 'yap-worker.mjs'}
+                      {technicalDiagnostics.runner?.timeout_seconds ? `  timeout: ${technicalDiagnostics.runner.timeout_seconds}s` : ''}
+                    </div>
+                  )}
+                  {(technicalDiagnostics.workerPhases.length > 0 || technicalDiagnostics.failedPhase) && (
+                    <div>
+                      <strong>last_phase:</strong> {technicalDiagnostics.workerPhases.length > 0
+                        ? `${technicalDiagnostics.workerPhases[technicalDiagnostics.workerPhases.length - 1]?.phase || '?'}:${technicalDiagnostics.workerPhases[technicalDiagnostics.workerPhases.length - 1]?.status || '?'}`
+                        : technicalDiagnostics.failedPhase}
+                    </div>
+                  )}
+                  {technicalDiagnostics.workerPhases.length > 0 && (
+                    <div>
+                      <strong>phases:</strong> {summarizeWorkerPhases(technicalDiagnostics.workerPhases)}
+                    </div>
+                  )}
+                  {technicalDiagnostics.stdoutTail && (
+                    <div className="yap-result-tech-block">
+                      <strong>stdout:</strong>
+                      <pre>{technicalDiagnostics.stdoutTail}</pre>
+                    </div>
+                  )}
+                  {technicalDiagnostics.stderrTail && (
+                    <div className="yap-result-tech-block">
+                      <strong>stderr:</strong>
+                      <pre>{technicalDiagnostics.stderrTail}</pre>
+                    </div>
+                  )}
+                </div>
+              </details>
+            )}
+            {status === 'sync_failed' && ['YAP_TIMEOUT', 'YAP_GENERIC_ERROR', 'YAP_SAVE_NOT_CONFIRMED'].includes(errorCode) && (
               <YapCrashLogButton initData={initData} telegramUserId={telegramUserId} />
             )}
           </div>

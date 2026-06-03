@@ -694,6 +694,115 @@ describe('Mini App user-simulation suite', () => {
     expect(document.body.textContent).not.toContain('notes_field_not_found');
   });
 
+  test('shows inline technical diagnostics for save-not-confirmed failures', async () => {
+    axios.post.mockImplementation((url) => {
+      if (String(url).includes('/yap/sync')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              status: 'sync_failed',
+              message: 'Salvataggio YAP non confermato dopo 3 tentativi',
+              status_reason: 'salvataggio_yap_non_confermato_dopo_3_tentativi',
+              error_code: 'YAP_SAVE_NOT_CONFIRMED',
+              preSync: { ready: true, score: 92, issues: [] },
+              phase_timeline: [
+                { name: 'precheck', status: 'completed', duration_ms: 1000 },
+                { name: 'write', status: 'failed', duration_ms: 82000 },
+                { name: 'finalize', status: 'completed', duration_ms: 40 },
+              ],
+              failed_phase: 'save',
+              runner: {
+                script: 'yap-worker.mjs',
+                finished_at: '2026-06-03T15:42:05.362758+00:00',
+                timeout_seconds: 210,
+              },
+              worker_phases: [
+                { phase: 'save_attempt', status: 'try_3', elapsed_ms: 65742 },
+                { phase: 'save_result', status: 'failed', elapsed_ms: 84162 },
+              ],
+              stderr_tail: '{"event":"yap:phase","phase":"save_result","status":"failed"}',
+              telemetry: { total_elapsed_ms: 82000 },
+              practice: {
+                id: 1,
+                synced: false,
+                management_sync_status: 'sync_failed',
+              },
+            },
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 1 } } });
+      }
+      if (url.includes('/practices/1/yap-mapping-preview')) {
+        return Promise.resolve({ data: { success: true, data: { proposedYap: { fieldMapping: {} }, confidence: {} } } });
+      }
+      if (url.includes('/api/practices/1')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 1,
+                status: 'confirmed',
+                plate_confirmed: 'AB123CD',
+                phone: '3331112222',
+                customer_name: 'Mario Rossi',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-11-10T09:00:00.000Z',
+                appointment_time: '09:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                synced: false,
+                management_sync_status: 'sync_failed',
+              },
+              sections: [],
+              parts: [],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [{
+              id: 1,
+              plate: 'AB123CD',
+              customer_name: 'Mario Rossi',
+              contexts: ['officina'],
+              synced: false,
+              management_sync_status: 'sync_failed',
+              appointment_date: '2026-11-10T09:00:00.000Z',
+              created_at: '2026-11-10T09:00:00.000Z',
+            }],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    clickElement(document.querySelector('.practice-card'));
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+    clickElement(getButton('Sincronizza con YAP'));
+
+    await waitFor(() => document.body.textContent.includes('Salvataggio YAP non confermato dopo 3 tentativi'));
+    expect(document.body.textContent).toContain('Crash log YAP');
+    expect(document.body.textContent).toContain('last_phase: save_result:failed');
+    expect(document.body.textContent).toContain('script: yap-worker.mjs  timeout: 210s');
+    expect(document.body.textContent).toContain('stderr:');
+  });
+
   test('editing an existing practice preserves section rows when updating notes only', async () => {
     axios.put.mockResolvedValueOnce({ data: { success: true, data: { id: 1 } } });
 
