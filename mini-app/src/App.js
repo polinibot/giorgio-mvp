@@ -2553,7 +2553,15 @@ function App() {
         }
         loadDetail(id);
         if (['agenda_synced', 'partial_synced', 'complete_synced', 'synced'].includes(data.status)) {
-          setTimeout(() => { auditYapAppointmentRef.current?.(id, { debug: false, background: true }); }, 800);
+          console.log('[YAP] Auto-audit scheduled for practice', id, 'status:', data.status);
+          setTimeout(() => {
+            if (auditYapAppointmentRef.current) {
+              console.log('[YAP] Starting auto-audit...');
+              auditYapAppointmentRef.current(id, { debug: false, background: true });
+            } else {
+              console.warn('[YAP] Auto-audit skipped: ref not ready');
+            }
+          }, 2000);
         }
       } else if (data.status === 'dry_run') {
         if (!silent) addToast('Dry-run YAP completato: nessuna modifica eseguita', 'info');
