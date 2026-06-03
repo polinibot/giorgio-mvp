@@ -193,6 +193,16 @@ export async function launchPersistentContextWithFallback(
   for (const lockFile of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
     await fs.rm(path.join(userDataDir, lockFile), { force: true }).catch(() => {});
   }
+  // Pulisce Cache e Crash Reports che si accumulano tra i run e causano OOM su Railway
+  for (const dir of [
+    path.join(userDataDir, "Default", "Cache"),
+    path.join(userDataDir, "Default", "Code Cache"),
+    path.join(userDataDir, "Default", "GPUCache"),
+    path.join(userDataDir, "Crash Reports"),
+    path.join(userDataDir, "Default", "Service Worker", "CacheStorage"),
+  ]) {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 
   const preferredPath = await pickChromiumExecutablePath();
   const options = preferredPath

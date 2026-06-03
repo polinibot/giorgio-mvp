@@ -2355,25 +2355,17 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
         const rect = checkLeaf.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
-        // Dispatch mousedown + mouseup + click — GWT sinkEvents cattura tutti e tre
-        const fireOn = (target) => {
-          ["mousedown", "mouseup", "click"].forEach((type) => {
-            target.dispatchEvent(new MouseEvent(type, {
-              bubbles: true, cancelable: true, view: window,
-              clientX: cx, clientY: cy, screenX: cx, screenY: cy,
-              button: 0, buttons: type === "mouseup" ? 0 : 1,
-            }));
-          });
-        };
-        // Spara sull'elemento foglia e su ogni parent fino al popup
-        let node = checkLeaf;
-        const tags = [];
-        while (node && node !== popup) {
-          fireOn(node);
-          tags.push(node.tagName);
-          node = node.parentElement;
-        }
-        return "dispatched:" + tags.join(">");
+        // Dispatch mousedown + mouseup + click SOLO sulla foglia con bubbles:true.
+        // Il bubbling nativo propaga automaticamente al GWT handler — non serve
+        // iterare i parent manualmente (causerebbe troppi eventi sintetici e crash).
+        ["mousedown", "mouseup", "click"].forEach((type) => {
+          checkLeaf.dispatchEvent(new MouseEvent(type, {
+            bubbles: true, cancelable: true, view: window,
+            clientX: cx, clientY: cy, screenX: cx, screenY: cy,
+            button: 0, buttons: type === "mouseup" ? 0 : 1,
+          }));
+        });
+        return "dispatched:" + checkLeaf.tagName + "@" + Math.round(cx) + "," + Math.round(cy);
       }).catch(() => false);
       if (!domClicked || domClicked.startsWith("no_")) {
         // Fallback: mouse click Playwright nativo sulle coordinate
