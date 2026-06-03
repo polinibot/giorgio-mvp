@@ -2329,9 +2329,13 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
         candidateCount,
         candidateScore: candidate.score,
       });
-      // GWT usa sinkEvents (listener globale sul documento) — element.click() non basta.
-      // Serve dispatchEvent con un vero MouseEvent sintetico con bubbles:true e coordinate
-      // reali: GWT intercetta questo evento tramite il suo handler globale.
+      // Usa le coordinate del candidate (già promosso al DIV/clickTarget da readPopupState).
+      // page.mouse.click è un evento OS-level che GWT non può ignorare.
+      // Prima move per simulare hover (alcuni GWT button attivano solo su hover+click).
+      await page.mouse.move(candidate.x, candidate.y);
+      await page.waitForTimeout(60).catch(() => {});
+      await page.mouse.click(candidate.x, candidate.y, { button: "left", clickCount: 1 });
+      // Secondo tentativo: cerca la foglia SPAN e clicca anche lì (per sicurezza)
       const domClicked = await safeEvaluate(page, () => {
         const isVisible = (el) => {
           const r = el.getBoundingClientRect();
@@ -2345,8 +2349,7 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
             if (t.includes("dettagli appuntamento")) return true;
             return [...el.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible).length >= 5;
           });
-        if (!popup) return "no_popup";
-        // Cerca l'elemento FOGLIA con textContent === "check"
+        if (!popup) return "popup_closed";
         const checkLeaf = [...popup.querySelectorAll("*")]
           .filter(isVisible)
           .find((el) => {
@@ -2356,20 +2359,18 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
           });
         if (!checkLeaf) return "no_check_leaf";
         const rect = checkLeaf.getBoundingClientRect();
-        return {
-          tag: checkLeaf.tagName,
-          cx: rect.left + rect.width / 2,
-          cy: rect.top + rect.height / 2,
-        };
+        return { tag: checkLeaf.tagName, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
       }).catch(() => null);
-      // Usa page.mouse.click nativo (evento OS-level) sulle coordinate della foglia SPAN.
-      // Questo è più affidabile di dispatchEvent per GWT che usa sinkEvents.
-      const clickCoords = (domClicked && typeof domClicked === "object" && domClicked.cx)
-        ? { x: domClicked.cx, y: domClicked.cy }
-        : { x: candidate.x, y: candidate.y };
-      await page.mouse.move(clickCoords.x, clickCoords.y);
-      await page.waitForTimeout(80).catch(() => {});
-      await page.mouse.click(clickCoords.x, clickCoords.y, { button: "left", clickCount: 1 });
+      if (domClicked === "popup_closed") {
+        logPhase("save_popup", "closed_after_first_click", { attempt });
+        putResponse = { status: () => 200, url: () => "local://popup-closed" };
+        break;
+      }
+      if (domClicked?.cx) {
+        await page.mouse.move(domClicked.cx, domClicked.cy);
+        await page.waitForTimeout(60).catch(() => {});
+        await page.mouse.click(domClicked.cx, domClicked.cy, { button: "left", clickCount: 1 });
+      }
       logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex, domClicked });
 
       // Aspetta fino a 3s che il popup si chiuda: GWT processa il click in modo asincrono
@@ -2384,6 +2385,26 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
         putResponse = { status: () => 200, url: () => "local://popup-closed" };
         break;
       }
+      // Dump diagnostico: mostra tutti gli elementi visibili nel popup per debug
+      const popupDump = await safeEvaluate(page, () => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")]
+          .find((el) => isVisible(el) && (
+            (el.textContent || "").toLowerCase().includes("dettagli appuntamento")
+            || [...el.querySelectorAll("input,textarea,select")].filter(isVisible).length >= 3
+          ));
+        if (!popup) return null;
+        return [...popup.querySelectorAll("*")].filter(isVisible).slice(0, 40).map((el) => ({
+          tag: el.tagName, cls: (el.className || "").slice(0, 60),
+          txt: (el.textContent || "").trim().slice(0, 30),
+          rect: (() => { const r = el.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; })(),
+        }));
+      }).catch(() => null);
+      if (popupDump) logPhase("save_click", "popup_dom_dump", { elements: popupDump.length, dump: popupDump.slice(0, 20) });
       if (popupAfterClick.errors?.length) {
         throw new Error(`Popup ancora aperto: ${popupAfterClick.errors.join(" | ")}`);
       }
