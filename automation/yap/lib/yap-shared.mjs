@@ -583,10 +583,41 @@ export async function persistYapSession(context) {
   }
 }
 
+// Esegue page.evaluate con un timeout HARD. Playwright NON applica alcun timeout a
+// page.evaluate: durante un redirect-loop di login il contesto JS viene distrutto e
+// ricreato di continuo, quindi la promise di evaluate può non risolversi MAI (né
+// resolve né reject). Senza questa corsa, un singolo evaluate appeso blocca l'intero
+// worker fino al kill a 210s (vedi crash openAgenda:recovery1_nav_done). Qui forziamo
+// un fallback dopo `ms` così i loop a deadline possono davvero uscire.
+export async function evalWithTimeout(page, fn, arg, ms = 4000, fallback = undefined, label = "") {
+  let timer = null;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      process.stderr.write(JSON.stringify({
+        event: "yap:phase",
+        phase: "evalGuard",
+        status: "evaluate_timeout",
+        label,
+        ms,
+        ts: new Date().toISOString(),
+      }) + "\n");
+      resolve(fallback);
+    }, ms);
+  });
+  try {
+    return await Promise.race([
+      Promise.resolve(page.evaluate(fn, arg)).catch(() => fallback),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function waitForYapBootSurface(page, timeout = 25000) {
   const started = Date.now();
   while ((Date.now() - started) < timeout) {
-    const state = await page.evaluate(() => {
+    const state = await evalWithTimeout(page, () => {
       const isVisible = (node) => {
         if (!node) return false;
         const rect = node.getBoundingClientRect();
@@ -617,7 +648,7 @@ async function waitForYapBootSurface(page, timeout = 25000) {
       if (loadingVisible) return "loading";
       if (/\bagenda\b/.test(bodyText)) return "app_shell";
       return "unknown";
-    }).catch(() => "unknown");
+    }, undefined, 3500, "unknown", "bootSurface");
 
     if (state === "login" || state === "agenda" || state === "app_shell") return state;
     await page.waitForTimeout(250).catch(() => {});
@@ -637,7 +668,7 @@ export async function isYapLoginPage(page, timeout = 1200) {
 }
 
 async function hasYapAppShell(page, timeout = 2000) {
-  return page.evaluate(() => {
+  return evalWithTimeout(page, () => {
     const isVisible = (node) => {
       if (!node) return false;
       const rect = node.getBoundingClientRect();
@@ -651,7 +682,7 @@ async function hasYapAppShell(page, timeout = 2000) {
         return /^(Dashboard|Agenda|Nuovo|Revisioni|Banche dati|Analisi|Archivi|Configurazioni|Aiuto)$/i.test(text)
           || /@offcarchiuduno/i.test(text);
       });
-  }).catch(() => false);
+  }, undefined, Math.max(1500, timeout), false, "hasAppShell");
 }
 
 async function openAgendaFromAppShell(page, timeout = 15000) {
@@ -673,7 +704,7 @@ async function dismissUnsupportedBrowserWarningRobust(page, { timeout = 6000 } =
   const started = Date.now();
   let dismissed = false;
   while ((Date.now() - started) < timeout) {
-    const handled = await page.evaluate(() => {
+    const handled = await evalWithTimeout(page, () => {
       const isVisible = (node) => {
         if (!node) return false;
         const rect = node.getBoundingClientRect();
@@ -696,13 +727,13 @@ async function dismissUnsupportedBrowserWarningRobust(page, { timeout = 6000 } =
       if (!okBtn) return false;
       okBtn.click();
       return true;
-    }).catch(() => false);
+    }, undefined, 3000, false, "dismissWarning_handle");
     if (handled) {
       dismissed = true;
       await page.waitForTimeout(250).catch(() => {});
       continue;
     }
-    const stillVisible = await page.evaluate(() => {
+    const stillVisible = await evalWithTimeout(page, () => {
       const isVisible = (node) => {
         if (!node) return false;
         const rect = node.getBoundingClientRect();
@@ -719,7 +750,7 @@ async function dismissUnsupportedBrowserWarningRobust(page, { timeout = 6000 } =
             || text.includes("non e piu supportata")
             || text.includes("safari - null");
         });
-    }).catch(() => false);
+    }, undefined, 3000, false, "dismissWarning_check");
     if (!stillVisible) return dismissed;
     await page.waitForTimeout(250).catch(() => {});
   }
@@ -1375,7 +1406,29 @@ export async function loginYap(page, username, password) {
 
 const _logShared = (phase, status, extra = {}) => process.stderr.write(JSON.stringify({ event: "yap:phase", phase, status, ts: new Date().toISOString(), ...extra }) + "\n");
 
+// Deadline complessiva di apertura agenda (ms). Tetto di sicurezza: anche con tutti
+// gli evaluate protetti, un redirect-loop persistente non deve mai consumare i 210s
+// del worker. Allo scadere lanciamo "agenda_redirected_to_login" — errore che
+// openAgendaWithRecovery tratta come recuperabile (pulisce cookie + ri-login).
+const OPEN_AGENDA_DEADLINE_MS = Number(process.env.YAP_OPEN_AGENDA_DEADLINE_MS || 75000);
+
 export async function openAgendaInApp(page) {
+  const _deadlineStart = Date.now();
+  let _deadlineTimer = null;
+  const deadline = new Promise((_, reject) => {
+    _deadlineTimer = setTimeout(() => {
+      _logShared("openAgenda", "deadline_exceeded", { ms: Date.now() - _deadlineStart, limit_ms: OPEN_AGENDA_DEADLINE_MS });
+      reject(new Error("agenda_redirected_to_login"));
+    }, OPEN_AGENDA_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([_openAgendaInAppInner(page), deadline]);
+  } finally {
+    if (_deadlineTimer) clearTimeout(_deadlineTimer);
+  }
+}
+
+async function _openAgendaInAppInner(page) {
   const _t0 = Date.now();
   await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
   _logShared("openAgenda", "nav_done", { ms: Date.now() - _t0, url: page.url().slice(0, 80) });
