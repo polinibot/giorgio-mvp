@@ -1373,6 +1373,9 @@ export async function openAgendaInApp(page) {
     await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
     const recoveredSurface = await waitForYapBootSurface(page, 6000).catch(() => "unknown");
     _logShared("openAgenda", "recovery1_surface", { surface: recoveredSurface, ms: Date.now() - _t0 });
+    if (recoveredSurface === "login" || recoveredSurface === "unknown") {
+      throw new Error("agenda_redirected_to_login");
+    }
     if (recoveredSurface === "app_shell") {
       await openAgendaFromAppShell(page, 12000).catch(() => {});
     }
@@ -1397,6 +1400,7 @@ export async function openAgendaInApp(page) {
         await openAgendaFromAppShell(page, 12000).catch(() => {});
         continue;
       }
+      if (recoveredSurface2 === "agenda") continue;
       throw new Error("agenda_redirected_to_login");
     }
     if (await hasYapAppShell(page, 1500).catch(() => false)) {
@@ -1416,6 +1420,7 @@ export async function openAgendaInApp(page) {
         await openAgendaFromAppShell(page, 12000).catch(() => {});
         continue;
       }
+      if (recoveredSurface3 === "agenda") continue;
       throw new Error("agenda_redirected_to_login");
     }
     await waitForAgendaReady(page, 6000).catch(() => {});
