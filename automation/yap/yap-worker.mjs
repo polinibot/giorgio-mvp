@@ -2343,15 +2343,27 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
             return [...el.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible).length >= 5;
           });
         if (!popup) return "no_popup";
-        // Cerca lo SPAN/elemento con testo esatto "check" (icona Material Icons = salva)
-        const checkEl = [...popup.querySelectorAll("span, div, a, button")]
+        // Cerca l'elemento FOGLIA con textContent === "check" (solo testo diretto, no children con testo)
+        const checkLeaf = [...popup.querySelectorAll("*")]
           .filter(isVisible)
-          .find((el) => (el.textContent || "").trim() === "check");
-        if (!checkEl) return "no_check_el";
-        checkEl.click();
-        return "clicked:" + checkEl.tagName;
+          .find((el) => {
+            if ((el.textContent || "").trim() !== "check") return false;
+            // Deve essere foglia o avere figli senza testo significativo
+            const kids = [...el.children].filter((c) => (c.textContent || "").trim().length > 0);
+            return kids.length === 0;
+          });
+        if (!checkLeaf) return "no_check_leaf";
+        // Clicca la foglia e ogni suo parent fino al popup per garantire bubbling GWT
+        let node = checkLeaf;
+        const clicked = [];
+        while (node && node !== popup) {
+          node.click();
+          clicked.push(node.tagName);
+          node = node.parentElement;
+        }
+        return "clicked:" + clicked.join(">");
       }).catch(() => false);
-      if (!domClicked || domClicked === "no_popup" || domClicked === "no_check_el") {
+      if (!domClicked || domClicked === "no_popup" || domClicked === "no_check_el" || domClicked === "no_check_leaf") {
         // Fallback: mouse click nativo sulle coordinate
         await page.mouse.click(candidate.x, candidate.y);
       }
