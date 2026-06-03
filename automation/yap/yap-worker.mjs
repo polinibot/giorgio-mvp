@@ -2466,7 +2466,7 @@ async function runYapAutomation(job, args) {
       logPhase("session", "profile_fallback", { reason: "profile_busy" });
     }
   }
-  const { browser, context, page } = runtime;
+  let { browser, context, page } = runtime;
   let _pageCrashError = null;
   page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
 
@@ -2521,9 +2521,31 @@ async function runYapAutomation(job, args) {
       logPhase("session", "restored");
     } catch (restoreError) {
       const message = String(restoreError?.message || "");
-      const recoverable = /agenda_redirected_to_login|Timeout|ERR_FAILED|ERR_ABORTED|waiting for locator|agenda_date_not_reached/i.test(message);
+      const recoverable = /agenda_redirected_to_login|Timeout|ERR_FAILED|ERR_ABORTED|waiting for locator|agenda_date_not_reached|Target crashed/i.test(message);
       if (!recoverable) throw restoreError;
       logPhase("session", "restore_failed", { error: message.slice(0, 180) });
+      // Se il browser è crashato, ricrea il runtime con profilo pulito
+      if (/Target crashed/i.test(message)) {
+        logPhase("session", "browser_crashed_recovery");
+        await context.close().catch(() => {});
+        // Pulisce manualmente il profilo (Crash Reports + Default tranne Cookies)
+        const profileDir = YAP_CHROME_PROFILE_DIR;
+        try {
+          const defaultEntries = await fs.readdir(path.join(profileDir, "Default")).catch(() => []);
+          const keep = new Set(["Cookies", "Login Data", "Login Data-journal"]);
+          for (const entry of defaultEntries) {
+            if (!keep.has(entry)) await fs.rm(path.join(profileDir, "Default", entry), { recursive: true, force: true }).catch(() => {});
+          }
+          await fs.rm(path.join(profileDir, "Crash Reports"), { recursive: true, force: true }).catch(() => {});
+        } catch (_) {}
+        const newRuntime = await createYapRuntime(chromium, {
+          headed: args.headed, freshLogin: true,
+          launchArgs, preferPersistentProfile: !args.noPersistProfile,
+          resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR,
+        });
+        ({ browser, context, page } = newRuntime);
+        page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
+      }
       logPhase("login", "starting");
       await loginYap(page, username, password);
       didExplicitLogin = true;
