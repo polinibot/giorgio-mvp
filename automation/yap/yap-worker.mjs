@@ -2356,24 +2356,20 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
           });
         if (!checkLeaf) return "no_check_leaf";
         const rect = checkLeaf.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2;
-        const cy = rect.top + rect.height / 2;
-        // Dispatch mousedown + mouseup + click SOLO sulla foglia con bubbles:true.
-        // Il bubbling nativo propaga automaticamente al GWT handler — non serve
-        // iterare i parent manualmente (causerebbe troppi eventi sintetici e crash).
-        ["mousedown", "mouseup", "click"].forEach((type) => {
-          checkLeaf.dispatchEvent(new MouseEvent(type, {
-            bubbles: true, cancelable: true, view: window,
-            clientX: cx, clientY: cy, screenX: cx, screenY: cy,
-            button: 0, buttons: type === "mouseup" ? 0 : 1,
-          }));
-        });
-        return "dispatched:" + checkLeaf.tagName + "@" + Math.round(cx) + "," + Math.round(cy);
-      }).catch(() => false);
-      if (!domClicked || domClicked.startsWith("no_")) {
-        // Fallback: mouse click Playwright nativo sulle coordinate
-        await page.mouse.click(candidate.x, candidate.y);
-      }
+        return {
+          tag: checkLeaf.tagName,
+          cx: rect.left + rect.width / 2,
+          cy: rect.top + rect.height / 2,
+        };
+      }).catch(() => null);
+      // Usa page.mouse.click nativo (evento OS-level) sulle coordinate della foglia SPAN.
+      // Questo è più affidabile di dispatchEvent per GWT che usa sinkEvents.
+      const clickCoords = (domClicked && typeof domClicked === "object" && domClicked.cx)
+        ? { x: domClicked.cx, y: domClicked.cy }
+        : { x: candidate.x, y: candidate.y };
+      await page.mouse.move(clickCoords.x, clickCoords.y);
+      await page.waitForTimeout(80).catch(() => {});
+      await page.mouse.click(clickCoords.x, clickCoords.y, { button: "left", clickCount: 1 });
       logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex, domClicked });
 
       // Aspetta fino a 3s che il popup si chiuda: GWT processa il click in modo asincrono
