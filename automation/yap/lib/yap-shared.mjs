@@ -1150,6 +1150,9 @@ export async function scanVisibleAgendaEventTargets(page, { includeStyle = false
 }
 
 export async function loginYap(page, username, password) {
+  const _loginStart = Date.now();
+  const _logLogin = (status, extra = {}) => process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "loginYap", status, elapsed_ms: Date.now() - _loginStart, ts: new Date().toISOString(), ...extra }) + "\n");
+  _logLogin("start");
   const _cookieLog = [];
   const _cookieListener = (response) => {
     try {
@@ -1162,10 +1165,14 @@ export async function loginYap(page, username, password) {
   };
   page.on("response", _cookieListener);
   try {
+    _logLogin("navigating");
     await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
+    _logLogin("nav_done", { url: page.url().slice(0, 80) });
     await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3500 });
 
+    _logLogin("waiting_boot_surface");
     const bootSurface = await waitForYapBootSurface(page, 18000);
+    _logLogin("boot_surface", { surface: bootSurface });
     const ssSnapshot = await page.evaluate((origin) => {
       try {
         if (window.location.origin !== origin) return { origin: window.location.origin, keys: [] };
@@ -1186,13 +1193,16 @@ export async function loginYap(page, username, password) {
       ts: new Date().toISOString(),
     }) + "\n");
     if (bootSurface === "agenda") {
+      _logLogin("already_in_agenda");
       await persistYapSession(page.context()).catch(() => {});
       return;
     }
     if (bootSurface === "app_shell") {
+      _logLogin("opening_agenda_from_shell");
       try {
         await openAgendaFromAppShell(page, 12000);
         await persistYapSession(page.context()).catch(() => {});
+        _logLogin("done_via_shell");
         return;
       } catch {}
     }
@@ -1276,9 +1286,11 @@ export async function loginYap(page, username, password) {
       });
     }
 
+    _logLogin("filling_credentials");
     await page.waitForTimeout(100);
     await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
     await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 20000 });
+    _logLogin("input_ready");
     const filled = await page.evaluate(({ u, p }) => {
       const userEl = document.querySelector('input[name="u"]');
       const passEl = document.querySelector('input[name="pw"]');
@@ -1316,8 +1328,11 @@ export async function loginYap(page, username, password) {
       });
     }
 
+    _logLogin("submitted");
     const _loginSubmitMs = Date.now();
+    _logLogin("waiting_post_login");
     const postLoginState = await waitForYapBootSurface(page, 20000);
+    _logLogin("post_login_surface", { surface: postLoginState, ms: Date.now() - _loginSubmitMs });
     process.stderr.write(JSON.stringify({
       event: "yap:session",
       status: "post_login_surface",
