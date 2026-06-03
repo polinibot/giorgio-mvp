@@ -772,11 +772,22 @@ async function runAudit(mapping, args) {
     logPhase("event_click", "starting", { terms: searchTerms.slice(0, 2) });
     const click = await clickAgendaEventRobust(page, searchTerms, plan.agenda.dalle, mapping.agenda.data);
     const events = click.events?.length ? click.events : await scanAgendaEvents(page);
-    logPhase("event_click", click.success ? "done" : "not_found");
+    logPhase("event_click", click.success ? "done" : "not_found", {
+      success: click.success,
+      text: (click.text || "").slice(0, 60),
+      time: click.time || null,
+      eventsFound: (click.events || []).length,
+      searchTerms: searchTerms.slice(0, 2),
+    });
     await page.waitForTimeout(800);
     const popup = await extractPopup(page);
     const toolbar = await extractAgendaToolbar(page);
-    logPhase("popup", popup.found ? "found" : "not_found");
+    logPhase("popup", popup.found ? "found" : "not_found", {
+      found: popup.found,
+      cosa: (popup.agenda?.cosa || "").slice(0, 40),
+      dalle: popup.agenda?.dalle || null,
+      tagsCount: (popup.tags || []).length,
+    });
     let practice = { openedPractice: false, openedOdl: false, text: "", clickLabels: [] };
     if (popup.found && !args.quick) {
       logPhase("practice_odl", "starting");
@@ -797,6 +808,16 @@ async function runAudit(mapping, args) {
       : null;
     const found = { event: event || clickEvent, popup, toolbar, practice };
     const outcome = classifyAudit(fields, found);
+    logPhase("audit", "classified", {
+      status: outcome.status,
+      present: outcome.present.length,
+      missing: outcome.missing.length,
+      mismatch: outcome.mismatch.length,
+      missingFields: outcome.missing.slice(0, 5).map((f) => ({ field: f.field, expected: String(f.expected || "").slice(0, 30) })),
+      eventFound: !!(event || clickEvent),
+      eventTitle: ((event || clickEvent)?.title || "").slice(0, 40),
+      popupFound: popup.found,
+    });
 
     return {
       ok: outcome.status !== "sync_failed",
