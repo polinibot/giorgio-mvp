@@ -2438,16 +2438,20 @@ async function runYapAutomation(job, args) {
         if (!needsRelogin && !wrongDate) throw error;
         logPhase("agenda", needsRelogin ? "relogin" : "date_retry", { attempt, error: message.slice(0, 180) });
         await context.clearCookies().catch(() => {});
-        await page.evaluate(() => {
-          try { window.localStorage?.clear?.(); } catch {}
-          try { window.sessionStorage?.clear?.(); } catch {}
-        }).catch(() => {});
+        await Promise.race([
+          page.evaluate(() => {
+            try { window.localStorage?.clear?.(); } catch {}
+            try { window.sessionStorage?.clear?.(); } catch {}
+          }),
+          new Promise((r) => setTimeout(r, 3000)),
+        ]).catch(() => {});
         await page.goto(process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
         // Svuota sessionStorage DOPO domcontentloaded: a questo punto GWT non ha ancora
         // letto sessionStorage, quindi non può fare silent re-auth che blocca per ~200s.
-        await page.evaluate(() => {
-          try { window.sessionStorage?.clear?.(); } catch {}
-        }).catch(() => {});
+        await Promise.race([
+          page.evaluate(() => { try { window.sessionStorage?.clear?.(); } catch {} }),
+          new Promise((r) => setTimeout(r, 3000)),
+        ]).catch(() => {});
         try {
           await loginYap(page, username, password);
         } catch (retryError) {

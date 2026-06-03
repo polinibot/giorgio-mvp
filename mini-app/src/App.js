@@ -325,8 +325,8 @@ function getYapProgressLabel(action, startedAt, fallback = '') {
       [32,  'YAP: apertura slot e compilazione popup...'],
       [42,  'YAP: salvataggio agenda in corso...'],
       [52,  'YAP: scrittura pratica e ODL...'],
-      [75,  'YAP: attesa risposta portale. Non chiudere.'],
-      [100, 'YAP: risposta lenta. Se fallisce riprova.'],
+      [75,  'YAP: attesa risposta portale...'],
+      [100, 'YAP: elaborazione in corso...'],
     ],
     audit: [
       [0,  'YAP: avvio browser...'],
@@ -2541,14 +2541,16 @@ function App() {
       if (['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(data.status)) {
         invalidatePracticeCaches(id);
         if (!silent) {
+          // Appuntamento scritto su YAP (RPC confermata): mostralo SUBITO come successo.
+          // La verifica parte in background e non blocca piu' la UI con "risposta lenta".
           addToast(data.status === 'duplicate'
             ? (data.message || 'Agenda già presente in YAP: nessuna modifica necessaria')
-            : (data.message || 'Appuntamento scritto su YAP. Verifica in corso...'),
-            data.status === 'complete_synced' ? 'success' : 'warning');
+            : (data.message || 'Appuntamento salvato su YAP ✓ (verifica in corso...)'),
+            'success');
         }
         loadDetail(id);
         if (['agenda_synced', 'partial_synced', 'complete_synced', 'synced'].includes(data.status)) {
-          setTimeout(() => { auditYapAppointmentRef.current?.(id, { debug: false }); }, 800);
+          setTimeout(() => { auditYapAppointmentRef.current?.(id, { debug: false, background: true }); }, 800);
         }
       } else if (data.status === 'dry_run') {
         if (!silent) addToast('Dry-run YAP completato: nessuna modifica eseguita', 'info');
@@ -2662,6 +2664,7 @@ function App() {
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, selectedPracticeId, detailData, practices, loadDashboard, searchQuery, activeFilters, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
   const auditYapAppointment = useCallback(async (id, options = {}) => {
+    const background = options.background || false;
     if (browserPreviewMode) {
       const simulated = {
         status: 'partial_synced',
@@ -2673,9 +2676,11 @@ function App() {
       setYapLastResult(simulated);
       return simulated;
     }
-    startYapActionProgress('audit', id, 'YAP: avvio browser e ripristino sessione...');
-    setYapAuditLoading(true);
-    setYapLastResult(null);
+    if (!background) {
+      startYapActionProgress('audit', id, 'YAP: avvio browser e ripristino sessione...');
+      setYapAuditLoading(true);
+      setYapLastResult(null);
+    }
     setYapLastPracticeId(id);
     const auditAbortController = new AbortController();
     yapAbortControllerRef.current = auditAbortController;
@@ -2684,9 +2689,19 @@ function App() {
       // NON ritentare in automatico: l'audit apre il browser; un retry lanciava un secondo run.
       const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 255000, signal: auditAbortController.signal });
       const data = normalizeYapOutcome(res.data?.data || {});
-      setYapLastResult(data);
       rememberResponse('yap.audit');
       invalidatePracticeCaches(id);
+      if (background) {
+        // Verifica in background: aggiorna lo stato SOLO per confermare (verde),
+        // senza mai declassare un salvataggio gia' riuscito ne' mostrare spinner/toast.
+        if (data.status === 'complete_synced') {
+          setYapLastResult(data);
+          addToast(data.message || 'Verifica YAP completata: tutto ok', 'success');
+        }
+        loadDetail(id);
+        return data;
+      }
+      setYapLastResult(data);
       const tone = data.status === 'complete_synced' ? 'success' : (data.status === 'sync_failed' ? 'error' : 'warning');
       const auditLabel = data.message || 'Controllo YAP completato';
       finishYapActionProgress(auditLabel, tone === 'error' ? 'error' : 'success', tone === 'error' ? 0 : 1400);
@@ -2704,6 +2719,11 @@ function App() {
         retryable: true,
         error: err?.response?.data?.detail || err?.response?.data || err?.message || 'audit_failed',
       };
+      if (background) {
+        // Verifica in background fallita: NON tocchiamo il risultato della sync
+        // (l'appuntamento e' stato comunque scritto). Niente toast/spinner di errore.
+        return errorResult;
+      }
       setYapLastResult(errorResult);
       finishYapActionProgress(errorResult.message || 'Verifica YAP fallita', 'error', 0);
       addToast(errorResult.message, 'error');
