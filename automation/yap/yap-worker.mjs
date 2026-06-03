@@ -2381,7 +2381,12 @@ async function runYapAutomation(job, args) {
           try { window.localStorage?.clear?.(); } catch {}
           try { window.sessionStorage?.clear?.(); } catch {}
         }).catch(() => {});
-        await page.goto(process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it", { waitUntil: "domcontentloaded" }).catch(() => {});
+        await page.goto(process.env.YAP_BASE_URL || "https://yap.mmbsoftware.it", { waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+        // Svuota sessionStorage DOPO domcontentloaded: a questo punto GWT non ha ancora
+        // letto sessionStorage, quindi non può fare silent re-auth che blocca per ~200s.
+        await page.evaluate(() => {
+          try { window.sessionStorage?.clear?.(); } catch {}
+        }).catch(() => {});
         try {
           await loginYap(page, username, password);
         } catch (retryError) {

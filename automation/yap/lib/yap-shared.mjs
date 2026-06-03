@@ -1167,7 +1167,15 @@ export async function loginYap(page, username, password) {
   page.on("response", _cookieListener);
   try {
     _logLogin("navigating");
-    await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
+    // Naviga solo se non siamo già su YAP (evita doppia navigazione quando il chiamante
+    // ha già fatto page.goto(YAP_BASE_URL) con sessionStorage svuotato).
+    const _currentUrl = page.url();
+    const _onYap = _currentUrl.startsWith(new URL(YAP_BASE_URL).origin);
+    if (!_onYap) {
+      await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
+    } else {
+      _logLogin("already_on_yap", { url: _currentUrl.slice(0, 80) });
+    }
     _logLogin("nav_done", { url: page.url().slice(0, 80) });
     await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3500 });
 
@@ -1290,7 +1298,9 @@ export async function loginYap(page, username, password) {
     _logLogin("filling_credentials");
     await page.waitForTimeout(100);
     await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
-    await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 10000 });
+    _logLogin("waiting_input_visible");
+    await page.waitForTimeout(500);
+    await page.locator('input[name="u"]').waitFor({ state: "visible", timeout: 25000 });
     _logLogin("input_ready");
     const filled = await page.evaluate(({ u, p }) => {
       const userEl = document.querySelector('input[name="u"]');
@@ -1307,7 +1317,7 @@ export async function loginYap(page, username, password) {
       return true;
     }, { u: username, p: password });
     if (!filled) {
-      await page.locator('input[name="u"]').click({ force: true, timeout: 10000 });
+      await page.locator('input[name="u"]').click({ force: true, timeout: 5000 });
       await page.locator('input[name="u"]').pressSequentially(username, { delay: 40 });
       await page.locator('input[name="pw"]').click({ force: true });
       await page.locator('input[name="pw"]').pressSequentially(password, { delay: 40 });
@@ -1316,8 +1326,9 @@ export async function loginYap(page, username, password) {
       .getByTestId("loginSubmitButton")
       .or(page.getByRole("button", { name: /acc[ée]di/i }))
       .first();
+    _logLogin("clicking_submit");
     try {
-      await loginBtn.click({ force: true, timeout: 10000 });
+      await loginBtn.click({ force: true, timeout: 8000 });
     } catch {
       await page.evaluate(() => {
         const btn =
