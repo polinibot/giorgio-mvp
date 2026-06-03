@@ -1407,7 +1407,8 @@ function YapCrashLogButton({ initData, telegramUserId }) {
           <b>script:</b> {crash.script}  <b>timeout:</b> {crash.timeout_seconds}s{'\n'}
           <b>last_phase:</b> {crash.last_phase}{'\n'}
           <b>phases:</b> {crash.phase_summary}{'\n\n'}
-          <b>stderr:</b>{'\n'}{crash.stderr}
+          <b>stdout:</b>{'\n'}{crash.stdout || '(vuoto)'}{'\n\n'}
+          <b>stderr:</b>{'\n'}{crash.stderr || '(vuoto)'}
         </div>
       )}
     </div>

@@ -48,6 +48,7 @@ const WORKSPACE_STATES = Object.freeze({
 });
 
 const _workerStart = Date.now();
+process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
   process.stderr.write(JSON.stringify({
     event: "yap:phase",
@@ -2712,12 +2713,14 @@ async function main() {
     throw new Error("Serve --payload-file oppure --practice-id");
   }
 
+  logPhase("worker", "reading_payload");
   const job = args.payloadFile ? await readPayloadFile(args.payloadFile, args) : await readPracticeFromApi(args);
+  logPhase("worker", "validating_job");
   validateJob(job);
-
+  logPhase("worker", "cleanup_start");
   // Cleanup vecchi screenshot prima di eseguire (manutenzione automatica)
   await cleanupOldArtifacts(args.artifactDir, 7);
-  
+  logPhase("worker", "automation_start");
   const result = await runYapAutomation(job, args);
   console.log(JSON.stringify({
     ok: true,

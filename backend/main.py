@@ -1613,11 +1613,32 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
             )
+            _stdout_chunks: list = []
+            _stderr_chunks: list = []
+
+            async def _drain_stdout():
+                assert process.stdout
+                async for chunk in process.stdout:
+                    _stdout_chunks.append(chunk)
+
+            async def _drain_stderr():
+                assert process.stderr
+                async for chunk in process.stderr:
+                    _stderr_chunks.append(chunk)
+
+            _drain_task_out = asyncio.ensure_future(_drain_stdout())
+            _drain_task_err = asyncio.ensure_future(_drain_stderr())
             try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+                await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+                await asyncio.gather(_drain_task_out, _drain_task_err, return_exceptions=True)
+                stdout = b"".join(_stdout_chunks)
+                stderr = b"".join(_stderr_chunks)
             except asyncio.TimeoutError:
                 process.kill()
-                stdout, stderr = await process.communicate()
+                await asyncio.gather(_drain_task_out, _drain_task_err, return_exceptions=True)
+                await process.wait()
+                stdout = b"".join(_stdout_chunks)
+                stderr = b"".join(_stderr_chunks)
                 out_text = stdout.decode("utf-8", errors="replace").strip()
                 err_text = stderr.decode("utf-8", errors="replace").strip()
                 duration_ms = int((time.perf_counter() - attempt_started_monotonic) * 1000)
