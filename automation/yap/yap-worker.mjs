@@ -2326,9 +2326,9 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
         candidateCount,
         candidateScore: candidate.score,
       });
-      // DOM .click() con bubbling: cerca lo SPAN "check" nel popup e chiama
-      // .click() su di esso — il click bolla fino al GWT handler sul TD/wrapper.
-      // Più affidabile di page.mouse.click(coordinate) che bypassa il bubbling GWT.
+      // GWT usa sinkEvents (listener globale sul documento) — element.click() non basta.
+      // Serve dispatchEvent con un vero MouseEvent sintetico con bubbles:true e coordinate
+      // reali: GWT intercetta questo evento tramite il suo handler globale.
       const domClicked = await safeEvaluate(page, () => {
         const isVisible = (el) => {
           const r = el.getBoundingClientRect();
@@ -2343,28 +2343,40 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
             return [...el.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible).length >= 5;
           });
         if (!popup) return "no_popup";
-        // Cerca l'elemento FOGLIA con textContent === "check" (solo testo diretto, no children con testo)
+        // Cerca l'elemento FOGLIA con textContent === "check"
         const checkLeaf = [...popup.querySelectorAll("*")]
           .filter(isVisible)
           .find((el) => {
             if ((el.textContent || "").trim() !== "check") return false;
-            // Deve essere foglia o avere figli senza testo significativo
             const kids = [...el.children].filter((c) => (c.textContent || "").trim().length > 0);
             return kids.length === 0;
           });
         if (!checkLeaf) return "no_check_leaf";
-        // Clicca la foglia e ogni suo parent fino al popup per garantire bubbling GWT
+        const rect = checkLeaf.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        // Dispatch mousedown + mouseup + click — GWT sinkEvents cattura tutti e tre
+        const fireOn = (target) => {
+          ["mousedown", "mouseup", "click"].forEach((type) => {
+            target.dispatchEvent(new MouseEvent(type, {
+              bubbles: true, cancelable: true, view: window,
+              clientX: cx, clientY: cy, screenX: cx, screenY: cy,
+              button: 0, buttons: type === "mouseup" ? 0 : 1,
+            }));
+          });
+        };
+        // Spara sull'elemento foglia e su ogni parent fino al popup
         let node = checkLeaf;
-        const clicked = [];
+        const tags = [];
         while (node && node !== popup) {
-          node.click();
-          clicked.push(node.tagName);
+          fireOn(node);
+          tags.push(node.tagName);
           node = node.parentElement;
         }
-        return "clicked:" + clicked.join(">");
+        return "dispatched:" + tags.join(">");
       }).catch(() => false);
-      if (!domClicked || domClicked === "no_popup" || domClicked === "no_check_el" || domClicked === "no_check_leaf") {
-        // Fallback: mouse click nativo sulle coordinate
+      if (!domClicked || domClicked.startsWith("no_")) {
+        // Fallback: mouse click Playwright nativo sulle coordinate
         await page.mouse.click(candidate.x, candidate.y);
       }
       logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex, domClicked });
