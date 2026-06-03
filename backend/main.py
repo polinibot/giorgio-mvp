@@ -1805,15 +1805,42 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
         if returncode != 0:
             failure_detail = _build_yap_failure_detail(out, err)
             failure_detail["runner"] = runner_meta
+            _worker_phases_fail = _extract_yap_phases(err)
+            _phase_parts_fail = []
+            _prev_ms_fail = 0
+            for _p in _worker_phases_fail:
+                _cur = _p.get("elapsed_ms") or 0
+                _phase_parts_fail.append(f"{_p['phase']}:{_p.get('status','')}({_cur}ms,+{_cur-_prev_ms_fail}ms)")
+                _prev_ms_fail = _cur
             logger.error(
-                "YAP script failed (%s): %s",
+                "YAP script failed (%s): %s phases=[%s]",
                 script_name,
                 failure_detail.get("message"),
+                " -> ".join(_phase_parts_fail) or "none",
                 extra={
                     "stdout_tail": out[-3000:],
                     "stderr_tail": err[-3000:],
                 },
             )
+            try:
+                _dump_dir = os.path.join(_project_root(), "automation", "artifacts", "yap", "crash-dumps")
+                os.makedirs(_dump_dir, exist_ok=True)
+                with open(os.path.join(_dump_dir, "last-timeout.json"), "w", encoding="utf-8") as _fh:
+                    _json.dump({
+                        "script": script_name,
+                        "attempt": "primary",
+                        "timeout_seconds": timeout_seconds,
+                        "ts": _utc_now_iso(),
+                        "last_phase": f"{_worker_phases_fail[-1].get('phase') if _worker_phases_fail else 'None'}:{_worker_phases_fail[-1].get('status') if _worker_phases_fail else 'None'}",
+                        "phases": _worker_phases_fail,
+                        "phase_summary": " -> ".join(_phase_parts_fail) or "none",
+                        "stderr": err,
+                        "stdout": out,
+                        "error_message": failure_detail.get("message"),
+                        "returncode": returncode,
+                    }, _fh, ensure_ascii=False, indent=2)
+            except Exception as _dump_err:
+                logger.warning("Failed to write crash dump (failure): %s", _dump_err)
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=failure_detail,

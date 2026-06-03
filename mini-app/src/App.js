@@ -2857,7 +2857,7 @@ function App() {
                 ))}
               </div>
             )}
-            {status === 'sync_failed' && errorCode === 'YAP_TIMEOUT' && (
+            {status === 'sync_failed' && ['YAP_TIMEOUT', 'YAP_GENERIC_ERROR'].includes(errorCode) && (
               <YapCrashLogButton initData={initData} telegramUserId={telegramUserId} />
             )}
           </div>
