@@ -8,6 +8,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
+  buildYapTelemetry,
+  createYapRuntime,
   loginYap,
   openAgendaInApp,
   gotoAgendaDate,
@@ -18,10 +20,8 @@ import {
   normalizeAppointmentTime,
   normalize,
   getYapSlotMinutes,
-  yapContextOptions,
   ROOT_DIR,
-  launchChromiumWithFallback,
-  applyYapSessionStorage,
+  waitForAgendaEventPopulation,
 } from "./lib/yap-shared.mjs";
 import { buildManagementPlan, normalizeMappingInput } from "./lib/yap-mapping.mjs";
 
@@ -230,6 +230,7 @@ function valueMatches(expected, found, kind) {
 }
 
 async function scanAgendaEvents(page) {
+  await waitForAgendaEventPopulation(page);
   return page.evaluate(() => {
     return [...document.querySelectorAll(".fc-time-grid-event, .fc-event")]
       .filter((el) => {
@@ -462,7 +463,7 @@ async function tryOpenPracticeAndOdl(page) {
   if (clickPractice.clicked) {
     result.openedPractice = true;
     result.clickLabels.push(clickPractice.label);
-    await page.waitForTimeout(3500);
+    await page.waitForTimeout(2000);
   }
 
   const clickOdl = await page.evaluate(() => {
@@ -481,7 +482,7 @@ async function tryOpenPracticeAndOdl(page) {
   if (clickOdl.clicked) {
     result.openedOdl = true;
     result.clickLabels.push(clickOdl.label);
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1500);
   }
 
   const scoped = await page.evaluate(() => {
@@ -739,33 +740,40 @@ async function runAudit(mapping, args) {
     );
   }
 
-  const browser = await launchChromiumWithFallback(
-    chromium,
-    {
-      headless: !args.headed,
-      args: launchArgs,
-    },
-    { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
-  );
+  const startedAtMs = Date.now();
+  const runtime = await createYapRuntime(chromium, {
+    headed: args.headed,
+    freshLogin: args.freshLogin,
+    launchArgs,
+    preferPersistentProfile: true,
+    resolveModule: requireFromYap.resolve.bind(requireFromYap),
+  });
   logPhase("browser", "ready");
-  const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
-  await applyYapSessionStorage(context, { freshLogin: args.freshLogin });
-  const page = await context.newPage();
+  const { page } = runtime;
 
   let screenshot = null;
   try {
-    logPhase("login", "starting");
-    await loginYap(page, username, password);
-    logPhase("login", "done");
-    logPhase("agenda", "starting", { date: mapping.agenda.data });
-    await openAgendaInApp(page);
-    await gotoAgendaDate(page, mapping.agenda.data);
-    logPhase("agenda", "ready");
+    logPhase("session", "restoring");
+    let sessionRestored = false;
+    try {
+      await openAgendaInApp(page);
+      await gotoAgendaDate(page, mapping.agenda.data);
+      sessionRestored = true;
+      logPhase("session", "restored");
+    } catch (_restoreErr) {
+      logPhase("login", "starting");
+      await loginYap(page, username, password);
+      logPhase("login", "done");
+      await openAgendaInApp(page);
+      await gotoAgendaDate(page, mapping.agenda.data);
+    }
+    if (!sessionRestored) logPhase("session", "login_done");
+    logPhase("agenda", "ready", { date: mapping.agenda.data });
     logPhase("event_click", "starting", { terms: searchTerms.slice(0, 2) });
     const click = await clickAgendaEventRobust(page, searchTerms, plan.agenda.dalle, mapping.agenda.data);
     const events = click.events?.length ? click.events : await scanAgendaEvents(page);
     logPhase("event_click", click.success ? "done" : "not_found");
-    await page.waitForTimeout(1800);
+    await page.waitForTimeout(800);
     const popup = await extractPopup(page);
     const toolbar = await extractAgendaToolbar(page);
     logPhase("popup", popup.found ? "found" : "not_found");
@@ -814,6 +822,18 @@ async function runAudit(mapping, args) {
         eventCount: events.length,
         eventTitles: events.map((ev) => [ev.time, ev.title].filter(Boolean).join(" ")).slice(0, 20),
       },
+      telemetry: buildYapTelemetry({
+        runtime,
+        viewport: { ...(found.event || {}), centerDateLabel: found.event?.date || mapping.agenda.data },
+        eventCount: events.length,
+        startedAtMs,
+        extra: {
+          action: "audit",
+          popupFound: Boolean(popup.found),
+          openedPractice: Boolean(practice.openedPractice),
+          openedOdl: Boolean(practice.openedOdl),
+        },
+      }),
       found,
       present: outcome.present,
       missing: outcome.missing,
@@ -822,8 +842,7 @@ async function runAudit(mapping, args) {
       screenshot,
     };
   } finally {
-    await context.close().catch(() => {});
-    await browser.close().catch(() => {});
+    await runtime.close().catch(() => {});
   }
 }
 

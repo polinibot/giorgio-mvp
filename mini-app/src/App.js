@@ -1527,6 +1527,7 @@ function App() {
   const yapActionProgressTimerRef = useRef(null);
   const yapActionProgressClearTimerRef = useRef(null);
   const yapAbortControllerRef = useRef(null);
+  const auditYapAppointmentRef = useRef(null);
   const toastIdRef = useRef(0);
   const formRef = useRef(null);
   const searchTimerRef = useRef(null);
@@ -2471,10 +2472,13 @@ function App() {
         if (!silent) {
           addToast(data.status === 'duplicate'
             ? (data.message || 'Agenda già presente in YAP: nessuna modifica necessaria')
-            : (data.message || 'Verifica YAP completata'),
+            : (data.message || 'Appuntamento scritto su YAP. Verifica in corso...'),
             data.status === 'complete_synced' ? 'success' : 'warning');
         }
         loadDetail(id);
+        if (['agenda_synced', 'partial_synced', 'complete_synced', 'synced'].includes(data.status)) {
+          setTimeout(() => { auditYapAppointmentRef.current?.(id, { debug: false }); }, 800);
+        }
       } else if (data.status === 'dry_run') {
         if (!silent) addToast('Dry-run YAP completato: nessuna modifica eseguita', 'info');
       } else if (data.status === 'not_ready') {
@@ -2635,6 +2639,7 @@ function App() {
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
+  auditYapAppointmentRef.current = auditYapAppointment;
 
   const renderGlobalYapActionProgressBar = () => {
     if (!yapActionProgress) return null;
@@ -2775,7 +2780,7 @@ function App() {
       }
     }
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
-    const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
+    const canAudit = showRetry && resolvedPracticeId && ['sync_failed', 'audit_failed'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
     const canActionHint = Boolean(
       resolvedPracticeId
