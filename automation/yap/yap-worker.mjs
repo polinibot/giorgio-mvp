@@ -2316,32 +2316,29 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
         throw new Error("Bottone salva non trovato nel popup");
       }
 
-      putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
-        logPhase("save_click", "clicking", {
-          buttonText: candidate.rawText || candidate.text || "check",
-          buttonClass: candidate.buttonClass,
-          clickTag: candidate.clickTag,
-          x: Math.round(candidate.x),
-          y: Math.round(candidate.y),
-          candidateIndex,
-          candidateCount,
-          candidateScore: candidate.score,
-        });
-        await page.mouse.click(candidate.x, candidate.y);
-        logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex });
-      }, 10000 + (attempt - 1) * 3000);
+      logPhase("save_click", "clicking", {
+        buttonText: candidate.rawText || candidate.text || "check",
+        buttonClass: candidate.buttonClass,
+        clickTag: candidate.clickTag,
+        x: Math.round(candidate.x),
+        y: Math.round(candidate.y),
+        candidateIndex,
+        candidateCount,
+        candidateScore: candidate.score,
+      });
+      await page.mouse.click(candidate.x, candidate.y);
+      logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex });
 
-      if (putResponse) {
-        logPhase("save_response", "received", { attempt });
-        break;
+      // Aspetta fino a 3s che il popup si chiuda: GWT processa il click in modo asincrono
+      let popupAfterClick = null;
+      for (let w = 0; w < 6; w += 1) {
+        await page.waitForTimeout(500).catch(() => {});
+        popupAfterClick = await readPopupState();
+        if (!popupAfterClick?.open) break;
       }
-
-      await page.waitForTimeout(1200).catch(() => {});
-      const popupAfterClick = await readPopupState();
-      const stillOpenAttempt = Boolean(popupAfterClick?.open);
-      if (!stillOpenAttempt) {
+      if (!popupAfterClick?.open) {
         logPhase("save_popup", "closed_after_click", { attempt });
-        putResponse = { status: () => 200, url: () => "local://popup-closed-without-rpc" };
+        putResponse = { status: () => 200, url: () => "local://popup-closed" };
         break;
       }
       if (popupAfterClick.errors?.length) {
