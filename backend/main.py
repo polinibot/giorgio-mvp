@@ -1152,9 +1152,18 @@ def _build_yap_sync_scope(mapped: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _practice_cache_stamp(practice: Practice, db: Session) -> str:
-    sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice.id).all()
-    parts = db.query(PracticePart).filter(PracticePart.practice_id == practice.id).all()
+def _practice_cache_stamp(
+    practice: Practice,
+    db: Session,
+    sections=None,
+    parts=None,
+) -> str:
+    # sections/parts possono essere passati pre-caricati per evitare query extra
+    # nel caso batch (vedere _pre_sync_check_batch). Se None, vengono caricati qui.
+    if sections is None:
+        sections = db.query(PracticeSection).filter(PracticeSection.practice_id == practice.id).all()
+    if parts is None:
+        parts = db.query(PracticePart).filter(PracticePart.practice_id == practice.id).all()
     data = {
         "id": practice.id,
         "updated_at": practice.updated_at.isoformat() if practice.updated_at else "",
@@ -2465,12 +2474,29 @@ async def pre_sync_check_batch(
             Practice.status != PracticeStatus.DELETED,
         ).all()
         by_id = {p.id: p for p in practices}
+
+        # Pre-carica sezioni e ricambi per tutte le pratiche trovate in 2 query
+        # invece di 2N query dentro il loop (una per pratica).
+        found_ids = list(by_id.keys())
+        all_sections = db.query(PracticeSection).filter(PracticeSection.practice_id.in_(found_ids)).all()
+        all_parts = db.query(PracticePart).filter(PracticePart.practice_id.in_(found_ids)).all()
+        sections_by_practice: Dict[int, list] = {}
+        for s in all_sections:
+            sections_by_practice.setdefault(s.practice_id, []).append(s)
+        parts_by_practice: Dict[int, list] = {}
+        for p in all_parts:
+            parts_by_practice.setdefault(p.practice_id, []).append(p)
+
         result: Dict[str, Any] = {}
         for pid in parsed_ids:
             practice = by_id.get(pid)
             if not practice:
                 continue
-            stamp = _practice_cache_stamp(practice, db)
+            stamp = _practice_cache_stamp(
+                practice, db,
+                sections=sections_by_practice.get(practice.id, []),
+                parts=parts_by_practice.get(practice.id, []),
+            )
             cache_key = f"{practice.id}:{stamp}"
             check = _cache_get(YAP_PRECHECK_CACHE, cache_key)
             if check is None:

@@ -160,7 +160,7 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
     const inferred = String(result.practice?.management_sync_status || result.yap?.status || '').trim();
     const normalizedMessage = String(message || '').toLowerCase();
     if (inferred) status = inferred;
-    else if (result.yap?.result?.saved || result.yap?.result?.mode === 'commit') status = result.audit ? 'partial_synced' : 'agenda_synced';
+    else if (result.yap?.result?.saved || result.yap?.result?.mode === 'commit') status = (result.audit && typeof result.audit === 'object' && Object.keys(result.audit).length > 0) ? 'partial_synced' : 'agenda_synced';
     else if (normalizedMessage.includes('agenda sincronizzata')) status = 'partial_synced';
     else if (normalizedMessage.includes('appuntamento eliminato')) status = 'deleted';
     else if (normalizedMessage.includes('non trovato') || normalizedMessage.includes('not found')) status = 'not_found';
@@ -215,6 +215,8 @@ function summarizePhaseTimeline(phaseTimeline, fallback = '') {
     const label = YAP_PHASE_LABELS[failed.name] || failed.name || 'fase';
     return `YAP: ${label} fallita (${Math.round(totalMs / 1000)}s)`;
   }
+  // Se nessuna fase è completed (es. tutte skipped), non mostrare "0/N fasi" che è rumore.
+  if (!done) return fallback;
   return `${done}/${phases.length} fasi completate (${Math.round(totalMs / 1000)}s)`;
 }
 
@@ -704,7 +706,7 @@ function Lightbox({ src, onClose }) {
   return (
     <div className="lightbox-overlay" onClick={onClose}>
       <div className="lightbox-content" onClick={e => e.stopPropagation()}>
-        <button className="lightbox-close" onClick={onClose} type="button">✕</button>
+        <button className="lightbox-close" onClick={onClose} type="button" aria-label="Chiudi foto">✕</button>
         <img src={src} alt="Foto pratica" className="lightbox-img" />
       </div>
     </div>
@@ -1866,6 +1868,9 @@ function App() {
     } catch (_) { return false; }
   }, [setValue]);
 
+  // Event listener per persistere la bozza al cambio tab/chiusura pagina.
+  // Separato dall'effect del debounce sotto per evitare di re-aggiungere/rimuovere
+  // addEventListener ad ogni tasto premuto (watchedValues cambia ad ogni keystroke).
   useEffect(() => {
     if (currentView !== 'form' || loading || submitInProgress) return undefined;
 
@@ -1876,20 +1881,27 @@ function App() {
       if (document.visibilityState === 'hidden' && hasMeaningfulDraft()) persistDraft();
     };
 
-    const timer = setTimeout(() => {
-      if (hasMeaningfulDraft()) persistDraft();
-    }, 250);
     window.addEventListener('beforeunload', persistDraftOnLeave);
     window.addEventListener('pagehide', persistDraftOnLeave);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      clearTimeout(timer);
       window.removeEventListener('beforeunload', persistDraftOnLeave);
       window.removeEventListener('pagehide', persistDraftOnLeave);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [watchedValues, currentView, loading, submitInProgress, selectedContexts, sections, parts, persistDraft, hasMeaningfulDraft, stopSaveProgressTimers]);
+  }, [currentView, loading, submitInProgress, persistDraft, hasMeaningfulDraft]);
+
+  // Debounce: persiste la bozza 250ms dopo ogni modifica al form.
+  // watchedValues cambia ad ogni keystroke (react-hook-form), quindi questo effect
+  // si triggera spesso — ma fa solo un setTimeout, niente DOM pesante.
+  useEffect(() => {
+    if (currentView !== 'form' || loading || submitInProgress) return undefined;
+    const timer = setTimeout(() => {
+      if (hasMeaningfulDraft()) persistDraft();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [watchedValues, currentView, loading, submitInProgress, selectedContexts, sections, parts, persistDraft, hasMeaningfulDraft]);
 
   useEffect(() => () => {
     stopSaveProgressTimers();
@@ -2423,6 +2435,8 @@ function App() {
     const currentTelegramUserId = telegramUserId;
     let successCount = 0;
     let failCount = 0;
+    // Upload sequenziale intenzionale: permette il progress "foto N di M" preciso
+    // e protegge da rate-limit lato server (Cloudinary). Non parallelizzare.
     for (let i = 0; i < formPhotos.length; i++) {
       setFormPhotoUploadProgress(`Caricamento foto ${i + 1}/${formPhotos.length}...`);
       if (onProgress) {
@@ -2496,8 +2510,13 @@ function App() {
         label: 'Caricamento foto completato',
       });
     }
-    if (successCount > 0) addToast(`${successCount} foto caricate con successo!`, 'success');
-    if (failCount > 0) addToast(`${failCount} foto non caricate.`, 'error');
+    if (successCount > 0 && failCount > 0) {
+      addToast(`${successCount} foto caricate, ${failCount} non caricate.`, 'warning');
+    } else if (successCount > 0) {
+      addToast(`${successCount} foto caricate con successo!`, 'success');
+    } else if (failCount > 0) {
+      addToast(`${failCount} foto non caricate.`, 'error');
+    }
     // Cleanup previews
     formPhotos.forEach(p => URL.revokeObjectURL(p.preview));
     setFormPhotos([]);
@@ -2872,18 +2891,23 @@ function App() {
         writeReport.parts?.error ? formatYapWriteReportIssue('ricambi', writeReport.parts.error) : null,
         writeReport.waste?.error ? formatYapWriteReportIssue('smaltimento', writeReport.waste.error) : null,
       ].filter(Boolean);
-      diagnosticItems.push(issues.length ? `Post-scrittura: ${issues.slice(0, 2).join(', ')}` : 'Post-scrittura: controlli incompleti');
+      if (issues.length) {
+        diagnosticItems.push(`Post-scrittura: ${issues.slice(0, 2).join(', ')}`);
+      }
     }
     const errorCode = safeResult.error_code || safeResult?.yap?.error?.error_code || null;
     const statusReason = safeResult.status_reason || safeResult?.yap?.error?.reason || null;
     const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
-    diagnosticItems.push(...buildYapTelemetryDetails(telemetry, status));
+    diagnosticItems.push(...buildYapTelemetryDetails(telemetry, status).filter(Boolean));
     if (errorCode && errorCode !== 'YAP_TIMEOUT') diagnosticItems.push(`Codice ${errorCode}`);
     if (statusReason) {
       const reasonStr = String(statusReason).trim().toLowerCase();
       if (!reasonStr.startsWith('timeout')) {
-        const prefix = reasonStr === 'audit_deferred' ? 'Stato' : 'Causa';
-        diagnosticItems.push(`${prefix} ${formatYapStatusReason(statusReason)}`);
+        const formattedReason = formatYapStatusReason(statusReason);
+        if (formattedReason) {
+          const prefix = reasonStr === 'audit_deferred' ? 'Stato' : 'Causa';
+          diagnosticItems.push(`${prefix} ${formattedReason}`);
+        }
       }
     }
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
@@ -4354,7 +4378,7 @@ function App() {
             onChange={e => setSearchQuery(e.target.value)}
           />
           {searchQuery && (
-            <button className="search-clear" onClick={() => setSearchQuery('')} type="button">✕</button>
+            <button className="search-clear" onClick={() => setSearchQuery('')} type="button" aria-label="Cancella ricerca">✕</button>
           )}
         </div>
 
@@ -4914,7 +4938,7 @@ function App() {
           />
 
           {showDraftBanner && (
-            <div className="draft-banner">
+            <div className="draft-banner" role="status" aria-live="polite">
               <span>📝 Bozza ripristinata</span>
               <button type="button" onClick={discardDraft}>
                 Scarta
@@ -5218,7 +5242,7 @@ function App() {
                 <div className="form-group">
                   <div className="section-inline-actions">
                     <label>Righe Descrittive*</label>
-                    <button type="button" onClick={() => addDescriptionRow(context)} className="button-add">+ Aggiungi riga</button>
+                    <button type="button" onClick={() => addDescriptionRow(context)} className="button-add" aria-label={`Aggiungi riga descrittiva a ${context}`}>+ Aggiungi riga</button>
                   </div>
                   {sections[context]?.description_rows?.map((row, index) => (
                     <div key={`${context}-row-${index}-${sections[context].description_rows.length}`} className="description-row">
@@ -5230,7 +5254,7 @@ function App() {
                         placeholder="Descrizione lavoro..."
                       />
                       {sections[context].description_rows.length > 1 && (
-                        <button type="button" onClick={() => removeDescriptionRow(context, index)} className="button-remove">✕</button>
+                        <button type="button" onClick={() => removeDescriptionRow(context, index)} className="button-remove" aria-label={`Rimuovi riga ${index + 1} da ${context}`}>✕</button>
                       )}
                     </div>
                   ))}
@@ -5295,7 +5319,7 @@ function App() {
                   <div className="form-group">
                     <div className="section-inline-actions">
                       <label>Pezzi / ricambi</label>
-                      <button type="button" onClick={() => addPart(context)} className="button-add">+ Aggiungi pezzo</button>
+                      <button type="button" onClick={() => addPart(context)} className="button-add" aria-label={`Aggiungi pezzo a ${context}`}>+ Aggiungi pezzo</button>
                     </div>
                     {getPartsForContext(context).map((part, index) => (
                       <div key={part._key || index} className="description-row">
@@ -5310,7 +5334,7 @@ function App() {
                           className="input" placeholder="1 pz"
                           style={{ maxWidth: '100px' }}
                         />
-                        <button type="button" onClick={() => removePart(context, index)} className="button-remove">✕</button>
+                        <button type="button" onClick={() => removePart(context, index)} className="button-remove" aria-label={`Rimuovi pezzo ${index + 1} da ${context}`}>✕</button>
                       </div>
                     ))}
                   </div>
