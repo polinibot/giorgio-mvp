@@ -2237,6 +2237,8 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
     const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")]
       .find((el) => {
         if (!isVisible(el)) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.height < 80) return false; // popup di conferma/titolo GWT, non di editing
         const text = (el.textContent || "").toLowerCase();
         if (text.includes("dettagli appuntamento")) return true;
         return [...el.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible).length >= 5;
@@ -2334,6 +2336,35 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
         else logPhase("save_click", "popup_dom_dump", { elements: 0, note: "no popup found" });
       }
       const popupState = await readPopupState();
+      // Se il popup originale (con i campi) è già sparito, controlla se è rimasto
+      // solo il popup di conferma GWT (piccolo, senza input) = salvataggio già avvenuto.
+      if (!popupState?.open) {
+        logPhase("save_popup", "already_closed", { attempt });
+        putResponse = { status: () => 200, url: () => "local://popup-already-closed" };
+        break;
+      }
+      // Popup di conferma post-salvataggio: altezza < 80px e nessun input = successo
+      const confirmPopupCheck = await safeEvaluate(page, () => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const popups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")].filter(isVisible);
+        const confirmPopup = popups.find((el) => {
+          const rect = el.getBoundingClientRect();
+          const inputs = [...el.querySelectorAll("input, textarea, select")].filter(isVisible);
+          return rect.height < 80 && inputs.length === 0;
+        });
+        if (!confirmPopup) return null;
+        const rect = confirmPopup.getBoundingClientRect();
+        return { h: Math.round(rect.height), txt: (confirmPopup.textContent || "").trim().slice(0, 60) };
+      }).catch(() => null);
+      if (confirmPopupCheck) {
+        logPhase("save_popup", "confirm_popup_detected", { attempt, ...confirmPopupCheck });
+        putResponse = { status: () => 200, url: () => "local://confirm-popup" };
+        break;
+      }
       const candidateCount = popupState?.saveCandidates?.length || 0;
       const candidateIndex = Math.min(Math.max(0, attempt - 1), Math.max(0, candidateCount - 1));
       const candidate = popupState?.saveCandidates?.[candidateIndex] || popupState?.saveCandidates?.[0] || null;
