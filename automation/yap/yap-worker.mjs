@@ -588,27 +588,13 @@ async function clickApproximateSlot(page, targetTime) {
   ];
 
   for (const point of clickPoints) {
-    const clicked = await safeEvaluate(page, ({ x, y }) => {
-      const dispatch = (type) => {
-        const target = document.elementFromPoint(x, y);
-        if (!target) return false;
-        target.dispatchEvent(new MouseEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          view: window,
-          clientX: x,
-          clientY: y,
-        }));
-        return true;
-      };
-      const first = dispatch("click");
-      if (!first) return false;
-      dispatch("click");
-      dispatch("dblclick");
-      return true;
-    }, point).catch(() => false);
-    if (!clicked) continue;
-    const opened = await waitForAppointmentPopup(page, 3000);
+    // Usa page.mouse.click nativo (OS-level) invece di dispatchEvent sintetico
+    // GWT risponde meglio agli eventi OS-level per l'apertura del popup
+    await page.mouse.move(point.x, point.y);
+    await page.waitForTimeout(60).catch(() => {});
+    await page.mouse.click(point.x, point.y, { button: "left", clickCount: 1 });
+    await page.waitForTimeout(60).catch(() => {});
+    const opened = await waitForAppointmentPopup(page, 5000);
     if (opened) return;
     await page.keyboard.press("Escape").catch(() => {});
     await page.waitForTimeout(120);
