@@ -2513,7 +2513,7 @@ async def sync_practice_to_yap(
 
         # Budget hardening: timeout contenuto per evitare attese eccessive lato UI.
         try:
-            sync_timeout_s = int(os.getenv("YAP_SYNC_TIMEOUT_S", "150") or "150")
+            sync_timeout_s = int(os.getenv("YAP_SYNC_TIMEOUT_S", "210") or "210")
             result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=sync_timeout_s, db=db)
         except HTTPException as worker_exc:
             detail = worker_exc.detail if isinstance(worker_exc.detail, dict) else {"message": str(worker_exc.detail)}

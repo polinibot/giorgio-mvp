@@ -1146,9 +1146,9 @@ export async function loginYap(page, username, password) {
   page.on("response", _cookieListener);
   try {
     await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
-    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3500 });
 
-    const bootSurface = await waitForYapBootSurface(page, 30000);
+    const bootSurface = await waitForYapBootSurface(page, 18000);
     const ssSnapshot = await page.evaluate((origin) => {
       try {
         if (window.location.origin !== origin) return { origin: window.location.origin, keys: [] };
@@ -1226,8 +1226,8 @@ export async function loginYap(page, username, password) {
         }) + "\n");
         if (injected > 0) {
           await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
-          await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-          const reinjectedSurface = await waitForYapBootSurface(page, 20000).catch(() => "unknown");
+          await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3500 });
+          const reinjectedSurface = await waitForYapBootSurface(page, 14000).catch(() => "unknown");
           process.stderr.write(JSON.stringify({
             event: "yap:session",
             status: "reinject_surface",
@@ -1299,7 +1299,6 @@ export async function loginYap(page, username, password) {
       });
     }
 
-    await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
     const _loginSubmitMs = Date.now();
     const postLoginState = await waitForYapBootSurface(page, 20000);
     process.stderr.write(JSON.stringify({
@@ -1312,9 +1311,8 @@ export async function loginYap(page, username, password) {
     if (postLoginState === "app_shell") {
       await openAgendaFromAppShell(page, 20000).catch(() => {});
     } else if (postLoginState !== "agenda") {
-      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-      await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
-      await waitForAgendaReady(page, 20000).catch(() => {});
+      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3500 });
+      await waitForAgendaReady(page, 12000).catch(() => {});
     }
     await persistYapSession(page.context()).catch(() => {});
   } finally {
@@ -1339,15 +1337,15 @@ export async function openAgendaInApp(page) {
   if (!postNavUrl.startsWith(yapOrigin)) {
     throw new Error("agenda_redirected_to_login");
   }
-  const initialSurface = await waitForYapBootSurface(page, 10000).catch(() => "unknown");
-  await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+  const initialSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
+  await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
   if (initialSurface === "app_shell") {
     await openAgendaFromAppShell(page, 12000).catch(() => {});
   }
   if (await isYapLoginPage(page, 1000)) {
     await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
-    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-    const recoveredSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
+    const recoveredSurface = await waitForYapBootSurface(page, 6000).catch(() => "unknown");
     if (recoveredSurface === "app_shell") {
       await openAgendaFromAppShell(page, 12000).catch(() => {});
     }
@@ -1364,9 +1362,9 @@ export async function openAgendaInApp(page) {
     }
     if (await isYapLoginPage(page, 800)) {
       await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
-      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-      const recoveredSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
-      if (recoveredSurface === "app_shell") {
+      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
+      const recoveredSurface2 = await waitForYapBootSurface(page, 6000).catch(() => "unknown");
+      if (recoveredSurface2 === "app_shell") {
         await openAgendaFromAppShell(page, 12000).catch(() => {});
         continue;
       }
@@ -1376,26 +1374,26 @@ export async function openAgendaInApp(page) {
       await openAgendaFromAppShell(page, 12000).catch(() => {});
       continue;
     }
-    await waitForYapBootSurface(page, 5000).catch(() => {});
+    await waitForYapBootSurface(page, 3500).catch(() => {});
     await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
-    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
     if (await isYapLoginPage(page, 800)) {
       await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
-      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-      const recoveredSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
-      if (recoveredSurface === "app_shell") {
+      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
+      const recoveredSurface3 = await waitForYapBootSurface(page, 6000).catch(() => "unknown");
+      if (recoveredSurface3 === "app_shell") {
         await openAgendaFromAppShell(page, 12000).catch(() => {});
         continue;
       }
       throw new Error("agenda_redirected_to_login");
     }
-    await waitForAgendaReady(page, 8000).catch(() => {});
+    await waitForAgendaReady(page, 6000).catch(() => {});
   }
 
   if (await isYapLoginPage(page, 1000)) {
     throw new Error("agenda_redirected_to_login");
   }
-  await waitForAgendaReady(page, 20000);
+  await waitForAgendaReady(page, 12000);
 }
 
 export async function openAgendaWithRecovery(

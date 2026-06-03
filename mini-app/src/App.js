@@ -287,30 +287,31 @@ function getYapProgressLabel(action, startedAt, fallback = '') {
   const elapsed = formatProgressElapsed(startedAt);
   const hints = {
     sync: [
-      [0,   'YAP: avvio browser e ripristino sessione...'],
-      [8,   'YAP: accesso al portale in corso...'],
-      [22,  'YAP: login completato, navigazione agenda...'],
-      [32,  'YAP: apertura slot appuntamento...'],
-      [38,  'YAP: popup compilato, salvataggio agenda...'],
-      [42,  'YAP: apertura pratica veicolo...'],
-      [62,  'YAP: scrittura ODL e campi pratica...'],
-      [85,  'YAP: fase lunga, possibile attesa del portale. Non chiudere.'],
-      [120, 'YAP: ancora in risposta. Se fallisce mostro codice errore e prossima azione.'],
+      [0,   'YAP: avvio browser...'],
+      [5,   'YAP: ripristino sessione in corso...'],
+      [15,  'YAP: navigazione agenda...'],
+      [25,  'YAP: controllo duplicati...'],
+      [32,  'YAP: apertura slot e compilazione popup...'],
+      [42,  'YAP: salvataggio agenda in corso...'],
+      [52,  'YAP: scrittura pratica e ODL...'],
+      [75,  'YAP: attesa risposta portale. Non chiudere.'],
+      [100, 'YAP: risposta lenta. Se fallisce riprova.'],
     ],
     audit: [
-      [0,  'YAP: avvio browser e ripristino sessione...'],
-      [8,  'YAP: accesso al portale in corso...'],
-      [22, 'YAP: lettura campi appuntamento e tag...'],
-      [45, 'YAP: confronto audit strict in corso...'],
-      [70, 'YAP: verifica lenta, attendo risposta del portale...'],
+      [0,  'YAP: avvio browser...'],
+      [5,  'YAP: ripristino sessione...'],
+      [15, 'YAP: apertura appuntamento in agenda...'],
+      [30, 'YAP: lettura campi e tag...'],
+      [50, 'YAP: confronto audit in corso...'],
+      [75, 'YAP: attesa risposta portale...'],
     ],
     delete: [
-      [0,  'YAP: ricerca appuntamento da eliminare...'],
-      [8,  'YAP: accesso al portale in corso...'],
-      [18, 'YAP: apertura dettagli appuntamento...'],
-      [28, 'YAP: conferma eliminazione in corso...'],
-      [40, 'YAP: verifica rimozione appuntamento...'],
-      [60, 'YAP: eliminazione lenta, attendo risposta del portale...'],
+      [0,  'YAP: avvio browser...'],
+      [5,  'YAP: ripristino sessione...'],
+      [15, 'YAP: ricerca appuntamento in agenda...'],
+      [25, 'YAP: apertura dettagli...'],
+      [35, 'YAP: conferma eliminazione...'],
+      [50, 'YAP: verifica rimozione...'],
     ],
   };
   const actionHints = hints[action] || [];
@@ -1677,15 +1678,16 @@ function App() {
     yapActionProgressTimerRef.current = setInterval(() => {
       setYapActionProgress((current) => {
         if (!current || current.status !== 'running') return current;
-        const caps = { sync: 90, delete: 88, audit: 86 };
-        const cap = caps[current.action] ?? 88;
-        const increment = current.percent < 15 ? 2.5 : current.percent < 40 ? 1.2 : current.percent < 70 ? 0.6 : 0.25;
+        const caps = { sync: 93, delete: 91, audit: 91 };
+        const cap = caps[current.action] ?? 91;
+        const elapsed = (Date.now() - current.startedAt) / 1000;
+        const increment = elapsed < 10 ? 1.8 : elapsed < 30 ? 0.9 : elapsed < 60 ? 0.45 : 0.18;
         const nextPercent = Math.min(cap, Number((current.percent + increment).toFixed(1)));
         const nextLabel = getYapProgressLabel(current.action, current.startedAt, current.label);
         if (nextPercent === current.percent && nextLabel === current.label) return current;
         return { ...current, percent: nextPercent, label: nextLabel };
       });
-    }, 320);
+    }, 400);
   }, [stopYapActionProgressTimers]);
 
   const finishYapActionProgress = useCallback((label, status = 'success', clearDelay = 1400) => {
@@ -2454,7 +2456,7 @@ function App() {
     try {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
       const res = await fetchWithRetry(() =>
-        axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 180000, signal: abortController.signal })
+        axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 240000, signal: abortController.signal })
       );
       const data = normalizeYapOutcome(res.data?.data || {}, { dryRun: Boolean(apiOptions.dry_run) });
       setYapLastResult(data);
@@ -2765,12 +2767,14 @@ function App() {
     const nextAction = safeResult.next_action || safeResult?.yap?.error?.next_action || '';
     const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
     diagnosticItems.push(...buildYapTelemetryDetails(telemetry, status));
-    if (errorCode) diagnosticItems.push(`Codice ${errorCode}`);
+    if (errorCode && errorCode !== 'YAP_TIMEOUT') diagnosticItems.push(`Codice ${errorCode}`);
     if (statusReason) {
-      const prefix = String(statusReason).trim().toLowerCase() === 'audit_deferred' ? 'Stato' : 'Causa';
-      diagnosticItems.push(`${prefix} ${formatYapStatusReason(statusReason)}`);
+      const reasonStr = String(statusReason).trim().toLowerCase();
+      if (reasonStr !== 'audit_deferred' && !reasonStr.startsWith('timeout')) {
+        const prefix = reasonStr === 'audit_deferred' ? 'Stato' : 'Causa';
+        diagnosticItems.push(`${prefix} ${formatYapStatusReason(statusReason)}`);
+      }
     }
-    if (nextAction) diagnosticItems.push(`Prossima azione: ${nextAction}`);
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
