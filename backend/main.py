@@ -346,7 +346,7 @@ def _get_yap_run_lock() -> asyncio.Lock:
 
 
 class _WithAcquiredLock:
-    """Context manager che rilascia un asyncio.Lock già acquisito esternamente."""
+    """Context manager che rilascia un asyncio.Lock giÃ  acquisito esternamente."""
     def __init__(self, lock: asyncio.Lock):
         self._lock = lock
 
@@ -519,7 +519,7 @@ def require_yap_internal_auth(
 ) -> dict:
     expected_secret = (settings.yap_worker_secret or settings.secret_key).strip()
     if not expected_secret:
-        # No secret configured — internal endpoint cannot be safely authenticated.
+        # No secret configured â€” internal endpoint cannot be safely authenticated.
         # Return 503 (not 401) to signal misconfiguration vs bad credentials,
         # and to block fallthrough to whitelisted-user auth on this destructive
         # non-scoped endpoint.
@@ -1055,7 +1055,7 @@ def _project_root() -> str:
     # In container/runtime the backend code lives under /app.
     # Using dirname(__file__) keeps all derived paths writable and stable.
     root = os.path.abspath(os.path.dirname(__file__))
-    # Fallback per sviluppo locale se 'automation' non è nella stessa cartella ma è nel parent
+    # Fallback per sviluppo locale se 'automation' non Ã¨ nella stessa cartella ma Ã¨ nel parent
     if not os.path.exists(os.path.join(root, "automation")) and os.path.exists(os.path.join(os.path.dirname(root), "automation")):
         return os.path.dirname(root)
     return root
@@ -1341,7 +1341,7 @@ def _persist_yap_audit_result(
     practice.management_sync_status = status_value
     practice.management_last_sync_at = datetime.now(timezone.utc)
     practice.management_audit_result = _json.dumps(audit_result, ensure_ascii=False)
-    # Solo complete_synced è considerato successo pieno.
+    # Solo complete_synced Ã¨ considerato successo pieno.
     practice.synced = status_value == "complete_synced"
     practice.updated_by_telegram_id = user_id
     db.commit()
@@ -1396,10 +1396,10 @@ def _extract_yap_session_events(stderr_text: str) -> list:
 
 
 def _yap_appointment_saved_from_detail(detail: Any) -> bool:
-    """True se le fasi del worker indicano che l'appuntamento è già stato scritto su YAP.
+    """True se le fasi del worker indicano che l'appuntamento Ã¨ giÃ  stato scritto su YAP.
 
     Serve quando il worker viene interrotto (timeout/errore) DOPO aver salvato l'agenda
-    ma DURANTE la scrittura dell'ODL: in quel caso l'appuntamento esiste già su YAP e la
+    ma DURANTE la scrittura dell'ODL: in quel caso l'appuntamento esiste giÃ  su YAP e la
     pratica non va declassata a 'sync_failed', ma lasciata 'agenda_synced' (verifica in attesa).
     """
     if not isinstance(detail, dict):
@@ -1550,7 +1550,7 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
-                "message": "Un'altra operazione YAP è già in corso. Attendi il completamento e riprova.",
+                "message": "Un'altra operazione YAP Ã¨ giÃ  in corso. Attendi il completamento e riprova.",
                 "error_code": "YAP_BUSY",
                 "next_action": "retry",
             },
@@ -1571,7 +1571,7 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
         )
 
         # Serializziamo l'accesso al session-state condiviso.
-        # NB: usiamo una sessione DB dedicata (non quella della request) così che il
+        # NB: usiamo una sessione DB dedicata (non quella della request) cosÃ¬ che il
         # commit dello stato di sessione non persista per sbaglio modifiche ORM in sospeso.
         persist_session_state = db is not None
         session_file_path = os.path.join(root, "automation", "artifacts", "yap", "session-state.json")
@@ -1814,6 +1814,12 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 _cur = _p.get("elapsed_ms") or 0
                 _phase_parts_fail.append(f"{_p['phase']}:{_p.get('status','')}({_cur}ms,+{_cur-_prev_ms_fail}ms)")
                 _prev_ms_fail = _cur
+            if _worker_phases_fail:
+                failure_detail["worker_phases"] = _worker_phases_fail
+            if err:
+                failure_detail["stderr_tail"] = err[-4000:]
+            if out:
+                failure_detail["stdout_tail"] = out[-2000:]
             logger.error(
                 "YAP script failed (%s): %s phases=[%s]",
                 script_name,
@@ -2176,7 +2182,7 @@ async def create_practice(
     if not practice_data.contexts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Almeno un contesto è obbligatorio",
+            detail="Almeno un contesto Ã¨ obbligatorio",
         )
 
     practice_data.appointment_time = _normalize_slot_time(practice_data.appointment_time)
@@ -2330,7 +2336,7 @@ async def delete_practice(
                 if failure_status == "blocked_by_odl":
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
-                        detail="Impossibile cancellare la pratica: l'appuntamento YAP è collegato a un ordine di lavoro",
+                        detail="Impossibile cancellare la pratica: l'appuntamento YAP Ã¨ collegato a un ordine di lavoro",
                     )
                 # Se non trovato su YAP, consideriamo la pratica gia' rimossa lato agenda.
                 if failure_status not in {"not_found"} and result.get("found") is not False:
@@ -2594,7 +2600,7 @@ async def sync_practice_to_yap(
         except HTTPException as worker_exc:
             detail = worker_exc.detail if isinstance(worker_exc.detail, dict) else {"message": str(worker_exc.detail)}
             runtime_telemetry = _extract_yap_runtime_telemetry(detail)
-            # Se l'agenda è già stata scritta su YAP (fase 'save'/'done') ma il worker è stato
+            # Se l'agenda Ã¨ giÃ  stata scritta su YAP (fase 'save'/'done') ma il worker Ã¨ stato
             # interrotto durante la scrittura ODL (es. timeout a budget esaurito), NON marcare la
             # pratica come fallita: l'appuntamento esiste. Stato 'agenda_synced' + Verifica YAP.
             if _yap_appointment_saved_from_detail(detail):
@@ -2610,7 +2616,7 @@ async def sync_practice_to_yap(
                     success=True,
                     data={
                         "status": "agenda_synced",
-                        "message": "Appuntamento scritto su YAP. La scrittura ODL si è interrotta (timeout): premi Verifica YAP per completare i controlli.",
+                        "message": "Appuntamento scritto su YAP. La scrittura ODL si Ã¨ interrotta (timeout): premi Verifica YAP per completare i controlli.",
                         "status_reason": "audit_deferred",
                         "error_code": None,
                         "next_action": "Verifica YAP",
@@ -2702,8 +2708,8 @@ async def sync_practice_to_yap(
             if external_id:
                 practice.management_external_id = str(external_id)
             # Audit inline rimosso: la sync scrive su YAP e salva stato 'agenda_synced'.
-            # L'audit (più lento, apre pratica+ODL) viene eseguito solo on-demand via
-            # il pulsante "Verifica YAP", così la sync completa in ~30-60s invece di 300s+.
+            # L'audit (piÃ¹ lento, apre pratica+ODL) viene eseguito solo on-demand via
+            # il pulsante "Verifica YAP", cosÃ¬ la sync completa in ~30-60s invece di 300s+.
             practice.synced = True
             practice.management_sync_status = "agenda_synced"
             practice.management_last_sync_at = datetime.now(timezone.utc)
@@ -3077,7 +3083,7 @@ async def get_yap_mapping_preview_from_form(
     body: PracticeFullSave,
     user_data: dict = Depends(require_whitelisted_user),
 ):
-    """Anteprima YAP da dati form (senza salvare). Contesti mini-app = fonte di verità."""
+    """Anteprima YAP da dati form (senza salvare). Contesti mini-app = fonte di veritÃ ."""
     try:
         from automation_service import AutomationService
         from yap_mapping import build_yap_preview
@@ -3161,7 +3167,7 @@ async def test_error_channel(
         )
 
     result = await notifier.notify_error(
-        error_message="🧪 Questo è un messaggio di test dal backend Giorgio",
+        error_message="ðŸ§ª Questo Ã¨ un messaggio di test dal backend Giorgio",
         context={
             "practice_id": None,
             "worker": "test-endpoint",
@@ -3244,7 +3250,7 @@ async def create_section(
             if not non_empty:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Almeno una riga descrittiva è obbligatoria per contesto",
+                    detail="Almeno una riga descrittiva Ã¨ obbligatoria per contesto",
                 )
             rows_json = _json.dumps(non_empty)
         else:
