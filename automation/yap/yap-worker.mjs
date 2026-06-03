@@ -2310,6 +2310,29 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
     saveAttemptsUsed = attempt;
     logPhase("save_attempt", `try_${attempt}`);
     try {
+      // Dump DOM del popup al primo tentativo per diagnostica struttura bottone
+      if (attempt === 1) {
+        const _diagDump = await safeEvaluate(page, () => {
+          const isVisible = (el) => {
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+          };
+          const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")]
+            .filter(isVisible)
+            .sort((a, b) => b.querySelectorAll("*").length - a.querySelectorAll("*").length)[0];
+          if (!popup) return null;
+          return [...popup.querySelectorAll("*")].filter(isVisible).slice(0, 50).map((el) => ({
+            tag: el.tagName,
+            cls: (el.className || "").slice(0, 80),
+            txt: (el.textContent || "").trim().slice(0, 40),
+            rect: (() => { const r = el.getBoundingClientRect(); return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; })(),
+            pe: window.getComputedStyle(el).pointerEvents,
+          }));
+        }).catch(() => null);
+        if (_diagDump) logPhase("save_click", "popup_dom_dump", { elements: _diagDump.length, dump: _diagDump });
+        else logPhase("save_click", "popup_dom_dump", { elements: 0, note: "no popup found" });
+      }
       const popupState = await readPopupState();
       const candidateCount = popupState?.saveCandidates?.length || 0;
       const candidateIndex = Math.min(Math.max(0, attempt - 1), Math.max(0, candidateCount - 1));
