@@ -2764,7 +2764,6 @@ function App() {
     }
     const errorCode = safeResult.error_code || safeResult?.yap?.error?.error_code || null;
     const statusReason = safeResult.status_reason || safeResult?.yap?.error?.reason || null;
-    const nextAction = safeResult.next_action || safeResult?.yap?.error?.next_action || '';
     const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
     diagnosticItems.push(...buildYapTelemetryDetails(telemetry, status));
     if (errorCode && errorCode !== 'YAP_TIMEOUT') diagnosticItems.push(`Codice ${errorCode}`);
