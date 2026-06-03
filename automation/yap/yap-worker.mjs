@@ -2247,17 +2247,24 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
       .map((el) => {
         const rawText = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").trim();
         const text = rawText.toLowerCase();
+        // FIX salvataggio: scarta i contenitori. Il popup contiene la scritta
+        // "Appuntamento salvato", quindi includes("salva") matchava l'intero popup
+        // e cliccavamo il centro (746,300) invece dell'icona -> RPC mai inviata.
+        if (rawText.length > 14) return null;
         if (!(text === "check" || text.includes("salva") || text.includes("save") || text.includes("floppy"))) return null;
 
+        // FIX salvataggio: promuovi SOLO a un vero ancestor cliccabile
+        // (A/BUTTON/[role=button]/[onclick]); NON risalire a TD/DIV generici,
+        // altrimenti il click finisce al centro del popup. In GWT l'evento bolla
+        // comunque dall'icona al gestore, quindi cliccare l'icona stessa basta.
         let clickTarget = el;
         let node = el.parentElement;
-        for (let i = 0; i < 5 && node && node !== popup; i += 1) {
+        for (let i = 0; i < 4 && node && node !== popup; i += 1) {
           const tag = node.tagName;
           if (tag === "A" || tag === "BUTTON" || node.getAttribute("onclick") || node.getAttribute("role") === "button") {
             clickTarget = node;
             break;
           }
-          if (tag === "TD" || tag === "DIV") clickTarget = node;
           node = node.parentElement;
         }
 
