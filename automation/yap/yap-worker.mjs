@@ -2208,6 +2208,113 @@ async function fillAppointmentPopup(page, job) {
   }
 }
 
+// Audit inline: verifica i dati appena salvati senza aprire nuovo browser
+async function runInlineAudit(page, job, managementWrite) {
+  const expected = {
+    cosa: job.appointment?.title || job.appointment?.cosa || "",
+    date: job.appointment?.date || "",
+    time: job.appointment?.time || "",
+    duration: job.appointment?.duration || 30,
+    plate: job.customer?.plate || "",
+    notes: job.notes?.internal || "",
+  };
+
+  const present = [];
+  const missing = [];
+
+  // Chiudi eventuali popup aperti
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(200);
+
+  // Clicca lo slot per riaprire il popup
+  try {
+    await clickApproximateSlot(page, expected.time);
+  } catch (e) {
+    return { verified: false, error: "Slot not found for audit", present, missing };
+  }
+
+  await page.waitForTimeout(600);
+
+  // Leggi stato popup
+  const popupData = await safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const popups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")].filter(isVisible);
+    const popup = popups[0];
+    if (!popup) return null;
+    const inputs = [...popup.querySelectorAll("input, textarea")].filter(isVisible).map((i) => ({
+      value: i.value || "",
+      placeholder: i.placeholder || "",
+    }));
+    const text = popup.textContent || "";
+    return { inputs, text, hasCosa: text.includes("Cosa"), hasDettagli: text.includes("Dettagli") };
+  }).catch(() => null);
+
+  if (!popupData) {
+    return { verified: false, error: "Popup not found for audit", present, missing };
+  }
+
+  // Verifica campi base
+  const inputValues = popupData.inputs.map((i) => i.value).join(" ");
+  if (expected.cosa && inputValues.toLowerCase().includes(expected.cosa.toLowerCase())) {
+    present.push({ field: "cosa", expected: expected.cosa });
+  } else if (expected.cosa) {
+    missing.push({ field: "cosa", expected: expected.cosa, found: inputValues.slice(0, 100) });
+  }
+
+  // Verifica data
+  const dateIt = expected.date.replace(/-/g, "/");
+  if (inputValues.includes(dateIt) || inputValues.includes(expected.date)) {
+    present.push({ field: "date", expected: expected.date });
+  } else {
+    missing.push({ field: "date", expected: expected.date, found: inputValues.slice(0, 100) });
+  }
+
+  // Verifica targa se presente
+  if (expected.plate) {
+    const plateUpper = expected.plate.toUpperCase();
+    if (inputValues.toUpperCase().includes(plateUpper) || popupData.text.toUpperCase().includes(plateUpper)) {
+      present.push({ field: "plate", expected: expected.plate });
+    } else {
+      missing.push({ field: "plate", expected: expected.plate });
+    }
+  }
+
+  // Verifica ODL se scritto
+  if (managementWrite?.ok && expected.notes) {
+    // Clicca per aprire pratica se necessario
+    try {
+      const hasOdl = await safeEvaluate(page, (notes) => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const allText = document.body.innerText || "";
+        return allText.toLowerCase().includes(notes.toLowerCase().slice(0, 30));
+      }, expected.notes).catch(() => false);
+      if (hasOdl) {
+        present.push({ field: "odl_notes", expected: expected.notes.slice(0, 50) });
+      } else {
+        missing.push({ field: "odl_notes", expected: expected.notes.slice(0, 50) });
+      }
+    } catch (_) {
+      missing.push({ field: "odl_notes", expected: expected.notes.slice(0, 50), error: "check failed" });
+    }
+  }
+
+  const verified = missing.length === 0 && present.length >= 2; // almeno cosa e data
+  return {
+    verified,
+    present,
+    missing,
+    summary: { present: present.length, missing: missing.length, fields: present.map((p) => p.field) },
+  };
+}
+
 async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
   let putResponse = null;
   let saveAttemptsUsed = 0;
@@ -2816,9 +2923,30 @@ async function runYapAutomation(job, args) {
       }));
       logPhase("odl", managementWrite?.ok === false ? "failed" : "done", { ok: managementWrite?.ok });
     }
+
+    // Audit inline: verifica immediatamente che l'appuntamento sia stato scritto correttamente
+    logPhase("inline_audit", "starting");
+    let inlineAudit = null;
+    try {
+      inlineAudit = await runInlineAudit(page, job, managementWrite);
+      logPhase("inline_audit", inlineAudit?.verified ? "verified" : "partial", {
+        present: inlineAudit?.present?.length || 0,
+        missing: inlineAudit?.missing?.length || 0,
+      });
+    } catch (auditErr) {
+      logPhase("inline_audit", "error", { error: auditErr.message });
+    }
+
+    const allVerified = inlineAudit?.verified === true;
+    const finalStatus = allVerified ? "complete_synced" : "agenda_synced";
+    const finalMessage = allVerified
+      ? "Appuntamento YAP scritto e verificato: tutto ok."
+      : "Appuntamento scritto su YAP. Verifica YAP per controllare i campi.";
+
     return {
       saved: true,
       mode: "commit",
+      status: finalStatus,
       putAction: {
         detected: Boolean(putResponse),
         status: putResponse?.status(),
@@ -2829,11 +2957,12 @@ async function runYapAutomation(job, args) {
       telemetry: buildYapTelemetry({
         runtime,
         startedAtMs: _runStart,
-        extra: { saveAttempts: saveAttemptsUsed },
+        extra: { saveAttempts: saveAttemptsUsed, audit: inlineAudit?.summary },
       }),
       managementWrite,
       write_report: managementWrite,
-      message: "Appuntamento salvato su YAP.",
+      inline_audit: inlineAudit,
+      message: finalMessage,
     };
   } catch (error) {
     const errorSuffix = `${job.practiceId || "payload"}-${Date.now()}`;
