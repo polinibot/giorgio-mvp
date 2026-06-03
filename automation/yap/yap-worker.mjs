@@ -2326,8 +2326,36 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
         candidateCount,
         candidateScore: candidate.score,
       });
-      await page.mouse.click(candidate.x, candidate.y);
-      logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex });
+      // DOM .click() con bubbling: cerca lo SPAN "check" nel popup e chiama
+      // .click() su di esso — il click bolla fino al GWT handler sul TD/wrapper.
+      // Più affidabile di page.mouse.click(coordinate) che bypassa il bubbling GWT.
+      const domClicked = await safeEvaluate(page, () => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")]
+          .find((el) => {
+            if (!isVisible(el)) return false;
+            const t = (el.textContent || "").toLowerCase();
+            if (t.includes("dettagli appuntamento")) return true;
+            return [...el.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible).length >= 5;
+          });
+        if (!popup) return "no_popup";
+        // Cerca lo SPAN/elemento con testo esatto "check" (icona Material Icons = salva)
+        const checkEl = [...popup.querySelectorAll("span, div, a, button")]
+          .filter(isVisible)
+          .find((el) => (el.textContent || "").trim() === "check");
+        if (!checkEl) return "no_check_el";
+        checkEl.click();
+        return "clicked:" + checkEl.tagName;
+      }).catch(() => false);
+      if (!domClicked || domClicked === "no_popup" || domClicked === "no_check_el") {
+        // Fallback: mouse click nativo sulle coordinate
+        await page.mouse.click(candidate.x, candidate.y);
+      }
+      logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex, domClicked });
 
       // Aspetta fino a 3s che il popup si chiuda: GWT processa il click in modo asincrono
       let popupAfterClick = null;
