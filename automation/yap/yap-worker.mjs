@@ -2231,14 +2231,17 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
       putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
         // Individua il bottone salva tramite DOM per ottenere coordinate
         const btnInfo = await safeEvaluate(page, () => {
-          const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
-            .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
-          if (!popup) return { found: false, reason: "popup_not_found" };
           const isVisible = (el) => {
             const rect = el.getBoundingClientRect();
             const style = window.getComputedStyle(el);
             return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
           };
+          // Cerca il popup appuntamento: prima per titolo esatto, poi qualsiasi popup visibile
+          const allPopups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")].filter(isVisible);
+          const popup = allPopups.find((el) => (el.textContent || "").includes("Dettagli appuntamento"))
+            || allPopups.find((el) => (el.textContent || "").includes("appuntamento"))
+            || allPopups[0];
+          if (!popup) return { found: false, reason: "popup_not_found" };
           const btns = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button']")]
             .filter(isVisible)
             .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
@@ -2250,8 +2253,9 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
             cls: el.className || "",
           }));
           const saveBtn = btns.find((el) => {
-            const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
-            return text.includes("salva") || text.includes("save") || text.includes("floppy") || text.includes("ok");
+            const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").trim().toLowerCase();
+            // "check" = icona Material Icons del bottone conferma/salva in GWT
+            return text === "check" || text.includes("salva") || text.includes("save") || text.includes("floppy");
           });
           if (!saveBtn) return { found: false, reason: "save_button_not_found", buttonsCount: btns.length, allBtnInfo };
           const rect = saveBtn.getBoundingClientRect();
