@@ -762,9 +762,10 @@ export async function waitForYapAction(page, actionName, trigger, timeout = 1500
 
 async function navigateWithRetry(page, url, options = {}, attempts = 3) {
   let lastError = null;
+  const opts = { timeout: 15000, ...options };
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await page.goto(url, options);
+      return await page.goto(url, opts);
     } catch (error) {
       lastError = error;
       const message = String(error?.message || "");
@@ -1171,7 +1172,7 @@ export async function loginYap(page, username, password) {
     await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3500 });
 
     _logLogin("waiting_boot_surface");
-    const bootSurface = await waitForYapBootSurface(page, 18000);
+    const bootSurface = await waitForYapBootSurface(page, 10000).catch(() => "unknown");
     _logLogin("boot_surface", { surface: bootSurface });
     const ssSnapshot = await page.evaluate((origin) => {
       try {
@@ -1288,8 +1289,8 @@ export async function loginYap(page, username, password) {
 
     _logLogin("filling_credentials");
     await page.waitForTimeout(100);
-    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-    await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 20000 });
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
+    await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 10000 });
     _logLogin("input_ready");
     const filled = await page.evaluate(({ u, p }) => {
       const userEl = document.querySelector('input[name="u"]');
@@ -1331,7 +1332,7 @@ export async function loginYap(page, username, password) {
     _logLogin("submitted");
     const _loginSubmitMs = Date.now();
     _logLogin("waiting_post_login");
-    const postLoginState = await waitForYapBootSurface(page, 20000);
+    const postLoginState = await waitForYapBootSurface(page, 15000).catch(() => "unknown");
     _logLogin("post_login_surface", { surface: postLoginState, ms: Date.now() - _loginSubmitMs });
     process.stderr.write(JSON.stringify({
       event: "yap:session",
@@ -1341,7 +1342,7 @@ export async function loginYap(page, username, password) {
       ts: new Date().toISOString(),
     }) + "\n");
     if (postLoginState === "app_shell") {
-      await openAgendaFromAppShell(page, 20000).catch(() => {});
+      await openAgendaFromAppShell(page, 12000).catch(() => {});
     } else if (postLoginState !== "agenda") {
       await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3500 });
       await waitForAgendaReady(page, 12000).catch(() => {});
@@ -1384,8 +1385,9 @@ export async function openAgendaInApp(page) {
   }
   if (await isYapLoginPage(page, 1000)) {
     _logShared("openAgenda", "login_redirect_1", { ms: Date.now() - _t0 });
-    await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
-    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
+    await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }, 1).catch(() => {});
+    _logShared("openAgenda", "recovery1_nav_done", { url: page.url().slice(0, 80), ms: Date.now() - _t0 });
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 2000 });
     const recoveredSurface = await waitForYapBootSurface(page, 6000).catch(() => "unknown");
     _logShared("openAgenda", "recovery1_surface", { surface: recoveredSurface, ms: Date.now() - _t0 });
     if (recoveredSurface === "login" || recoveredSurface === "unknown") {
