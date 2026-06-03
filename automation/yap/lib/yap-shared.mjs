@@ -787,7 +787,8 @@ export async function gotoAgendaDate(page, isoDate) {
   const targetDay = String(target.getDate());
   const targetNeedle = `${targetDay} ${Object.keys(months)[target.getMonth()]} ${target.getFullYear()}`;
   const currentMonthIndex = async () => {
-    const text = normalize(await page.locator(".view-switch").first().innerText({ timeout: 5000 }));
+    const text = normalize(await page.locator(".view-switch").first().innerText({ timeout: 600 }).catch(() => ""));
+    if (!text) return null;
     const [monthName, yearText] = text.split(/\s+/);
     if (!(monthName in months) || !yearText) return null;
     return Number(yearText) * 12 + months[monthName];
@@ -815,11 +816,19 @@ export async function gotoAgendaDate(page, isoDate) {
     await page.waitForTimeout(250).catch(() => {});
   }
 
+  let consecutiveNulls = 0;
   for (let guard = 0; guard < 36; guard += 1) {
     const currentIndex = await currentMonthIndex();
-    if (currentIndex == null || currentIndex === targetIndex) break;
+    if (currentIndex == null) {
+      consecutiveNulls += 1;
+      if (consecutiveNulls >= 3) break;
+      await page.waitForTimeout(200).catch(() => {});
+      continue;
+    }
+    consecutiveNulls = 0;
+    if (currentIndex === targetIndex) break;
     await page.locator(currentIndex > targetIndex ? ".prev-button" : ".next-button").first().click();
-    await page.waitForTimeout(120);
+    await page.waitForTimeout(80);
   }
   await page.waitForTimeout(250).catch(() => {});
 
@@ -875,21 +884,20 @@ export async function gotoAgendaDate(page, isoDate) {
   } else {
     await page.keyboard.press("Home").catch(() => {});
   }
-  await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
-  await waitForAgendaReady(page, 10000).catch(() => {});
-  for (let loadingGuard = 0; loadingGuard < 20; loadingGuard += 1) {
+  await waitForAgendaReady(page, 5000).catch(() => {});
+  for (let loadingGuard = 0; loadingGuard < 12; loadingGuard += 1) {
     if (await agendaShowsTargetDate()) return true;
     const state = await readAgendaViewportState(page).catch(() => null);
     const selectedMatches = state?.selectedMiniDay === targetDay;
     const centerMentionsTargetMonth = normalize(state?.centerDateLabel || "").includes(normalize(`${Object.keys(months)[target.getMonth()]} ${target.getFullYear()}`));
     const loadingVisible = await agendaLoadingVisible();
     if (!loadingVisible && !selectedMatches && !centerMentionsTargetMonth) break;
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(280);
   }
-  for (let verify = 0; verify < 8; verify += 1) {
+  for (let verify = 0; verify < 5; verify += 1) {
     if (await agendaShowsTargetDate()) return true;
-    await page.waitForTimeout(350);
-    if ((verify === 2 || verify === 5) && moved) {
+    await page.waitForTimeout(280);
+    if ((verify === 1 || verify === 3) && moved) {
       await page.mouse.dblclick(dayTarget.x, dayTarget.y).catch(() => {});
     }
   }
