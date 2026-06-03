@@ -2229,7 +2229,8 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
     logPhase("save_attempt", `try_${attempt}`);
     try {
       putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
-        const saved = await safeEvaluate(page, () => {
+        // Individua il bottone salva tramite DOM per ottenere coordinate
+        const btnInfo = await safeEvaluate(page, () => {
           const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
             .find((el) => (el.textContent || "").includes("Dettagli appuntamento"));
           if (!popup) return { found: false, reason: "popup_not_found" };
@@ -2245,17 +2246,23 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
             const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").toLowerCase();
             return text.includes("salva") || text.includes("save") || text.includes("floppy") || text.includes("done") || text.includes("check");
           }) || btns[0];
-          if (saveBtn) { 
-            saveBtn.click(); 
-            return { found: true, buttonText: saveBtn.textContent || saveBtn.title || "unknown" }; 
-          }
-          return { found: false, reason: "save_button_not_found", buttonsCount: btns.length };
+          if (!saveBtn) return { found: false, reason: "save_button_not_found", buttonsCount: btns.length };
+          const rect = saveBtn.getBoundingClientRect();
+          return {
+            found: true,
+            buttonText: saveBtn.textContent || saveBtn.getAttribute("title") || saveBtn.getAttribute("alt") || "unknown",
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2,
+          };
         });
-        
-        if (!saved || !saved.found) {
-          throw new Error(`Bottone salva non trovato: ${saved?.reason || "unknown"}`);
+
+        if (!btnInfo || !btnInfo.found) {
+          throw new Error(`Bottone salva non trovato: ${btnInfo?.reason || "unknown"}`);
         }
-        logPhase("save_click", "clicked", { buttonText: saved.buttonText });
+        logPhase("save_click", "clicking", { buttonText: btnInfo.buttonText, x: Math.round(btnInfo.x), y: Math.round(btnInfo.y) });
+        // Click Playwright nativo tramite coordinate — funziona anche con GWT e handler custom
+        await page.mouse.click(btnInfo.x, btnInfo.y);
+        logPhase("save_click", "clicked", { buttonText: btnInfo.buttonText });
       }, 10000 + (attempt - 1) * 3000); // Timeout: 10s, 13s, 16s
       
       if (putResponse) {
