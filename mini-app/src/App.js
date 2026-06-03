@@ -2527,9 +2527,9 @@ function App() {
     yapAbortControllerRef.current = abortController;
     try {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
-      const res = await fetchWithRetry(() =>
-        axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 240000, signal: abortController.signal })
-      );
+      // NON ritentare in automatico: la sync e' un POST non idempotente che apre il
+      // browser e scrive su YAP. Il retry raddoppiava l'esecuzione ("appena finito, riparte").
+      const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 240000, signal: abortController.signal });
       const data = normalizeYapOutcome(res.data?.data || {}, { dryRun: Boolean(apiOptions.dry_run) });
       setYapLastResult(data);
       rememberResponse('yap.sync');
@@ -2616,9 +2616,8 @@ function App() {
       const requestOptions = inferredTime ? { ...options, time: inferredTime } : { ...options };
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
       updateYapActionProgress({ percent: 22, label: 'YAP: accesso al portale in corso...' });
-      const res = await fetchWithRetry(() =>
-        axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
-      );
+      // NON ritentare in automatico: la delete e' non idempotente lato YAP.
+      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
@@ -2682,9 +2681,8 @@ function App() {
     yapAbortControllerRef.current = auditAbortController;
     try {
       rememberRequest('yap.audit', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/audit`, params: getAuthParams(), headers: getHeaders() });
-      const res = await fetchWithRetry(() =>
-        axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 255000, signal: auditAbortController.signal })
-      );
+      // NON ritentare in automatico: l'audit apre il browser; un retry lanciava un secondo run.
+      const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 255000, signal: auditAbortController.signal });
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.audit');
