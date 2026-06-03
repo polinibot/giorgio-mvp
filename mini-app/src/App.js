@@ -134,6 +134,16 @@ function isLocalDevHost() {
   return ['localhost', '127.0.0.1'].includes(window.location.hostname);
 }
 
+function extractYapTelemetry(result) {
+  const candidates = [
+    result?.telemetry,
+    result?.audit?.telemetry,
+    result?.yap?.telemetry,
+    result?.yap?.result?.telemetry,
+  ];
+  return candidates.find((candidate) => candidate && typeof candidate === 'object') || null;
+}
+
 function normalizeYapResult(rawResult, { dryRun = false } = {}) {
   const result = rawResult || {};
   const rawStatus = String(result.status || result.mode || '').trim();
@@ -165,11 +175,13 @@ function normalizeYapResult(rawResult, { dryRun = false } = {}) {
   const retryable = typeof result.retryable === 'boolean'
     ? result.retryable
     : (status === 'sync_failed' || status === 'not_ready');
+  const telemetry = extractYapTelemetry(result);
 
   return {
     ...result,
     status,
     message,
+    telemetry,
     retryable,
     status_reason: statusReason,
     error_code: errorCode,
@@ -215,6 +227,55 @@ function workerPhasesToLabel(workerPhases) {
   const statusMap = { starting: 'avvio', done: 'completato', ready: 'pronto', failed: 'fallito', scanning: 'scansione', opening: 'apertura', filled: 'compilato', found: 'trovato', not_found: 'non trovato', partial: 'parziale' };
   const statusLabel = statusMap[last.status] || last.status;
   return `YAP: ${phaseLabel} ${statusLabel} (${elapsedS}s)`;
+}
+
+function summarizePhaseProgress(phaseTimeline) {
+  const phases = Array.isArray(phaseTimeline) ? phaseTimeline : [];
+  if (!phases.length) return '';
+  const done = phases.filter((phase) => phase?.status === 'completed').length;
+  return `${done}/${phases.length} fasi`;
+}
+
+function formatYapElapsedMs(totalElapsedMs) {
+  const totalSeconds = Math.max(0, Math.round((Number(totalElapsedMs) || 0) / 1000));
+  if (!totalSeconds) return '';
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${String(seconds).padStart(2, '0')}s` : `${totalSeconds}s`;
+}
+
+function formatYapSessionLabel(telemetry, status) {
+  if (!telemetry || typeof telemetry !== 'object') return '';
+  if (telemetry.used_persistent_profile || telemetry.session_mode === 'persistent_profile') {
+    return 'Sessione riusata';
+  }
+  if (telemetry.session_mode === 'browser_context' && status !== 'complete_synced' && status !== 'duplicate') {
+    return 'Sessione isolata';
+  }
+  return '';
+}
+
+function formatYapProfileLockLabel(profileLock) {
+  if (!profileLock || typeof profileLock !== 'object') return '';
+  if (profileLock.acquired === false) return 'Profilo occupato, fallback sessione isolata';
+  if (Number(profileLock.wait_ms) > 0) {
+    const elapsed = formatYapElapsedMs(profileLock.wait_ms);
+    return elapsed ? `Lock profilo ${elapsed}` : 'Lock profilo';
+  }
+  return '';
+}
+
+function buildYapTelemetryDetails(telemetry, status) {
+  if (!telemetry || typeof telemetry !== 'object') return [];
+  const details = [];
+  if (telemetry.agenda_unstable) details.push('Agenda instabile rilevata');
+  else if (telemetry.empty_confirmed) details.push('Agenda vuota confermata');
+  if (telemetry.session_mode === 'browser_context' && telemetry.profile_lock?.acquired === false) {
+    details.push('Profilo occupato al momento del lock');
+  }
+  const profileLockLabel = formatYapProfileLockLabel(telemetry.profile_lock);
+  if (profileLockLabel) details.push(profileLockLabel);
+  return details;
 }
 
 function formatProgressElapsed(startedAt) {
@@ -2462,10 +2523,18 @@ function App() {
     updateYapActionProgress({ percent: 10, label: 'YAP: avvio browser e ripristino sessione...' });
     await waitForNextPaint();
     try {
-      rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders() });
+      const listPractice = Array.isArray(practices)
+        ? practices.find((practiceItem) => String(practiceItem.id) === String(id))
+        : null;
+      const inferredTime = options.time
+        || (String(selectedPracticeId || '') === String(id) ? detailData?.practice?.appointment_time : '')
+        || listPractice?.appointment_time
+        || '';
+      const requestOptions = inferredTime ? { ...options, time: inferredTime } : { ...options };
+      rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
       updateYapActionProgress({ percent: 22, label: 'YAP: accesso al portale in corso...' });
       const res = await fetchWithRetry(() =>
-        axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: options, params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
+        axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 180000 })
       );
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
@@ -2508,7 +2577,7 @@ function App() {
     } finally {
       setYapDeleteLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, selectedPracticeId, loadDashboard, searchQuery, activeFilters, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, selectedPracticeId, detailData, practices, loadDashboard, searchQuery, activeFilters, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
 
   const auditYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -2648,25 +2717,37 @@ function App() {
     const isSuccess = status === 'complete_synced' || status === 'deleted' || status === 'not_found';
     const isWarning = ['partial_synced', 'agenda_synced', 'synced', 'not_ready', 'blocked_by_odl', 'dry_run'].includes(status);
     const toneClass = isSuccess ? 'yap-success' : (isWarning ? 'yap-warning' : 'yap-error');
-    const meta = [];
-    if (Number.isFinite(safeResult.preSync?.score)) meta.push(`Pre-sync ${safeResult.preSync.score}/100`);
-    if (safeResult.yap?.result?.telemetry?.saveAttempts) meta.push(`${safeResult.yap.result.telemetry.saveAttempts} tentativi`);
-    if (safeResult.screenshot) meta.push('Screenshot salvato');
-    if (safeResult.duplicate) meta.push('Dedup attivo');
+    const telemetry = safeResult.telemetry || extractYapTelemetry(safeResult);
+    const primaryMeta = [];
+    const diagnosticItems = [];
+    if (Number.isFinite(safeResult.preSync?.score)) primaryMeta.push(`Pre-sync ${safeResult.preSync.score}/100`);
+    const saveAttempts = Number(telemetry?.saveAttempts || safeResult.yap?.result?.telemetry?.saveAttempts || 0);
+    if (saveAttempts > 0) primaryMeta.push(`${saveAttempts} ${saveAttempts === 1 ? 'tentativo' : 'tentativi'}`);
+    const phaseProgress = summarizePhaseProgress(safeResult.phase_timeline);
+    if (phaseProgress) primaryMeta.push(phaseProgress);
+    const elapsedLabel = formatYapElapsedMs(telemetry?.total_elapsed_ms);
+    if (elapsedLabel) primaryMeta.push(`Tempo ${elapsedLabel}`);
+    const sessionLabel = formatYapSessionLabel(telemetry, status);
+    if (sessionLabel) primaryMeta.push(sessionLabel);
+    if (safeResult.screenshot) diagnosticItems.push('Screenshot salvato');
+    if (safeResult.duplicate) diagnosticItems.push('Dedup attivo');
     if (audit) {
       const auditCount = (audit.present?.length || 0) + (audit.missing?.length || 0) + (audit.mismatch?.length || 0);
       const auditIncomplete = audit.completed === false || audit.technical_failure === true || audit.status_reason === 'audit_not_completed';
       if (auditIncomplete && auditCount === 0) {
-        meta.push('Audit non completato');
+        diagnosticItems.push('Audit non completato');
       } else {
-        meta.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
+        diagnosticItems.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
       }
     }
     const workerPhaseLabel = workerPhasesToLabel(safeResult.worker_phases);
     if (workerPhaseLabel) {
-      meta.push(workerPhaseLabel);
-    } else if (Array.isArray(safeResult.phase_timeline) && safeResult.phase_timeline.length) {
-      meta.push(summarizePhaseTimeline(safeResult.phase_timeline));
+      diagnosticItems.push(workerPhaseLabel);
+    } else {
+      const phaseSummary = summarizePhaseTimeline(safeResult.phase_timeline);
+      const hasFailedPhase = Array.isArray(safeResult.phase_timeline)
+        && safeResult.phase_timeline.some((phase) => phase?.status === 'failed');
+      if (phaseSummary && (!phaseProgress || hasFailedPhase)) diagnosticItems.push(phaseSummary);
     }
     const writeReport = safeResult.write_report || safeResult.yap?.result?.write_report || null;
     if (writeReport?.ok === false) {
@@ -2677,18 +2758,19 @@ function App() {
         writeReport.parts?.error ? formatYapWriteReportIssue('ricambi', writeReport.parts.error) : null,
         writeReport.waste?.error ? formatYapWriteReportIssue('smaltimento', writeReport.waste.error) : null,
       ].filter(Boolean);
-      meta.push(issues.length ? `Post-scrittura: ${issues.slice(0, 2).join(', ')}` : 'Post-scrittura: controlli incompleti');
+      diagnosticItems.push(issues.length ? `Post-scrittura: ${issues.slice(0, 2).join(', ')}` : 'Post-scrittura: controlli incompleti');
     }
     const errorCode = safeResult.error_code || safeResult?.yap?.error?.error_code || null;
     const statusReason = safeResult.status_reason || safeResult?.yap?.error?.reason || null;
     const nextAction = safeResult.next_action || safeResult?.yap?.error?.next_action || '';
     const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
-    if (errorCode) meta.push(`Codice ${errorCode}`);
+    diagnosticItems.push(...buildYapTelemetryDetails(telemetry, status));
+    if (errorCode) diagnosticItems.push(`Codice ${errorCode}`);
     if (statusReason) {
       const prefix = String(statusReason).trim().toLowerCase() === 'audit_deferred' ? 'Stato' : 'Causa';
-      meta.push(`${prefix} ${formatYapStatusReason(statusReason)}`);
+      diagnosticItems.push(`${prefix} ${formatYapStatusReason(statusReason)}`);
     }
-    if (nextAction) meta.push(`Azione ${nextAction}`);
+    if (nextAction) diagnosticItems.push(`Prossima azione: ${nextAction}`);
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
     const canAudit = showRetry && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
@@ -2707,7 +2789,20 @@ function App() {
           <div>
             <div className="yap-result-status">{titleMap[status] || titleMap.unknown}</div>
             {message && <div className="yap-result-message">{message}</div>}
-            {meta.length > 0 && <div className="yap-result-meta">{meta.join(' • ')}</div>}
+            {primaryMeta.length > 0 && (
+              <div className="yap-result-badges">
+                {primaryMeta.map((item) => (
+                  <span key={item} className="yap-result-badge">{item}</span>
+                ))}
+              </div>
+            )}
+            {diagnosticItems.length > 0 && (
+              <div className="yap-result-details">
+                {diagnosticItems.map((item) => (
+                  <div key={item} className="yap-result-detail">{item}</div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         {(canRetry || canAudit || canDelete || showSyncHint || showAuditHint || showDeleteHint) && (

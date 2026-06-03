@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -177,6 +178,7 @@ export async function launchChromiumWithFallback(chromium, baseLaunchOptions, { 
 // catturare manualmente il cookie di sessione (che è HttpOnly e non esposto da storageState).
 export const YAP_CHROME_PROFILE_DIR = process.env.YAP_CHROME_PROFILE_DIR
   || path.join(ROOT_DIR, "automation", "artifacts", "yap", "chrome-profile");
+export const YAP_PROFILE_LOCK_FILE = ".yap-profile.lock.json";
 
 // Lancia Chromium con un profilo persistente su disco usando launchPersistentContext.
 // Restituisce { browser: null, context } — nessun browser object separato come in launch().
@@ -201,6 +203,234 @@ export async function launchPersistentContextWithFallback(
     await installPlaywrightChromium(resolveModule, cwd);
     return tryLaunch(contextOptions);
   }
+}
+
+export function buildYapProfileLockPath(profileDir) {
+  return path.join(profileDir, YAP_PROFILE_LOCK_FILE);
+}
+
+function defaultIsPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+export function shouldBreakYapProfileLock(
+  lockInfo,
+  {
+    nowMs = Date.now(),
+    staleMs = 15 * 60 * 1000,
+    isPidAlive = defaultIsPidAlive,
+  } = {},
+) {
+  if (!lockInfo || typeof lockInfo !== "object") return true;
+  const pid = Number(lockInfo.pid);
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  const startedAtMs = Date.parse(lockInfo.startedAt || "");
+  if (!Number.isFinite(startedAtMs)) return true;
+  if ((nowMs - startedAtMs) > staleMs) return true;
+  return !isPidAlive(pid);
+}
+
+async function readYapProfileLock(lockPath) {
+  try {
+    const raw = await fs.readFile(lockPath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export async function acquireYapProfileLease(
+  profileDir,
+  {
+    waitMs = Number(process.env.YAP_PROFILE_LOCK_WAIT_MS) || 1200,
+    pollMs = Number(process.env.YAP_PROFILE_LOCK_POLL_MS) || 150,
+    staleMs = Number(process.env.YAP_PROFILE_LOCK_STALE_MS) || (15 * 60 * 1000),
+  } = {},
+) {
+  await fs.mkdir(profileDir, { recursive: true });
+  const lockPath = buildYapProfileLockPath(profileDir);
+  const startedAtMs = Date.now();
+  const owner = {
+    pid: process.pid,
+    startedAt: new Date(startedAtMs).toISOString(),
+    host: os.hostname(),
+  };
+
+  const release = async () => {
+    try {
+      const current = await readYapProfileLock(lockPath);
+      if (current?.pid === owner.pid && current?.startedAt === owner.startedAt) {
+        await fs.rm(lockPath, { force: true });
+      }
+    } catch {
+      // best-effort cleanup
+    }
+  };
+
+  while ((Date.now() - startedAtMs) <= waitMs) {
+    try {
+      const handle = await fs.open(lockPath, "wx");
+      try {
+        await handle.writeFile(JSON.stringify(owner), "utf-8");
+      } finally {
+        await handle.close();
+      }
+      return {
+        acquired: true,
+        lockPath,
+        owner,
+        elapsedMs: Date.now() - startedAtMs,
+        release,
+      };
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const current = await readYapProfileLock(lockPath);
+      if (shouldBreakYapProfileLock(current, { nowMs: Date.now(), staleMs })) {
+        await fs.rm(lockPath, { force: true }).catch(() => {});
+        continue;
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.max(50, pollMs)));
+    }
+  }
+
+  return {
+    acquired: false,
+    lockPath,
+    owner: await readYapProfileLock(lockPath),
+    elapsedMs: Date.now() - startedAtMs,
+    release: async () => {},
+  };
+}
+
+export async function createYapRuntime(
+  chromium,
+  {
+    headed = false,
+    freshLogin = false,
+    viewport = { width: 1440, height: 950 },
+    locale = "it-IT",
+    launchArgs = [],
+    preferPersistentProfile = true,
+    profileDir = process.env.YAP_CHROME_PROFILE_DIR || YAP_CHROME_PROFILE_DIR,
+    resolveModule,
+    cwd = ROOT_DIR,
+  } = {},
+) {
+  let browser = null;
+  let context = null;
+  let page = null;
+  let profileLease = null;
+  const startedAtMs = Date.now();
+  const telemetry = {
+    session_mode: "browser_context",
+    used_persistent_profile: false,
+    profile_lock: null,
+    started_at_ms: startedAtMs,
+  };
+
+  if (preferPersistentProfile && !freshLogin) {
+    profileLease = await acquireYapProfileLease(profileDir);
+    telemetry.profile_lock = {
+      acquired: profileLease.acquired,
+      wait_ms: profileLease.elapsedMs,
+      owner_pid: profileLease.owner?.pid ?? null,
+      lock_path: profileLease.lockPath,
+    };
+    if (profileLease.acquired) {
+      process.stderr.write(JSON.stringify({
+        event: "yap:session",
+        status: "profile_lock_acquired",
+        elapsed_ms: profileLease.elapsedMs,
+        lock_path: profileLease.lockPath,
+        ts: new Date().toISOString(),
+      }) + "\n");
+      context = await launchPersistentContextWithFallback(
+        chromium,
+        profileDir,
+        {
+          headless: !headed,
+          args: launchArgs,
+          viewport,
+          locale,
+        },
+        { resolveModule, cwd },
+      );
+      telemetry.session_mode = "persistent_profile";
+      telemetry.used_persistent_profile = true;
+    } else {
+      process.stderr.write(JSON.stringify({
+        event: "yap:session",
+        status: "profile_lock_fallback",
+        reason: "profile_busy",
+        owner_pid: profileLease.owner?.pid ?? null,
+        elapsed_ms: profileLease.elapsedMs,
+        ts: new Date().toISOString(),
+      }) + "\n");
+    }
+  }
+
+  if (!context) {
+    browser = await launchChromiumWithFallback(
+      chromium,
+      { headless: !headed, args: launchArgs },
+      { resolveModule, cwd },
+    );
+    context = await browser.newContext(await yapContextOptions({ freshLogin, viewport, locale }));
+    await applyYapSessionStorage(context, { freshLogin });
+    telemetry.session_mode = "browser_context";
+  }
+
+  page = await context.newPage();
+  process.stderr.write(JSON.stringify({
+    event: "yap:session",
+    status: "runtime_ready",
+    session_mode: telemetry.session_mode,
+    used_persistent_profile: telemetry.used_persistent_profile,
+    elapsed_ms: Date.now() - startedAtMs,
+    ts: new Date().toISOString(),
+  }) + "\n");
+
+  const close = async () => {
+    await context?.close().catch(() => {});
+    if (browser) await browser.close().catch(() => {});
+    if (profileLease) await profileLease.release().catch(() => {});
+  };
+
+  return {
+    browser,
+    context,
+    page,
+    profileLease,
+    telemetry,
+    close,
+  };
+}
+
+export function buildYapTelemetry({
+  runtime = null,
+  viewport = null,
+  eventCount = null,
+  startedAtMs = null,
+  extra = {},
+} = {}) {
+  return {
+    session_mode: runtime?.telemetry?.session_mode || null,
+    used_persistent_profile: runtime?.telemetry?.used_persistent_profile ?? null,
+    profile_lock: runtime?.telemetry?.profile_lock || null,
+    agenda_date: viewport?.centerDateLabel || null,
+    event_count: eventCount ?? viewport?.visibleEventCount ?? null,
+    empty_confirmed: viewport?.agendaSettle?.emptyConfirmed ?? null,
+    agenda_unstable: viewport?.agendaSettle?.unstable ?? null,
+    agenda_settle_polls: viewport?.agendaSettle?.polls ?? null,
+    total_elapsed_ms: startedAtMs ? (Date.now() - startedAtMs) : null,
+    ...extra,
+  };
 }
 
 async function exists(filePath) {
@@ -773,8 +1003,64 @@ export async function readAgendaViewportState(page) {
   });
 }
 
+export async function waitForAgendaEventPopulation(
+  page,
+  {
+    timeoutMs = Number(process.env.YAP_AGENDA_SETTLE_MS) || 1800,
+    pollMs = 300,
+    confirmEmptyReads = 2,
+    readState = readAgendaViewportState,
+  } = {},
+) {
+  const started = Date.now();
+  let latest = await readState(page);
+  let polls = 0;
+  let emptyReads = (latest?.visibleEventCount || 0) === 0 ? 1 : 0;
+  if ((latest?.visibleEventCount || 0) > 0) {
+    return {
+      ...latest,
+      agendaSettle: {
+        polls,
+        initialCount: latest.visibleEventCount || 0,
+        finalCount: latest.visibleEventCount || 0,
+        unstable: false,
+        emptyConfirmed: false,
+      },
+    };
+  }
+  const initialCount = latest?.visibleEventCount || 0;
+  while ((Date.now() - started) < timeoutMs) {
+    await page.waitForTimeout(pollMs).catch(() => {});
+    polls += 1;
+    latest = await readState(page).catch(() => latest);
+    if ((latest?.visibleEventCount || 0) > 0) {
+      return {
+        ...latest,
+        agendaSettle: {
+          polls,
+          initialCount,
+          finalCount: latest.visibleEventCount || 0,
+          unstable: initialCount === 0,
+          emptyConfirmed: false,
+        },
+      };
+    }
+    emptyReads += 1;
+  }
+  return {
+    ...latest,
+    agendaSettle: {
+      polls,
+      initialCount,
+      finalCount: latest?.visibleEventCount || 0,
+      unstable: false,
+      emptyConfirmed: emptyReads >= Math.max(1, confirmEmptyReads),
+    },
+  };
+}
+
 export async function scanVisibleAgendaEvents(page, { includeStyle = false } = {}) {
-  const state = await readAgendaViewportState(page);
+  const state = await waitForAgendaEventPopulation(page);
   return state.visibleEvents.map((event) => (
     includeStyle
       ? event
@@ -787,6 +1073,7 @@ export async function scanVisibleAgendaEvents(page, { includeStyle = false } = {
 }
 
 export async function scanVisibleAgendaEventTargets(page, { includeStyle = false } = {}) {
+  await waitForAgendaEventPopulation(page);
   return page.evaluate((wantStyle) => {
     const normalizeText = (value) => String(value || "")
       .normalize("NFD")
@@ -857,189 +1144,191 @@ export async function loginYap(page, username, password) {
     } catch (_) {}
   };
   page.on("response", _cookieListener);
-  await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
-  await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+  try {
+    await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" });
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
 
-  const bootSurface = await waitForYapBootSurface(page, 30000);
-  const ssSnapshot = await page.evaluate((origin) => {
-    try {
-      if (window.location.origin !== origin) return { origin: window.location.origin, keys: [] };
-      const keys = [];
-      for (let i = 0; i < window.sessionStorage.length; i += 1) {
-        const key = window.sessionStorage.key(i);
-        if (key != null) keys.push(key);
-      }
-      return { origin: window.location.origin, keys };
-    } catch (_) { return null; }
-  }, new URL(YAP_BASE_URL).origin).catch(() => null);
-  process.stderr.write(JSON.stringify({
-    event: "yap:session",
-    status: "boot_surface_detected",
-    surface: bootSurface,
-    sessionStorageKeys: ssSnapshot?.keys?.length ?? 0,
-    sessionStorageOrigin: ssSnapshot?.origin ?? null,
-    ts: new Date().toISOString(),
-  }) + "\n");
-  if (bootSurface === "agenda") {
-    await persistYapSession(page.context()).catch(() => {});
-    return;
-  }
-  if (bootSurface === "app_shell") {
-    try {
-      await openAgendaFromAppShell(page, 12000);
-      await persistYapSession(page.context()).catch(() => {});
-      return;
-    } catch {}
-  }
-
-  const loginInputVisible = bootSurface === "login"
-    || await page.locator('input[name="u"]').first().isVisible({ timeout: 2500 }).catch(() => false);
-  if (!loginInputVisible) {
-    const alreadyIn = await hasYapAppShell(page, 3000).catch(() => false);
-    if (alreadyIn) {
+    const bootSurface = await waitForYapBootSurface(page, 30000);
+    const ssSnapshot = await page.evaluate((origin) => {
       try {
-        await openAgendaFromAppShell(page, 12000);
-      } catch {}
-      await persistYapSession(page.context()).catch(() => {});
-      return;
-    }
-    await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
-    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-    const agendaReady = await waitForAgendaReady(page, 5000).then(() => true).catch(() => false);
-    if (agendaReady) {
-      await persistYapSession(page.context()).catch(() => {});
-      return;
-    }
-  }
-
-  if (loginInputVisible && ssSnapshot?.keys?.length === 0) {
-    const bundle = await readYapSessionBundle();
-    const ss = bundle?.__yapBundle && bundle.sessionStorage;
-    if (ss && ss.origin && ss.data && Object.keys(ss.data).length > 0) {
-      const injected = await page.evaluate((payload) => {
-        try {
-          if (window.location.origin !== payload.origin) return 0;
-          let count = 0;
-          for (const key of Object.keys(payload.data)) {
-            if (window.sessionStorage.getItem(key) == null) {
-              window.sessionStorage.setItem(key, payload.data[key]);
-              count += 1;
-            }
-          }
-          return count;
-        } catch (_) { return -1; }
-      }, ss).catch(() => -1);
-      process.stderr.write(JSON.stringify({
-        event: "yap:session",
-        status: "reinject_attempt",
-        injected,
-        origin: ss.origin,
-        ts: new Date().toISOString(),
-      }) + "\n");
-      if (injected > 0) {
-        await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
-        await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-        const reinjectedSurface = await waitForYapBootSurface(page, 20000).catch(() => "unknown");
-        process.stderr.write(JSON.stringify({
-          event: "yap:session",
-          status: "reinject_surface",
-          surface: reinjectedSurface,
-          ts: new Date().toISOString(),
-        }) + "\n");
-        if (reinjectedSurface === "agenda") {
-          await persistYapSession(page.context()).catch(() => {});
-          return;
+        if (window.location.origin !== origin) return { origin: window.location.origin, keys: [] };
+        const keys = [];
+        for (let i = 0; i < window.sessionStorage.length; i += 1) {
+          const key = window.sessionStorage.key(i);
+          if (key != null) keys.push(key);
         }
-        if (reinjectedSurface === "app_shell") {
-          await openAgendaFromAppShell(page, 12000).catch(() => {});
-          await persistYapSession(page.context()).catch(() => {});
-          return;
-        }
-      }
-    }
-  }
-
-  const okBtn = page.getByRole("button", { name: /^OK$/i }).or(page.getByText("OK", { exact: true }));
-  try {
-    await okBtn.first().waitFor({ state: "visible", timeout: 5000 });
-    await okBtn.first().click({ force: true });
-  } catch {
-    await page.evaluate(() => {
-      const btns = [...document.querySelectorAll("button, .gwt-Button, [role=\"button\"]")];
-      const ok = btns.find((b) => b.textContent.trim().toUpperCase() === "OK");
-      if (ok) ok.click();
-    });
-  }
-
-  await page.waitForTimeout(100);
-  await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-  await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 20000 });
-  const filled = await page.evaluate(({ u, p }) => {
-    const userEl = document.querySelector('input[name="u"]');
-    const passEl = document.querySelector('input[name="pw"]');
-    if (!userEl || !passEl) return false;
-    userEl.focus();
-    userEl.value = u;
-    userEl.dispatchEvent(new Event("input", { bubbles: true }));
-    userEl.dispatchEvent(new Event("change", { bubbles: true }));
-    passEl.focus();
-    passEl.value = p;
-    passEl.dispatchEvent(new Event("input", { bubbles: true }));
-    passEl.dispatchEvent(new Event("change", { bubbles: true }));
-    return true;
-  }, { u: username, p: password });
-  if (!filled) {
-    await page.locator('input[name="u"]').click({ force: true, timeout: 10000 });
-    await page.locator('input[name="u"]').pressSequentially(username, { delay: 40 });
-    await page.locator('input[name="pw"]').click({ force: true });
-    await page.locator('input[name="pw"]').pressSequentially(password, { delay: 40 });
-  }
-  const loginBtn = page
-    .getByTestId("loginSubmitButton")
-    .or(page.getByRole("button", { name: /acc[ée]di/i }))
-    .first();
-  try {
-    await loginBtn.click({ force: true, timeout: 10000 });
-  } catch {
-    await page.evaluate(() => {
-      const btn =
-        document.querySelector('[data-testid="loginSubmitButton"]') ||
-        [...document.querySelectorAll("button, .gwt-Button")].find((b) =>
-          /acc[eé]di/i.test(b.textContent || ""),
-        );
-      if (btn) btn.click();
-    });
-  }
-
-  // Attendi che la navigazione post-login parta prima di rilevare la superficie
-  await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
-  const _loginSubmitMs = Date.now();
-  const postLoginState = await waitForYapBootSurface(page, 20000);
-  process.stderr.write(JSON.stringify({
-    event: "yap:session",
-    status: "post_login_surface",
-    surface: postLoginState,
-    elapsed_ms: Date.now() - _loginSubmitMs,
-    ts: new Date().toISOString(),
-  }) + "\n");
-  if (postLoginState === "app_shell") {
-    await openAgendaFromAppShell(page, 20000).catch(() => {});
-  } else if (postLoginState !== "agenda") {
-    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
-    await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
-    await waitForAgendaReady(page, 20000).catch(() => {});
-  }
-  page.off("response", _cookieListener);
-  if (_cookieLog.length > 0) {
+        return { origin: window.location.origin, keys };
+      } catch (_) { return null; }
+    }, new URL(YAP_BASE_URL).origin).catch(() => null);
     process.stderr.write(JSON.stringify({
       event: "yap:session",
-      status: "set_cookie_trace",
-      count: _cookieLog.length,
-      entries: _cookieLog,
+      status: "boot_surface_detected",
+      surface: bootSurface,
+      sessionStorageKeys: ssSnapshot?.keys?.length ?? 0,
+      sessionStorageOrigin: ssSnapshot?.origin ?? null,
       ts: new Date().toISOString(),
     }) + "\n");
+    if (bootSurface === "agenda") {
+      await persistYapSession(page.context()).catch(() => {});
+      return;
+    }
+    if (bootSurface === "app_shell") {
+      try {
+        await openAgendaFromAppShell(page, 12000);
+        await persistYapSession(page.context()).catch(() => {});
+        return;
+      } catch {}
+    }
+
+    const loginInputVisible = bootSurface === "login"
+      || await page.locator('input[name="u"]').first().isVisible({ timeout: 2500 }).catch(() => false);
+    if (!loginInputVisible) {
+      const alreadyIn = await hasYapAppShell(page, 3000).catch(() => false);
+      if (alreadyIn) {
+        try {
+          await openAgendaFromAppShell(page, 12000);
+        } catch {}
+        await persistYapSession(page.context()).catch(() => {});
+        return;
+      }
+      await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+      const agendaReady = await waitForAgendaReady(page, 5000).then(() => true).catch(() => false);
+      if (agendaReady) {
+        await persistYapSession(page.context()).catch(() => {});
+        return;
+      }
+    }
+
+    if (loginInputVisible && ssSnapshot?.keys?.length === 0) {
+      const bundle = await readYapSessionBundle();
+      const ss = bundle?.__yapBundle && bundle.sessionStorage;
+      if (ss && ss.origin && ss.data && Object.keys(ss.data).length > 0) {
+        const injected = await page.evaluate((payload) => {
+          try {
+            if (window.location.origin !== payload.origin) return 0;
+            let count = 0;
+            for (const key of Object.keys(payload.data)) {
+              if (window.sessionStorage.getItem(key) == null) {
+                window.sessionStorage.setItem(key, payload.data[key]);
+                count += 1;
+              }
+            }
+            return count;
+          } catch (_) { return -1; }
+        }, ss).catch(() => -1);
+        process.stderr.write(JSON.stringify({
+          event: "yap:session",
+          status: "reinject_attempt",
+          injected,
+          origin: ss.origin,
+          ts: new Date().toISOString(),
+        }) + "\n");
+        if (injected > 0) {
+          await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+          await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+          const reinjectedSurface = await waitForYapBootSurface(page, 20000).catch(() => "unknown");
+          process.stderr.write(JSON.stringify({
+            event: "yap:session",
+            status: "reinject_surface",
+            surface: reinjectedSurface,
+            ts: new Date().toISOString(),
+          }) + "\n");
+          if (reinjectedSurface === "agenda") {
+            await persistYapSession(page.context()).catch(() => {});
+            return;
+          }
+          if (reinjectedSurface === "app_shell") {
+            await openAgendaFromAppShell(page, 12000).catch(() => {});
+            await persistYapSession(page.context()).catch(() => {});
+            return;
+          }
+        }
+      }
+    }
+
+    const okBtn = page.getByRole("button", { name: /^OK$/i }).or(page.getByText("OK", { exact: true }));
+    try {
+      await okBtn.first().waitFor({ state: "visible", timeout: 5000 });
+      await okBtn.first().click({ force: true });
+    } catch {
+      await page.evaluate(() => {
+        const btns = [...document.querySelectorAll("button, .gwt-Button, [role=\"button\"]")];
+        const ok = btns.find((b) => b.textContent.trim().toUpperCase() === "OK");
+        if (ok) ok.click();
+      });
+    }
+
+    await page.waitForTimeout(100);
+    await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+    await page.locator('input[name="u"]').waitFor({ state: "attached", timeout: 20000 });
+    const filled = await page.evaluate(({ u, p }) => {
+      const userEl = document.querySelector('input[name="u"]');
+      const passEl = document.querySelector('input[name="pw"]');
+      if (!userEl || !passEl) return false;
+      userEl.focus();
+      userEl.value = u;
+      userEl.dispatchEvent(new Event("input", { bubbles: true }));
+      userEl.dispatchEvent(new Event("change", { bubbles: true }));
+      passEl.focus();
+      passEl.value = p;
+      passEl.dispatchEvent(new Event("input", { bubbles: true }));
+      passEl.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }, { u: username, p: password });
+    if (!filled) {
+      await page.locator('input[name="u"]').click({ force: true, timeout: 10000 });
+      await page.locator('input[name="u"]').pressSequentially(username, { delay: 40 });
+      await page.locator('input[name="pw"]').click({ force: true });
+      await page.locator('input[name="pw"]').pressSequentially(password, { delay: 40 });
+    }
+    const loginBtn = page
+      .getByTestId("loginSubmitButton")
+      .or(page.getByRole("button", { name: /acc[ée]di/i }))
+      .first();
+    try {
+      await loginBtn.click({ force: true, timeout: 10000 });
+    } catch {
+      await page.evaluate(() => {
+        const btn =
+          document.querySelector('[data-testid="loginSubmitButton"]') ||
+          [...document.querySelectorAll("button, .gwt-Button")].find((b) =>
+            /acc[eé]di/i.test(b.textContent || ""),
+          );
+        if (btn) btn.click();
+      });
+    }
+
+    await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    const _loginSubmitMs = Date.now();
+    const postLoginState = await waitForYapBootSurface(page, 20000);
+    process.stderr.write(JSON.stringify({
+      event: "yap:session",
+      status: "post_login_surface",
+      surface: postLoginState,
+      elapsed_ms: Date.now() - _loginSubmitMs,
+      ts: new Date().toISOString(),
+    }) + "\n");
+    if (postLoginState === "app_shell") {
+      await openAgendaFromAppShell(page, 20000).catch(() => {});
+    } else if (postLoginState !== "agenda") {
+      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
+      await page.waitForLoadState("domcontentloaded", { timeout: 10000 }).catch(() => {});
+      await waitForAgendaReady(page, 20000).catch(() => {});
+    }
+    await persistYapSession(page.context()).catch(() => {});
+  } finally {
+    page.off("response", _cookieListener);
+    if (_cookieLog.length > 0) {
+      process.stderr.write(JSON.stringify({
+        event: "yap:session",
+        status: "set_cookie_trace",
+        count: _cookieLog.length,
+        entries: _cookieLog,
+        ts: new Date().toISOString(),
+      }) + "\n");
+    }
   }
-  await persistYapSession(page.context()).catch(() => {});
 }
 
 export async function openAgendaInApp(page) {

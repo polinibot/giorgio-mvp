@@ -692,6 +692,7 @@ class YapSyncRequest(BaseModel):
 
 class YapDeleteAppointmentRequest(BaseModel):
     date: Optional[str] = None
+    time: Optional[str] = None
     search: Optional[str] = None
     dry_run: bool = False
     debug: bool = False
@@ -700,6 +701,7 @@ class YapDeleteAppointmentRequest(BaseModel):
 
 class YapManualDeleteRequest(BaseModel):
     date: str
+    time: Optional[str] = None
     search: str
     dry_run: bool = False
     debug: bool = False
@@ -1369,6 +1371,28 @@ def _extract_yap_phases(stderr_text: str) -> list:
     return phases
 
 
+def _extract_yap_session_events(stderr_text: str) -> list:
+    """Estrae gli eventi yap:session emessi dal worker su stderr (diagnostica interna)."""
+    if not stderr_text:
+        return []
+    events = []
+    for line in stderr_text.splitlines():
+        line = line.strip()
+        if not line or '"event":"yap:session"' not in line and '"event": "yap:session"' not in line:
+            continue
+        try:
+            obj = _json.loads(line)
+            if obj.get("event") == "yap:session":
+                events.append({
+                    "status": obj.get("status", ""),
+                    "ts": obj.get("ts", ""),
+                    **{k: v for k, v in obj.items() if k not in ("event", "status", "ts")},
+                })
+        except (_json.JSONDecodeError, ValueError):
+            continue
+    return events
+
+
 def _yap_appointment_saved_from_detail(detail: Any) -> bool:
     """True se le fasi del worker indicano che l'appuntamento è già stato scritto su YAP.
 
@@ -1387,6 +1411,23 @@ def _yap_appointment_saved_from_detail(detail: Any) -> bool:
         if isinstance(ph, dict) and str(ph.get("phase")) == "save" and str(ph.get("status")) == "done":
             return True
     return False
+
+
+def _extract_yap_runtime_telemetry(payload: Any) -> Optional[dict]:
+    if not isinstance(payload, dict):
+        return None
+    candidates = [
+        payload.get("telemetry"),
+        payload.get("result", {}).get("telemetry") if isinstance(payload.get("result"), dict) else None,
+        payload.get("yap", {}).get("telemetry") if isinstance(payload.get("yap"), dict) else None,
+        payload.get("yap", {}).get("result", {}).get("telemetry")
+        if isinstance(payload.get("yap"), dict) and isinstance(payload.get("yap", {}).get("result"), dict)
+        else None,
+    ]
+    for telemetry in candidates:
+        if isinstance(telemetry, dict):
+            return telemetry
+    return None
 
 
 def _extract_json_blob(text: str) -> Optional[dict]:
@@ -1732,13 +1773,27 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
             )
 
         worker_phases = _extract_yap_phases(err)
+        session_events = _extract_yap_session_events(err)
         if worker_phases:
             runner_meta["worker_phases"] = worker_phases
             total_ms = runner_meta.get("total_elapsed_ms", 0)
-            phase_summary = " → ".join(
-                f"{p['phase']}({p['elapsed_ms']}ms)" for p in worker_phases
-            )
+            parts = []
+            prev_ms = 0
+            for p in worker_phases:
+                cur_ms = p.get("elapsed_ms") or 0
+                delta = cur_ms - prev_ms
+                parts.append(f"{p['phase']}:{p.get('status', '')}({cur_ms}ms,+{delta}ms)")
+                prev_ms = cur_ms
+            phase_summary = " -> ".join(parts)
             logger.info("YAP phases (%s) total=%dms: %s", script_name, total_ms, phase_summary)
+        if session_events:
+            runner_meta["session_event_count"] = len(session_events)
+            logger.info(
+                "YAP session events (%s) count=%d: %s",
+                script_name,
+                len(session_events),
+                " -> ".join(e.get("status", "?") for e in session_events),
+            )
 
         parsed = _extract_json_blob(out)
         if parsed:
@@ -2462,6 +2517,7 @@ async def sync_practice_to_yap(
             result = await _run_yap_script("yap-worker.mjs", args, timeout_seconds=sync_timeout_s, db=db)
         except HTTPException as worker_exc:
             detail = worker_exc.detail if isinstance(worker_exc.detail, dict) else {"message": str(worker_exc.detail)}
+            runtime_telemetry = _extract_yap_runtime_telemetry(detail)
             # Se l'agenda è già stata scritta su YAP (fase 'save'/'done') ma il worker è stato
             # interrotto durante la scrittura ODL (es. timeout a budget esaurito), NON marcare la
             # pratica come fallita: l'appuntamento esiste. Stato 'agenda_synced' + Verifica YAP.
@@ -2492,6 +2548,7 @@ async def sync_practice_to_yap(
                         "audit": None,
                         "preSync": check,
                         "phase_timeline": phase_timeline,
+                        "telemetry": runtime_telemetry,
                         "write_report": None,
                         "yap": {"ok": False, "partial": True, "error": detail},
                         "practice": {
@@ -2531,6 +2588,7 @@ async def sync_practice_to_yap(
                     "audit": None,
                     "preSync": check,
                     "phase_timeline": phase_timeline,
+                    "telemetry": runtime_telemetry,
                     "write_report": None,
                     "yap": {
                         "ok": False,
@@ -2548,6 +2606,7 @@ async def sync_practice_to_yap(
             )
         close_phase("write", "completed", "Scrittura YAP completata.")
         result_data = result.get("result") or {}
+        runtime_telemetry = _extract_yap_runtime_telemetry(result)
         write_report = (
             result_data.get("write_report")
             or result_data.get("managementWrite")
@@ -2621,6 +2680,7 @@ async def sync_practice_to_yap(
                 "audit": audit_result,
                 "preSync": check,
                 "phase_timeline": phase_timeline,
+                "telemetry": runtime_telemetry,
                 "write_report": write_report,
                 "yap": result,
                 "practice": {
@@ -2706,6 +2766,7 @@ async def audit_practice_yap(
 
         audit_timeout_s = int(os.getenv("YAP_AUDIT_TIMEOUT_S", "240") or "240")
         audit_result = await _run_yap_script("yap-audit-appointment.mjs", args, timeout_seconds=audit_timeout_s, db=db)
+        runtime_telemetry = _extract_yap_runtime_telemetry(audit_result)
         audit_status = _audit_status_from_result(audit_result)
         if body.persist:
             audit_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
@@ -2723,6 +2784,7 @@ async def audit_practice_yap(
                 "action_target": action_meta["action_target"] if audit_status == "sync_failed" else None,
                 "retryable": action_meta["retryable"] if audit_status == "sync_failed" else audit_status in {"partial_synced"},
                 "audit": audit_result,
+                "telemetry": runtime_telemetry,
                 "practice": {
                     "id": practice.id,
                     "synced": practice.synced,
@@ -2808,6 +2870,8 @@ async def delete_practice_yap_appointment(
     close_phase("precheck", "completed", "Parametri eliminazione validati.")
 
     args = ["--date", str(date_iso), f"--search={search}"]
+    if body.time:
+        args.extend(["--time", _normalize_slot_time(body.time)])
     if body.dry_run:
         args.append("--dry-run")
     if body.debug:
@@ -2816,6 +2880,7 @@ async def delete_practice_yap_appointment(
         args.append("--fresh-login")
 
     result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
+    runtime_telemetry = _extract_yap_runtime_telemetry(result)
     status_value = result.get("status") or ("deleted" if result.get("deleted") else ("not_found" if result.get("found") is False else "not_deleted"))
     delete_succeeded = bool(result.get("deleted") or status_value == "not_found" or result.get("found") is False)
     close_phase("delete", "completed" if delete_succeeded else "failed", "Delete YAP eseguita.")
@@ -2841,6 +2906,7 @@ async def delete_practice_yap_appointment(
             "action_target": action_meta["action_target"] if status_value in {"delete_failed", "blocked_by_odl"} else None,
             "retryable": action_meta["retryable"] if status_value in {"delete_failed", "blocked_by_odl"} else False,
             "phase_timeline": phase_timeline,
+            "telemetry": runtime_telemetry,
             "timing": {
                 "started_at": request_started_at,
                 "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -2870,6 +2936,8 @@ async def manual_delete_yap_appointment(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Date e search sono obbligatori")
 
     args = ["--date", date_arg, f"--search={search_arg}"]
+    if body.time:
+        args.extend(["--time", _normalize_slot_time(body.time)])
     if body.dry_run:
         args.append("--dry-run")
     if body.debug:
@@ -2879,10 +2947,12 @@ async def manual_delete_yap_appointment(
 
     result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
     status_value = result.get("status") or ("deleted" if result.get("deleted") else "not_deleted")
+    runtime_telemetry = _extract_yap_runtime_telemetry(result)
     return APIResponse(
         success=bool(result.get("deleted")),
         data={
             "status": status_value,
+            "telemetry": runtime_telemetry,
             "yap": result,
         },
     )

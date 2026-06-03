@@ -4,22 +4,20 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
+  createYapRuntime,
+  buildYapTelemetry,
   loginYap,
   openAgendaInApp,
   gotoAgendaDate,
   clickAgendaEvent,
+  scanVisibleAgendaEvents,
   toItalianDate,
   toYapTime,
   addMinutes,
   normalizeAppointmentTime,
   getYapSlotMinutes,
-  yapContextOptions,
   waitForAgendaReady,
   waitForYapAction,
-  launchChromiumWithFallback,
-  launchPersistentContextWithFallback,
-  YAP_CHROME_PROFILE_DIR,
-  applyYapSessionStorage,
 } from "./lib/yap-shared.mjs";
 import {
   pickCosaFromJob,
@@ -2219,24 +2217,6 @@ async function fillAppointmentPopup(page, job) {
   }
 }
 
-async function scanAgendaEvents(page) {
-  return safeEvaluate(page, () => {
-    const rows = [];
-    const seen = new Set();
-    for (const el of document.querySelectorAll(".fc-time-grid-event, .fc-event")) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 2) continue;
-      const title = (el.querySelector(".fc-title") || el).textContent.replace(/\s+/g, " ").trim();
-      const time = (el.querySelector(".fc-time")?.textContent || "").trim();
-      const key = `${time}|${title}`;
-      if (!title || seen.has(key)) continue;
-      seen.add(key);
-      rows.push({ time, title });
-    }
-    return rows;
-  });
-}
-
 async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
   let putResponse = null;
   let saveAttemptsUsed = 0;
@@ -2318,6 +2298,7 @@ async function summarizeResponseBody(response, limit = 1200) {
 }
 
 async function runYapAutomation(job, args) {
+  const _runStart = Date.now();
   const username = ensureEnv("YAP_USERNAME");
   const password = ensureEnv("YAP_PASSWORD");
   await fs.mkdir(args.artifactDir, { recursive: true });
@@ -2343,36 +2324,26 @@ async function runYapAutomation(job, args) {
   }
 
   logPhase("browser", "starting");
-  const usePersistProfile = !args.noPersistProfile && !args.freshLogin;
-  let browser = null;
-  let context;
-  if (usePersistProfile) {
-    const profileDir = process.env.YAP_CHROME_PROFILE_DIR || YAP_CHROME_PROFILE_DIR;
-    await fs.mkdir(profileDir, { recursive: true });
-    logPhase("session", "profile_dir", { dir: profileDir });
-    const contextOptions = {
-      headless: !args.headed,
-      args: launchArgs,
-      viewport: { width: 1440, height: 950 },
-      locale: "it-IT",
-    };
-    context = await launchPersistentContextWithFallback(
-      chromium,
-      profileDir,
-      contextOptions,
-      { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
-    );
-  } else {
-    browser = await launchChromiumWithFallback(
-      chromium,
-      { headless: !args.headed, args: launchArgs },
-      { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
-    );
-    context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
-    await applyYapSessionStorage(context, { freshLogin: args.freshLogin });
+  const runtime = await createYapRuntime(chromium, {
+    headed: args.headed,
+    freshLogin: args.freshLogin,
+    launchArgs,
+    preferPersistentProfile: !args.noPersistProfile,
+    resolveModule: requireFromYap.resolve.bind(requireFromYap),
+    cwd: ROOT_DIR,
+  });
+  if (runtime.telemetry?.profile_lock) {
+    logPhase("session", "profile_lock", {
+      dir: runtime.telemetry.profile_lock.lock_path,
+      acquired: runtime.telemetry.profile_lock.acquired,
+      wait_ms: runtime.telemetry.profile_lock.wait_ms,
+      owner_pid: runtime.telemetry.profile_lock.owner_pid,
+    });
+    if (!runtime.telemetry.profile_lock.acquired) {
+      logPhase("session", "profile_fallback", { reason: "profile_busy" });
+    }
   }
-  const _iapCookieLog = [];
-  const page = await context.newPage();
+  const { browser, context, page } = runtime;
   let _pageCrashError = null;
   page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
 
@@ -2432,16 +2403,6 @@ async function runYapAutomation(job, args) {
     if (!didExplicitLogin) {
       logPhase("agenda", "ready");
     }
-    if (_iapCookieLog.length > 0) {
-      process.stderr.write(JSON.stringify({
-        event: "yap:session",
-        status: "iap_set_cookie_trace",
-        count: _iapCookieLog.length,
-        entries: _iapCookieLog,
-        ts: new Date().toISOString(),
-      }) + "\n");
-    }
-
     const yapTags = pickYapTagsFromJob(job);
     if (args.debug) {
       console.log(
@@ -2463,12 +2424,17 @@ async function runYapAutomation(job, args) {
       );
     }
     logPhase("dedup", "scanning");
-    const existingEvents = await scanAgendaEvents(page);
+    const existingEvents = await scanVisibleAgendaEvents(page);
     const dedup = findExistingAppointment(existingEvents, {
       plate: job.customer.plate,
       date: job.appointment.date,
       time: job.appointment.time,
       toleranceMinutes: 0,
+    });
+    logPhase("dedup", dedup.hit ? "hit" : "miss", {
+      events: existingEvents.length,
+      plate: job.customer.plate,
+      time: job.appointment.time,
     });
 
     if (args.dryRun) {
@@ -2507,6 +2473,10 @@ async function runYapAutomation(job, args) {
         }),
         dedup,
         syncLog,
+        telemetry: buildYapTelemetry({
+          runtime,
+          startedAtMs: _runStart,
+        }),
         message: dedup.hit
           ? "Appuntamento già presente in agenda (dedup). Nessuna modifica."
           : "Accesso YAP e agenda verificati. Nessuna modifica eseguita su YAP.",
@@ -2572,9 +2542,11 @@ async function runYapAutomation(job, args) {
           url: putResponse?.url?.(),
           body_excerpt: putResponseSummary,
         },
-        telemetry: {
-          saveAttempts: saveAttemptsUsed,
-        },
+        telemetry: buildYapTelemetry({
+          runtime,
+          startedAtMs: _runStart,
+          extra: { saveAttempts: saveAttemptsUsed },
+        }),
         warning: popupSaveError || undefined,
         managementWrite,
         write_report: managementWrite,
@@ -2585,7 +2557,9 @@ async function runYapAutomation(job, args) {
     }
 
     logPhase("popup", "opening", { time: job.appointment.time });
+    const _slotClickStart = Date.now();
     await clickApproximateSlot(page, job.appointment.time);
+    logPhase("popup", "slot_clicked", { elapsed_ms: Date.now() - _slotClickStart });
     try {
       await fillAppointmentPopup(page, job);
     } catch (firstError) {
@@ -2637,9 +2611,11 @@ async function runYapAutomation(job, args) {
         body_excerpt: putResponseSummary,
       },
       screenshot: afterSavePath,
-      telemetry: {
-        saveAttempts: saveAttemptsUsed,
-      },
+      telemetry: buildYapTelemetry({
+        runtime,
+        startedAtMs: _runStart,
+        extra: { saveAttempts: saveAttemptsUsed },
+      }),
       managementWrite,
       write_report: managementWrite,
       message: "Appuntamento salvato su YAP.",
@@ -2656,8 +2632,7 @@ async function runYapAutomation(job, args) {
     }
     throw error;
   } finally {
-    await context.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
+    await runtime.close().catch(() => {});
   }
 }
 
