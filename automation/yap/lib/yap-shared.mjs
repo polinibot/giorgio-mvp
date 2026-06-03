@@ -193,33 +193,25 @@ export async function launchPersistentContextWithFallback(
   for (const lockFile of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
     await fs.rm(path.join(userDataDir, lockFile), { force: true }).catch(() => {});
   }
-  // Se ci sono Crash Reports il profilo è corrotto da un run precedente:
-  // svuota Default/ preservando solo Cookies (sessione) prima di rimuovere i crash reports
-  const crashReportsDir = path.join(userDataDir, "Crash Reports");
-  const profileCrashed = await fs.access(crashReportsDir).then(() => true).catch(() => false);
-  if (profileCrashed) {
-    try {
-      const defaultDir = path.join(userDataDir, "Default");
-      const entries = await fs.readdir(defaultDir).catch(() => []);
-      const keep = new Set(["Cookies", "Login Data", "Login Data-journal"]);
-      for (const entry of entries) {
-        if (!keep.has(entry)) {
-          await fs.rm(path.join(defaultDir, entry), { recursive: true, force: true }).catch(() => {});
-        }
+  // Pulisce Default/ ad ogni avvio preservando solo Cookies e Login Data.
+  // Il profilo persistente accumula Cache/State/GPUCache che causano OOM su Railway.
+  // I Cookies vengono preservati per riutilizzare la sessione senza re-login.
+  try {
+    const defaultDir = path.join(userDataDir, "Default");
+    const entries = await fs.readdir(defaultDir).catch(() => []);
+    const keep = new Set(["Cookies", "Login Data", "Login Data-journal", "Cookies-journal"]);
+    for (const entry of entries) {
+      if (!keep.has(entry)) {
+        await fs.rm(path.join(defaultDir, entry), { recursive: true, force: true }).catch(() => {});
       }
-    } catch (_) {}
-  }
-  // Pulisce Cache e file di stato che si accumulano e causano OOM/crash su Railway
+    }
+  } catch (_) {}
+  // Pulisce anche le dir top-level del profilo
   for (const dir of [
-    path.join(userDataDir, "Default", "Cache"),
-    path.join(userDataDir, "Default", "Code Cache"),
-    path.join(userDataDir, "Default", "GPUCache"),
     path.join(userDataDir, "GrShaderCache"),
     path.join(userDataDir, "ShaderCache"),
-    crashReportsDir,
-    path.join(userDataDir, "Default", "Service Worker", "CacheStorage"),
-    path.join(userDataDir, "Default", "Service Worker", "ScriptCache"),
-    path.join(userDataDir, "Default", "IndexedDB"),
+    path.join(userDataDir, "Crash Reports"),
+    path.join(userDataDir, "System Profile"),
   ]) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
