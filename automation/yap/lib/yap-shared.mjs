@@ -188,17 +188,26 @@ export async function launchPersistentContextWithFallback(
   contextOptions,
   { resolveModule, cwd = ROOT_DIR } = {},
 ) {
+  // Rimuove SingletonLock/SingletonCookie che bloccano indefinitamente il launch
+  // se un processo Chromium precedente è terminato in modo anomalo.
+  for (const lockFile of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+    await fs.rm(path.join(userDataDir, lockFile), { force: true }).catch(() => {});
+  }
+
   const preferredPath = await pickChromiumExecutablePath();
   const options = preferredPath
     ? { ...contextOptions, executablePath: preferredPath }
     : { ...contextOptions };
 
-  const tryLaunch = (opts) => chromium.launchPersistentContext(userDataDir, opts);
+  process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "browser", status: "launch_persistent_start", ts: new Date().toISOString() }) + "\n");
+  const tryLaunch = (opts) => chromium.launchPersistentContext(userDataDir, { timeout: 30000, ...opts });
 
   try {
     const context = await tryLaunch(options);
+    process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "browser", status: "launch_persistent_done", ts: new Date().toISOString() }) + "\n");
     return context;
   } catch (error) {
+    process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "browser", status: "launch_persistent_error", error: String(error?.message || error).slice(0, 200), ts: new Date().toISOString() }) + "\n");
     if (!resolveModule || !isMissingPlaywrightBrowserError(error)) throw error;
     await installPlaywrightChromium(resolveModule, cwd);
     return tryLaunch(contextOptions);
