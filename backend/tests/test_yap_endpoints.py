@@ -93,6 +93,14 @@ class TestYapSyncEndpoints:
 
         assert main._audit_reason_for_status("agenda_synced", {}) == "audit_deferred"
 
+    def test_save_not_confirmed_maps_to_specific_retry_action(self):
+        import main
+
+        action = main._build_yap_action_from_error("Salvataggio YAP non confermato dopo 3 tentativi")
+        assert action["error_code"] == "YAP_SAVE_NOT_CONFIRMED"
+        assert action["failed_phase"] == "save"
+        assert action["next_action"] == "Riprova sync"
+
     def test_yap_sync_rejects_missing_credentials(self, client, sample_practice, monkeypatch):
         monkeypatch.delenv("YAP_USERNAME", raising=False)
         monkeypatch.delenv("YAP_PASSWORD", raising=False)
@@ -218,6 +226,7 @@ class TestYapSyncEndpoints:
         assert data["practice"]["synced"] is True
         assert data["audit"] is None
         assert isinstance(data.get("phase_timeline"), list)
+        assert data["telemetry"]["saveAttempts"] == 1
         assert any(item.get("name") == "precheck" for item in data["phase_timeline"])
         assert any(item.get("name") == "write" for item in data["phase_timeline"])
         assert any(item.get("name") == "audit" and item.get("status") == "skipped" for item in data["phase_timeline"])
@@ -323,6 +332,81 @@ class TestYapSyncEndpoints:
         assert data["runner"]["timeout_seconds"] == 150
         assert "yap:phase" in data["stderr_tail"]
 
+    def test_yap_sync_keeps_agenda_synced_when_worker_times_out_after_save(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+        from automation_service import AutomationService
+
+        monkeypatch.setattr(
+            AutomationService,
+            "pre_sync_check",
+            staticmethod(lambda payload: {"ready": True, "score": 92, "issues": [], "warnings": []}),
+        )
+
+        async def fake_run_yap_script(*args, **kwargs):
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "message": "Timeout automazione YAP",
+                    "reason": "timeout during odl",
+                    "failed_phase": "odl",
+                    "worker_phases": [
+                        {"phase": "login", "status": "done", "elapsed_ms": 4200},
+                        {"phase": "save", "status": "done", "elapsed_ms": 16200},
+                        {"phase": "odl", "status": "starting", "elapsed_ms": 151000},
+                    ],
+                    "runner": {"timeout_seconds": 150, "total_elapsed_ms": 151234},
+                },
+            )
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/sync?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "agenda_synced"
+        assert data["status_reason"] == "audit_deferred"
+        assert data["retryable"] is True
+        assert data["practice"]["management_sync_status"] == "agenda_synced"
+        assert data["practice"]["synced"] is True
+        assert data["failed_phase"] == "odl"
+
+    def test_yap_audit_http_exception_is_persisted_as_deferred(self, client, sample_practice, db_session, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import json as _json
+        import main
+
+        practice = db_session.query(Practice).filter(Practice.id == sample_practice["id"]).first()
+        assert practice is not None
+        practice.management_sync_status = "agenda_synced"
+        practice.synced = True
+        db_session.commit()
+
+        async def fake_run_yap_script(*args, **kwargs):
+            raise HTTPException(status_code=504, detail={"message": "audit timeout"})
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/audit?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 504
+        db_session.refresh(practice)
+        persisted = _json.loads(practice.management_audit_result)
+        assert persisted["status"] == "agenda_synced"
+        assert persisted["status_reason"] == "audit_deferred"
+        assert persisted["completed"] is False
+
     @pytest.mark.parametrize(
         "audit_status,expected_synced",
         [
@@ -396,8 +480,11 @@ class TestYapSyncEndpoints:
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
         import main
+        captured = {}
 
-        async def fake_run_yap_script(*args, **kwargs):
+        async def fake_run_yap_script(script_name, args, **kwargs):
+            captured["script_name"] = script_name
+            captured["args"] = args
             return {
                 "found": False,
                 "deleted": False,
@@ -416,18 +503,22 @@ class TestYapSyncEndpoints:
         response = client.request(
             "DELETE",
             f"/practices/{sample_practice['id']}/yap/appointment?user_id=761118078",
-            json={},
+            json={"time": "09:00"},
         )
 
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["status"] == "not_found"
+        assert data["telemetry"]["runner"]["lock_wait_ms"] == 12
         assert isinstance(data.get("phase_timeline"), list)
         assert all(item.get("started_at") for item in data["phase_timeline"])
         assert all(item.get("finished_at") for item in data["phase_timeline"])
         assert data["timing"]["started_at"]
         assert data["timing"]["finished_at"]
         assert data["yap"]["telemetry"]["runner"]["lock_wait_ms"] == 12
+        assert captured["script_name"] == "yap-delete-appointment.mjs"
+        assert "--time" in captured["args"]
+        assert "09:00" in captured["args"]
 
         listed = client.get("/api/practices?user_id=761118078")
         assert listed.status_code == 200

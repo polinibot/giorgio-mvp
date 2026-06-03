@@ -9,12 +9,13 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
+  buildYapTelemetry,
+  createYapRuntime,
   loginYap,
   openAgendaWithRecovery,
-  readAgendaViewportState,
   ROOT_DIR,
   scanVisibleAgendaEvents,
-  yapContextOptions,
+  waitForAgendaEventPopulation,
 } from "./lib/yap-shared.mjs";
 
 const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
@@ -53,16 +54,20 @@ async function main() {
   }
 
   await fs.mkdir(ANALYSIS, { recursive: true });
-
-  const browser = await chromium.launch({ headless: !args.headed });
-  const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
-  const page = await context.newPage();
+  const startedAtMs = Date.now();
+  const runtime = await createYapRuntime(chromium, {
+    headed: args.headed,
+    freshLogin: args.freshLogin,
+    preferPersistentProfile: false,
+    resolveModule: requireFromYap.resolve.bind(requireFromYap),
+  });
+  const { page } = runtime;
 
   try {
     await loginYap(page, user, pass);
     await openAgendaWithRecovery(page, { dateIso: args.date, username: user, password: pass });
 
-    const viewport = await readAgendaViewportState(page);
+    const viewport = await waitForAgendaEventPopulation(page);
     const events = await scanVisibleAgendaEvents(page, { includeStyle: true });
     let screenshotPath = null;
     if (args.debug) {
@@ -85,6 +90,13 @@ async function main() {
       viewport,
       events,
       screenshot: screenshotPath,
+      telemetry: buildYapTelemetry({
+        runtime,
+        viewport,
+        eventCount: events.length,
+        startedAtMs,
+        extra: { action: "readonly_day_scan", date: args.date },
+      }),
     };
 
     const outPath = path.join(ANALYSIS, `readonly-scan-${args.date}.json`);
@@ -97,8 +109,7 @@ async function main() {
     }
     if (events.length > 15) console.log(`   ... +${events.length - 15} altri`);
   } finally {
-    await context.close();
-    await browser.close();
+    await runtime.close();
   }
 }
 

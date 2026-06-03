@@ -1222,6 +1222,8 @@ def _cache_invalidate_practice(practice_id: int) -> None:
 
 def _build_yap_action_from_error(reason: str) -> Dict[str, Any]:
     msg = str(reason or "").lower()
+    if "salvataggio yap non confermato" in msg or "save not confirmed" in msg:
+        return {"error_code": "YAP_SAVE_NOT_CONFIRMED", "next_action": "Riprova sync", "action_target": "sync", "failed_phase": "save", "retryable": True}
     if "timeout" in msg:
         return {"error_code": "YAP_TIMEOUT", "next_action": "Riprova sync", "action_target": "sync", "failed_phase": "write_or_audit", "retryable": True}
     if "audit_not_completed" in msg or "audit yap non completato" in msg:

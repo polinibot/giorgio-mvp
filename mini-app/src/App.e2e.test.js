@@ -587,6 +587,11 @@ describe('Mini App user-simulation suite', () => {
                 { name: 'write', status: 'completed', duration_ms: 8000 },
                 { name: 'audit', status: 'skipped', duration_ms: 50 },
               ],
+              telemetry: {
+                session_mode: 'browser_context',
+                agenda_unstable: true,
+                total_elapsed_ms: 27000,
+              },
               write_report: {
                 attempted: true,
                 ok: false,
@@ -680,6 +685,9 @@ describe('Mini App user-simulation suite', () => {
     clickElement(getButton('Sincronizza con YAP'));
 
     await waitFor(() => document.body.textContent.includes('YAP agenda scritta'));
+    expect(document.body.textContent).toContain('Tempo 27s');
+    expect(document.body.textContent).toContain('Agenda instabile rilevata');
+    expect(document.body.textContent).toContain('Sessione isolata');
     expect(document.body.textContent).toContain('Post-scrittura: note da ricontrollare');
     expect(document.body.textContent).toContain('Stato verifica completa in attesa');
     expect(document.body.textContent).not.toContain('appointment_not_verified');

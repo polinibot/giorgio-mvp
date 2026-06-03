@@ -13,14 +13,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
+  buildYapTelemetry,
+  createYapRuntime,
   loginYap,
   openAgendaWithRecovery,
   waitForAgendaReady,
   ROOT_DIR,
   scanVisibleAgendaEventTargets,
+  waitForAgendaEventPopulation,
   waitForYapAction,
-  yapContextOptions,
-  launchChromiumWithFallback,
 } from "./lib/yap-shared.mjs";
 
 const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
@@ -63,7 +64,7 @@ function createDeleteTrace(context = {}) {
 }
 
 function parseArgs(argv) {
-  const args = { headed: false, dryRun: false, debug: false, freshLogin: false };
+  const args = { headed: false, dryRun: false, debug: false, freshLogin: false, time: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => {
@@ -73,6 +74,8 @@ function parseArgs(argv) {
     };
     if (arg === "--date") args.date = next();
     else if (arg.startsWith("--date=")) args.date = arg.slice("--date=".length);
+    else if (arg === "--time") args.time = next();
+    else if (arg.startsWith("--time=")) args.time = arg.slice("--time=".length);
     else if (arg === "--search") args.search = next();
     else if (arg.startsWith("--search=")) args.search = arg.slice("--search=".length);
     else if (arg === "--headed") args.headed = true;
@@ -229,28 +232,37 @@ async function clickDeleteAndAcceptNativeDialog(page, locator) {
 }
 
 async function listVisibleAgendaEvents(page) {
+  await waitForAgendaEventPopulation(page);
   return scanVisibleAgendaEventTargets(page);
 }
 
-async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug = false, trace = null) {
+async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug = false, trace = null, expectedTime = "") {
   const normalizeText = (t) =>
     String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
   const needle = normalizeText(searchTerm);
+  const normalizedExpectedTime = normalizeText(expectedTime).replace(":", ".");
+  const matchesNeedle = (event) => {
+    if (!normalizeText(event.title).includes(needle)) return false;
+    if (!normalizedExpectedTime) return true;
+    return normalizeText(event.time || "").replace(":", ".").includes(normalizedExpectedTime);
+  };
 
   trace?.mark("agenda_scan_started", { search: searchTerm, date: dateIso });
   const events = await listVisibleAgendaEvents(page);
   trace?.mark("agenda_scan_completed", { event_count: events.length });
 
-  const match = events.find((ev) => normalizeText(ev.title).includes(needle));
+  const matchingEvents = events.filter(matchesNeedle);
+  const match = matchingEvents[0];
   if (!match) {
     trace?.mark("appointment_not_found_in_visible_events", { visible_titles: events.map((event) => event.title).slice(0, 12) });
     return { found: false, searched: searchTerm, events: events.map((e) => e.title) };
   }
-  const initialMatchCount = events.filter((event) => normalizeText(event.title).includes(needle)).length;
+  const initialMatchCount = matchingEvents.length;
   trace?.mark("appointment_match_found", {
     matched_title: match.title,
     matched_time: match.time || null,
     initial_match_count: initialMatchCount,
+    expected_time: expectedTime || null,
   });
 
   if (dryRun) {
@@ -364,7 +376,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   page.off("response", onResponse);
 
   let afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
-  let remainingMatches = afterEvents.filter((event) => normalizeText(event.title).includes(needle)).length;
+  let remainingMatches = afterEvents.filter(matchesNeedle).length;
   let deletedCount = Math.max(0, initialMatchCount - remainingMatches);
   let targetDeleted = deletedCount >= 1;
   if (!targetDeleted || !page.url().includes("#!agenda")) {
@@ -376,7 +388,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
     await page.waitForTimeout(250);
     afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
-    remainingMatches = afterEvents.filter((event) => normalizeText(event.title).includes(needle)).length;
+    remainingMatches = afterEvents.filter(matchesNeedle).length;
     deletedCount = Math.max(0, initialMatchCount - remainingMatches);
     targetDeleted = deletedCount >= 1;
   }
@@ -395,7 +407,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
         await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
         await page.waitForTimeout(400);
         const finalEvents = await listVisibleAgendaEvents(page).catch(() => []);
-        remainingMatches = finalEvents.filter((event) => normalizeText(event.title).includes(needle)).length;
+        remainingMatches = finalEvents.filter(matchesNeedle).length;
         deletedCount = Math.max(0, initialMatchCount - remainingMatches);
         targetDeleted = deletedCount >= 1;
         if (targetDeleted) {
@@ -410,7 +422,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
 
   const repairHint = (failureStatus === "blocked_by_odl" && !odlAutoFixed)
     ? {
-      script: `node automation/yap/yap-delete-linked-odl.mjs --date ${dateIso} --search ${searchTerm}`,
+      script: `node automation/yap/yap-delete-linked-odl.mjs --date ${dateIso} --search ${searchTerm}${expectedTime ? ` --time ${expectedTime}` : ""}`,
       reason: "L'appuntamento e' collegato a un ordine di lavoro. Prima elimina l'ODL, poi rilancia questo script.",
     }
     : null;
@@ -439,6 +451,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     deletedCount,
     remainingMatches,
     event: match,
+    expectedTime: expectedTime || undefined,
     yapMessage: visibleMessage || undefined,
     note: targetDeleted
       ? remainingMatches > 0
@@ -465,7 +478,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
-    console.log("Uso: node yap-delete-appointment.mjs --date YYYY-MM-DD --search TESTO [--headed] [--dry-run] [--debug] [--fresh-login]");
+    console.log("Uso: node yap-delete-appointment.mjs --date YYYY-MM-DD --search TESTO [--time HH:MM] [--headed] [--dry-run] [--debug] [--fresh-login]");
     return;
   }
   if (!args.date || !/^\d{4}-\d{2}-\d{2}$/.test(args.date)) {
@@ -504,22 +517,20 @@ async function main() {
     );
   }
 
-  const browser = await launchChromiumWithFallback(
-    chromium,
-    {
-      headless: !args.headed,
-      args: launchArgs,
-    },
-    { resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR },
-  );
-  const context = await browser.newContext(await yapContextOptions({
+  const startedAtMs = Date.now();
+  const runtime = await createYapRuntime(chromium, {
+    headed: args.headed,
     freshLogin: args.freshLogin,
+    launchArgs,
     viewport: { width: 1280, height: 820 },
-  }));
-  const page = await context.newPage();
+    preferPersistentProfile: false,
+    resolveModule: requireFromYap.resolve.bind(requireFromYap),
+  });
+  const { page } = runtime;
   const trace = createDeleteTrace({
     worker: "yap-delete-appointment.mjs",
     search: args.search,
+    expected_time: args.time || null,
     date: args.date,
     debug: !!args.debug,
     fresh_login: !!args.freshLogin,
@@ -558,7 +569,7 @@ async function main() {
     }
     trace.mark("agenda_date_navigation_completed", { date: args.date });
 
-    const result = await findAndDeleteAppointment(page, args.search, args.dryRun, args.date, args.debug, trace);
+    const result = await findAndDeleteAppointment(page, args.search, args.dryRun, args.date, args.debug, trace, args.time);
     trace.mark("delete_flow_completed", { final_status: result.status || (result.deleted ? "deleted" : "unknown") });
 
     let screenshotPath = null;
@@ -576,6 +587,13 @@ async function main() {
       screenshot: screenshotPath,
       ...result,
       telemetry: {
+        ...buildYapTelemetry({
+          runtime,
+          viewport: { centerDateLabel: args.date, agendaSettle: { emptyConfirmed: false, unstable: false, polls: null } },
+          eventCount: result.remainingMatches,
+          startedAtMs,
+          extra: { action: "delete_appointment", date: args.date, expected_time: args.time || null },
+        }),
         ...(result.telemetry || {}),
         trace: trace.snapshot({
           outcome: result.status || (result.deleted ? "deleted" : "unknown"),
@@ -599,8 +617,7 @@ async function main() {
     error.deleteTrace = trace.snapshot({ screenshot: error.screenshotPath || null });
     throw error;
   } finally {
-    await context.close();
-    await browser.close();
+    await runtime.close();
   }
 }
 

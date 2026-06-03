@@ -7,7 +7,7 @@
     "test": "node run-tests.mjs",
     "test:gate": "node run-tests.mjs",
     "cleanup": "node run-tests.mjs --cleanup-only",
-    "test:unit": "node --test yap-worker.unit.test.mjs",
+    "test:unit": "node --test yap-worker.unit.test.mjs yap-shared.unit.test.mjs",
     "test:worker": "node test-worker-suite.mjs",
     "test:delete": "node test-delete-worker.mjs",
     "test:readonly": "node run-dry-batch.mjs"

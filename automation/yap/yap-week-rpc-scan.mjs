@@ -13,11 +13,12 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
+  buildYapTelemetry,
+  createYapRuntime,
   loginYap,
   openAgendaWithRecovery,
-  readAgendaViewportState,
   scanVisibleAgendaEvents,
-  yapContextOptions,
+  waitForAgendaEventPopulation,
 } from "./lib/yap-shared.mjs";
 
 const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
@@ -152,9 +153,14 @@ async function main() {
   for (let i = 0; i < args.days; i += 1) dates.push(addDays(args.from, i));
 
   await fs.mkdir(ANALYSIS, { recursive: true });
-  const browser = await chromium.launch({ headless: !args.headed });
-  const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
-  const page = await context.newPage();
+  const startedAtMs = Date.now();
+  const runtime = await createYapRuntime(chromium, {
+    headed: args.headed,
+    freshLogin: args.freshLogin,
+    preferPersistentProfile: false,
+    resolveModule: requireFromYap.resolve.bind(requireFromYap),
+  });
+  const { page } = runtime;
   const days = [];
 
   try {
@@ -164,7 +170,7 @@ async function main() {
     for (const date of dates) {
       console.log(`📅 ${date}…`);
       const raw = await capturePrenotazioneForDate(page, date, { username: user, password: pass });
-      const viewport = await readAgendaViewportState(page);
+      const viewport = await waitForAgendaEventPopulation(page);
       const domEvents = await scanVisibleAgendaEvents(page);
       let rpcRecords = [];
       if (raw) {
@@ -179,12 +185,18 @@ async function main() {
         rpcRecordCount: rpcRecords.length,
         rpcRecords,
         hasRpc: Boolean(raw),
+        telemetry: buildYapTelemetry({
+          runtime,
+          viewport,
+          eventCount: domEvents.length,
+          startedAtMs,
+          extra: { action: "readonly_week_scan", date },
+        }),
       });
       console.log(`   DOM: ${domEvents.length}, RPC records: ${rpcRecords.length}`);
     }
   } finally {
-    await context.close().catch(() => {});
-    await browser.close().catch(() => {});
+    await runtime.close().catch(() => {});
   }
 
   const stats = buildStats(days);

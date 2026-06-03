@@ -11,12 +11,14 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 import {
+  buildYapTelemetry,
+  createYapRuntime,
   loginYap,
   openAgendaWithRecovery,
   ROOT_DIR,
   scanVisibleAgendaEventTargets,
+  waitForAgendaEventPopulation,
   YAP_ODL_DELETE_CONFIRM,
-  yapContextOptions,
 } from "./lib/yap-shared.mjs";
 
 const requireFromYap = createRequire(new URL("./package.json", import.meta.url));
@@ -28,7 +30,7 @@ const DELETE_ACTION_ENDPOINTS = [
 ];
 
 function parseArgs(argv) {
-  const args = { headed: false, dryRun: false, debug: false, freshLogin: false };
+  const args = { headed: false, dryRun: false, debug: false, freshLogin: false, time: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = () => {
@@ -37,6 +39,7 @@ function parseArgs(argv) {
       return argv[i];
     };
     if (arg === "--date") args.date = next();
+    else if (arg === "--time") args.time = next();
     else if (arg === "--search") args.search = next();
     else if (arg === "--headed") args.headed = true;
     else if (arg === "--dry-run") args.dryRun = true;
@@ -108,10 +111,15 @@ async function clickOdlSection(page) {
   });
 }
 
-async function findAppointmentEvent(page, searchTerm) {
+async function findAppointmentEvent(page, searchTerm, expectedTime = "") {
   const needle = normalize(searchTerm);
+  const expectedNeedle = normalize(expectedTime).replace(":", ".");
+  await waitForAgendaEventPopulation(page);
   const events = await scanVisibleAgendaEventTargets(page);
-  return events.find((ev) => normalize(ev.title).includes(needle)) || null;
+  return events.find((ev) =>
+    normalize(ev.title).includes(needle)
+    && (!expectedNeedle || normalize(ev.time || "").replace(":", ".").includes(expectedNeedle))
+  ) || events.find((ev) => normalize(ev.title).includes(needle)) || null;
 }
 
 async function visibleYapMessage(page) {
@@ -190,7 +198,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help) {
-    console.log("Uso: node automation/yap/yap-delete-linked-odl.mjs --date YYYY-MM-DD --search TESTO [--headed] [--dry-run] [--debug] [--fresh-login]");
+    console.log("Uso: node automation/yap/yap-delete-linked-odl.mjs --date YYYY-MM-DD --search TESTO [--time HH:MM] [--headed] [--dry-run] [--debug] [--fresh-login]");
     return;
   }
   if (!args.date || !/^\d{4}-\d{2}-\d{2}$/.test(args.date)) {
@@ -209,9 +217,14 @@ async function main() {
     process.exit(1);
   }
 
-  const browser = await chromium.launch({ headless: !args.headed });
-  const context = await browser.newContext(await yapContextOptions({ freshLogin: args.freshLogin }));
-  const page = await context.newPage();
+  const startedAtMs = Date.now();
+  const runtime = await createYapRuntime(chromium, {
+    headed: args.headed,
+    freshLogin: args.freshLogin,
+    preferPersistentProfile: false,
+    resolveModule: requireFromYap.resolve.bind(requireFromYap),
+  });
+  const { page } = runtime;
   const deleteRequests = [];
   const deleteResponses = [];
   const dialogMessages = [];
@@ -258,14 +271,41 @@ async function main() {
       password: pass,
     });
 
-    const event = await findAppointmentEvent(page, args.search);
+    const event = await findAppointmentEvent(page, args.search, args.time);
     if (!event) {
-      console.log(JSON.stringify({ ok: true, found: false, searched: args.search, date: args.date, events: [] }, null, 2));
+      console.log(JSON.stringify({
+        ok: true,
+        found: false,
+        searched: args.search,
+        date: args.date,
+        events: [],
+        telemetry: buildYapTelemetry({
+          runtime,
+          viewport: { centerDateLabel: args.date },
+          eventCount: 0,
+          startedAtMs,
+          extra: { action: "delete_linked_odl", expected_time: args.time || null },
+        }),
+      }, null, 2));
       return;
     }
 
     if (args.dryRun) {
-      console.log(JSON.stringify({ ok: true, found: true, dryRun: true, date: args.date, search: args.search, event }, null, 2));
+      console.log(JSON.stringify({
+        ok: true,
+        found: true,
+        dryRun: true,
+        date: args.date,
+        search: args.search,
+        event,
+        telemetry: buildYapTelemetry({
+          runtime,
+          viewport: { centerDateLabel: args.date },
+          eventCount: 1,
+          startedAtMs,
+          extra: { action: "delete_linked_odl", expected_time: args.time || null },
+        }),
+      }, null, 2));
       return;
     }
 
@@ -324,6 +364,13 @@ async function main() {
         requestMethod: deleteRequests[0]?.method,
         responseStatus: deleteResponses[0]?.status || null,
       },
+      telemetry: buildYapTelemetry({
+        runtime,
+        viewport: { centerDateLabel: args.date },
+        eventCount: 1,
+        startedAtMs,
+        extra: { action: "delete_linked_odl", expected_time: args.time || null },
+      }),
       dialogMessages,
       nextStep: deleted
         ? "Rerun yap-delete-appointment.mjs on the same date/search."
@@ -350,8 +397,7 @@ async function main() {
     }, null, 2));
     process.exitCode = 1;
   } finally {
-    await context.close();
-    await browser.close();
+    await runtime.close();
   }
 }
 

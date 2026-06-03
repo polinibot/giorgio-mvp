@@ -2223,87 +2223,122 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
   let saveAttemptsUsed = 0;
   let lastSaveError = null;
   logPhase("save_popup", "starting", { maxAttempts: maxSaveAttempts });
-  
+
+  const readPopupState = async () => safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")]
+      .find((el) => {
+        if (!isVisible(el)) return false;
+        const text = (el.textContent || "").toLowerCase();
+        if (text.includes("dettagli appuntamento")) return true;
+        return [...el.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible).length >= 5;
+      });
+    if (!popup) return { open: false, saveCandidates: [], errors: [] };
+
+    const popupRect = popup.getBoundingClientRect();
+    const clickableNodes = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button'], td, div")]
+      .filter(isVisible);
+    const saveCandidates = clickableNodes
+      .map((el) => {
+        const rawText = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").trim();
+        const text = rawText.toLowerCase();
+        if (!(text === "check" || text.includes("salva") || text.includes("save") || text.includes("floppy"))) return null;
+
+        let clickTarget = el;
+        let node = el.parentElement;
+        for (let i = 0; i < 5 && node && node !== popup; i += 1) {
+          const tag = node.tagName;
+          if (tag === "A" || tag === "BUTTON" || node.getAttribute("onclick") || node.getAttribute("role") === "button") {
+            clickTarget = node;
+            break;
+          }
+          if (tag === "TD" || tag === "DIV") clickTarget = node;
+          node = node.parentElement;
+        }
+
+        const rect = clickTarget.getBoundingClientRect();
+        const relX = popupRect.width > 0 ? (rect.left + rect.width / 2 - popupRect.left) / popupRect.width : 0;
+        const relY = popupRect.height > 0 ? (rect.top + rect.height / 2 - popupRect.top) / popupRect.height : 0;
+        let score = 0;
+        if (text.includes("salva") || text.includes("save") || text.includes("floppy")) score += 220;
+        if (text === "check") score += 140;
+        if (clickTarget.tagName === "A" || clickTarget.tagName === "BUTTON") score += 80;
+        if (relX >= 0.55) score += 55;
+        if (relY <= 0.35) score += 45;
+        score += Math.min(60, Math.round((rect.width * rect.height) / 100));
+        return {
+          rawText,
+          text,
+          clickTag: clickTarget.tagName,
+          buttonClass: clickTarget.className || "",
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          relX,
+          relY,
+          score,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score || b.relX - a.relX || a.relY - b.relY);
+
+    const errors = [...popup.querySelectorAll("div, span, td, li")]
+      .filter(isVisible)
+      .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim())
+      .filter((text) => text && text.length <= 160)
+      .filter((text) => /erro|attenz|obblig|selezion|compil|required|valida|manc/i.test(text.toLowerCase()))
+      .slice(0, 4);
+
+    return { open: true, saveCandidates, errors };
+  }).catch(() => ({ open: false, saveCandidates: [], errors: [] }));
+
   for (let attempt = 1; attempt <= maxSaveAttempts; attempt += 1) {
     saveAttemptsUsed = attempt;
     logPhase("save_attempt", `try_${attempt}`);
     try {
-      putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
-        // Individua il bottone salva tramite DOM per ottenere coordinate
-        const btnInfo = await safeEvaluate(page, () => {
-          const isVisible = (el) => {
-            const rect = el.getBoundingClientRect();
-            const style = window.getComputedStyle(el);
-            return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
-          };
-          // Stessa logica di appointmentPopupRect: popup con titolo o con >=5 input visibili
-          const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")]
-            .find((el) => {
-              if (!isVisible(el)) return false;
-              const text = (el.textContent || "").toLowerCase();
-              if (text.includes("dettagli appuntamento")) return true;
-              return [...el.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible).length >= 5;
-            });
-          if (!popup) return { found: false, reason: "popup_not_found" };
-          const btns = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button']")]
-            .filter(isVisible)
-            .sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
-          const allBtnInfo = btns.slice(0, 8).map((el) => ({
-            tag: el.tagName,
-            text: (el.textContent || "").trim().slice(0, 30),
-            title: el.getAttribute("title") || "",
-            alt: el.getAttribute("alt") || "",
-            cls: el.className || "",
-          }));
-          const saveBtn = btns.find((el) => {
-            const text = (el.textContent || el.getAttribute("title") || el.getAttribute("alt") || "").trim().toLowerCase();
-            // "check" = icona Material Icons del bottone conferma/salva in GWT
-            return text === "check" || text.includes("salva") || text.includes("save") || text.includes("floppy");
-          });
-          if (!saveBtn) return { found: false, reason: "save_button_not_found", buttonsCount: btns.length, allBtnInfo };
-          // In GWT lo SPAN è decorativo: risale al parent cliccabile (A o TD con onclick)
-          let clickTarget = saveBtn;
-          let node = saveBtn.parentElement;
-          for (let i = 0; i < 4 && node && node !== popup; i += 1) {
-            const tag = node.tagName;
-            if (tag === "A" || tag === "BUTTON" || node.getAttribute("onclick") || node.getAttribute("role") === "button") {
-              clickTarget = node;
-              break;
-            }
-            if (tag === "TD" || tag === "DIV") { clickTarget = node; }
-            node = node.parentElement;
-          }
-          const rect = clickTarget.getBoundingClientRect();
-          return {
-            found: true,
-            buttonText: saveBtn.textContent || saveBtn.getAttribute("title") || "check",
-            buttonClass: clickTarget.className || "",
-            clickTag: clickTarget.tagName,
-            x: rect.left + rect.width / 2,
-            y: rect.top + rect.height / 2,
-            allBtnInfo,
-          };
-        });
+      const popupState = await readPopupState();
+      const candidateCount = popupState?.saveCandidates?.length || 0;
+      const candidateIndex = Math.min(Math.max(0, attempt - 1), Math.max(0, candidateCount - 1));
+      const candidate = popupState?.saveCandidates?.[candidateIndex] || popupState?.saveCandidates?.[0] || null;
+      if (!candidate) {
+        logPhase("save_click", "btn_not_found", { candidateCount, errors: popupState?.errors || [] });
+        throw new Error("Bottone salva non trovato nel popup");
+      }
 
-        if (!btnInfo || !btnInfo.found) {
-          logPhase("save_click", "btn_not_found", { reason: btnInfo?.reason, buttonsCount: btnInfo?.buttonsCount, allBtnInfo: btnInfo?.allBtnInfo });
-          throw new Error(`Bottone salva non trovato: ${btnInfo?.reason || "unknown"}`);
-        }
-        logPhase("save_click", "clicking", { buttonText: btnInfo.buttonText, buttonClass: btnInfo.buttonClass, clickTag: btnInfo.clickTag, x: Math.round(btnInfo.x), y: Math.round(btnInfo.y) });
-        // Click Playwright nativo tramite coordinate — funziona anche con GWT e handler custom
-        await page.mouse.click(btnInfo.x, btnInfo.y);
-        logPhase("save_click", "clicked", { buttonText: btnInfo.buttonText });
-      }, 10000 + (attempt - 1) * 3000); // Timeout: 10s, 13s, 16s
-      
+      putResponse = await waitForYapAction(page, "PrenotazionePutAction", async () => {
+        logPhase("save_click", "clicking", {
+          buttonText: candidate.rawText || candidate.text || "check",
+          buttonClass: candidate.buttonClass,
+          clickTag: candidate.clickTag,
+          x: Math.round(candidate.x),
+          y: Math.round(candidate.y),
+          candidateIndex,
+          candidateCount,
+          candidateScore: candidate.score,
+        });
+        await page.mouse.click(candidate.x, candidate.y);
+        logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex });
+      }, 10000 + (attempt - 1) * 3000);
+
       if (putResponse) {
         logPhase("save_response", "received", { attempt });
         break;
       }
-      
-      const stillOpenAttempt = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1500 }).catch(() => false);
+
+      await page.waitForTimeout(1200).catch(() => {});
+      const popupAfterClick = await readPopupState();
+      const stillOpenAttempt = Boolean(popupAfterClick?.open);
       if (!stillOpenAttempt) {
         logPhase("save_popup", "closed_after_click", { attempt });
+        putResponse = { status: () => 200, url: () => "local://popup-closed-without-rpc" };
         break;
+      }
+      if (popupAfterClick.errors?.length) {
+        throw new Error(`Popup ancora aperto: ${popupAfterClick.errors.join(" | ")}`);
       }
     } catch (error) {
       lastSaveError = error;
@@ -2311,14 +2346,16 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
     }
     await page.waitForTimeout(800 * attempt);
   }
-  
+
   const saved = Boolean(putResponse);
   logPhase("save_result", saved ? "success" : "failed", { attempts: saveAttemptsUsed });
-  
+
   if (!saved) {
-    const stillOpen = await page.getByText("Dettagli appuntamento").first().isVisible({ timeout: 1500 }).catch(() => false);
+    const finalPopupState = await readPopupState();
+    const stillOpen = Boolean(finalPopupState?.open);
     if (stillOpen) {
-      const detail = lastSaveError?.message ? ` (${lastSaveError.message})` : "";
+      const popupErrors = finalPopupState.errors?.length ? ` [${finalPopupState.errors.join(" | ")}]` : "";
+      const detail = lastSaveError?.message ? ` (${lastSaveError.message})` : popupErrors;
       throw new Error(`Salvataggio YAP non confermato dopo ${maxSaveAttempts} tentativi${detail}`);
     }
   }
