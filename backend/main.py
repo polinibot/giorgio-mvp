@@ -1623,12 +1623,20 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 duration_ms = int((time.perf_counter() - attempt_started_monotonic) * 1000)
                 worker_phases = _extract_yap_phases(err_text)
                 last_phase = worker_phases[-1] if worker_phases else {}
+                _phase_parts = []
+                _prev_ms = 0
+                for _p in worker_phases:
+                    _cur = _p.get("elapsed_ms") or 0
+                    _phase_parts.append(f"{_p['phase']}:{_p.get('status','')}({_cur}ms,+{_cur-_prev_ms}ms)")
+                    _prev_ms = _cur
                 logger.error(
-                    "YAP script timeout (%s) attempt=%s started_at=%s timeout_seconds=%d",
+                    "YAP script timeout (%s) attempt=%s timeout=%ds last_phase=%s phases=[%s] stderr_tail=%s",
                     script_name,
                     attempt_name,
-                    attempt_started_at,
                     timeout_seconds,
+                    f"{last_phase.get('phase')}:{last_phase.get('status')}",
+                    " -> ".join(_phase_parts) or "none",
+                    err_text[-2000:],
                 )
                 raise _YapScriptTimeout(
                     {

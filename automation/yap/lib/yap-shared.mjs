@@ -1337,23 +1337,33 @@ export async function loginYap(page, username, password) {
   }
 }
 
+const _logShared = (phase, status, extra = {}) => process.stderr.write(JSON.stringify({ event: "yap:phase", phase, status, ts: new Date().toISOString(), ...extra }) + "\n");
+
 export async function openAgendaInApp(page) {
+  const _t0 = Date.now();
   await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
+  _logShared("openAgenda", "nav_done", { ms: Date.now() - _t0, url: page.url().slice(0, 80) });
   // Early-exit: se l'URL post-navigazione non è sull'origine YAP (redirect IAP/auth), è già login.
   const postNavUrl = page.url();
   const yapOrigin = new URL(YAP_BASE_URL).origin;
   if (!postNavUrl.startsWith(yapOrigin)) {
     throw new Error("agenda_redirected_to_login");
   }
+  const _t1 = Date.now();
   const initialSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
+  _logShared("openAgenda", "boot_surface", { surface: initialSurface, ms: Date.now() - _t1 });
   await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
   if (initialSurface === "app_shell") {
+    _logShared("openAgenda", "app_shell_open_start");
     await openAgendaFromAppShell(page, 12000).catch(() => {});
+    _logShared("openAgenda", "app_shell_open_done", { ms: Date.now() - _t0 });
   }
   if (await isYapLoginPage(page, 1000)) {
+    _logShared("openAgenda", "login_redirect_1", { ms: Date.now() - _t0 });
     await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
     await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
     const recoveredSurface = await waitForYapBootSurface(page, 6000).catch(() => "unknown");
+    _logShared("openAgenda", "recovery1_surface", { surface: recoveredSurface, ms: Date.now() - _t0 });
     if (recoveredSurface === "app_shell") {
       await openAgendaFromAppShell(page, 12000).catch(() => {});
     }
@@ -1366,12 +1376,14 @@ export async function openAgendaInApp(page) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     for (const sel of selectors) {
       const visible = await page.locator(sel).first().isVisible().catch(() => false);
-      if (visible) return;
+      if (visible) { _logShared("openAgenda", "agenda_visible_early", { sel, attempt, ms: Date.now() - _t0 }); return; }
     }
+    _logShared("openAgenda", "retry_loop", { attempt, ms: Date.now() - _t0 });
     if (await isYapLoginPage(page, 800)) {
       await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
       await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
       const recoveredSurface2 = await waitForYapBootSurface(page, 6000).catch(() => "unknown");
+      _logShared("openAgenda", "recovery2_surface", { surface: recoveredSurface2, attempt, ms: Date.now() - _t0 });
       if (recoveredSurface2 === "app_shell") {
         await openAgendaFromAppShell(page, 12000).catch(() => {});
         continue;
@@ -1379,6 +1391,7 @@ export async function openAgendaInApp(page) {
       throw new Error("agenda_redirected_to_login");
     }
     if (await hasYapAppShell(page, 1500).catch(() => false)) {
+      _logShared("openAgenda", "app_shell_retry", { attempt, ms: Date.now() - _t0 });
       await openAgendaFromAppShell(page, 12000).catch(() => {});
       continue;
     }
@@ -1389,6 +1402,7 @@ export async function openAgendaInApp(page) {
       await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
       await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
       const recoveredSurface3 = await waitForYapBootSurface(page, 6000).catch(() => "unknown");
+      _logShared("openAgenda", "recovery3_surface", { surface: recoveredSurface3, attempt, ms: Date.now() - _t0 });
       if (recoveredSurface3 === "app_shell") {
         await openAgendaFromAppShell(page, 12000).catch(() => {});
         continue;
@@ -1401,7 +1415,9 @@ export async function openAgendaInApp(page) {
   if (await isYapLoginPage(page, 1000)) {
     throw new Error("agenda_redirected_to_login");
   }
+  _logShared("openAgenda", "final_waitForAgendaReady", { ms: Date.now() - _t0 });
   await waitForAgendaReady(page, 12000);
+  _logShared("openAgenda", "done", { ms: Date.now() - _t0 });
 }
 
 export async function openAgendaWithRecovery(

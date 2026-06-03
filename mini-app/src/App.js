@@ -2497,11 +2497,17 @@ function App() {
         return { status: 'cancelled' };
       }
       rememberError('yap.sync', err);
+      const detail = err?.response?.data?.detail || {};
+      if (detail?.stderr_tail || detail?.worker_phases) {
+        console.error('[YAP SYNC TIMEOUT DEBUG]',
+          '\nphases:', JSON.stringify(detail.worker_phases || [], null, 2),
+          '\nstderr_tail:\n', detail.stderr_tail || '');
+      }
       const errorResult = {
         status: 'sync_failed',
         message: classifyError(err),
         retryable: true,
-        error: err?.response?.data?.detail || err?.response?.data || err?.message || 'sync_failed',
+        error: detail || err?.message || 'sync_failed',
       };
       setYapLastResult(errorResult);
       if (!silent) addToast(errorResult.message, 'error');
