@@ -18,6 +18,7 @@ import {
   getYapSlotMinutes,
   waitForAgendaReady,
   waitForYapAction,
+  YAP_CHROME_PROFILE_DIR,
 } from "./lib/yap-shared.mjs";
 import {
   pickCosaFromJob,
