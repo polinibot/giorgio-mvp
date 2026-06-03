@@ -523,7 +523,7 @@ async function clickApproximateSlot(page, targetTime) {
       }
     }
 
-    best.cell.scrollIntoView({ block: "center", inline: "nearest" });
+    best.cell.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
     const rect = best.cell.getBoundingClientRect();
     return {
       time: best.time,
@@ -534,6 +534,9 @@ async function clickApproximateSlot(page, targetTime) {
     };
   }, normalizedTarget).catch(() => null);
 
+  if (candidate) {
+    await page.waitForTimeout(300).catch(() => {});
+  }
   let slot = candidate;
   if (!slot) {
     await page.waitForFunction(() => {
@@ -604,7 +607,7 @@ async function clickApproximateSlot(page, targetTime) {
       return true;
     }, point).catch(() => false);
     if (!clicked) continue;
-    const opened = await waitForAppointmentPopup(page, 1800);
+    const opened = await waitForAppointmentPopup(page, 3000);
     if (opened) return;
     await page.keyboard.press("Escape").catch(() => {});
     await page.waitForTimeout(120);

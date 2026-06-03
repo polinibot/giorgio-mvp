@@ -199,7 +199,7 @@ export async function launchPersistentContextWithFallback(
   try {
     const defaultDir = path.join(userDataDir, "Default");
     const entries = await fs.readdir(defaultDir).catch(() => []);
-    const keep = new Set(["Cookies", "Login Data", "Login Data-journal", "Cookies-journal"]);
+    const keep = new Set(["Cookies", "Login Data", "Login Data-journal", "Cookies-journal", "Preferences", "Secure Preferences"]);
     for (const entry of entries) {
       if (!keep.has(entry)) {
         await fs.rm(path.join(defaultDir, entry), { recursive: true, force: true }).catch(() => {});
