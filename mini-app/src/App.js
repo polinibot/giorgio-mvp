@@ -2856,6 +2856,9 @@ function App() {
                 ))}
               </div>
             )}
+            {status === 'sync_failed' && errorCode === 'YAP_TIMEOUT' && (
+              <YapCrashLogButton initData={initData} telegramUserId={telegramUserId} />
+            )}
           </div>
         </div>
         {(canRetry || canAudit || canDelete || showSyncHint || showAuditHint || showDeleteHint) && (
