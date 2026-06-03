@@ -2236,11 +2236,14 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
             const style = window.getComputedStyle(el);
             return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
           };
-          // Cerca il popup appuntamento: prima per titolo esatto, poi qualsiasi popup visibile
-          const allPopups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")].filter(isVisible);
-          const popup = allPopups.find((el) => (el.textContent || "").includes("Dettagli appuntamento"))
-            || allPopups.find((el) => (el.textContent || "").includes("appuntamento"))
-            || allPopups[0];
+          // Stessa logica di appointmentPopupRect: popup con titolo o con >=5 input visibili
+          const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup")]
+            .find((el) => {
+              if (!isVisible(el)) return false;
+              const text = (el.textContent || "").toLowerCase();
+              if (text.includes("dettagli appuntamento")) return true;
+              return [...el.querySelectorAll("input, textarea, select, button, a, [role='button']")].filter(isVisible).length >= 5;
+            });
           if (!popup) return { found: false, reason: "popup_not_found" };
           const btns = [...popup.querySelectorAll("a.gwt-Anchor, button, .gwt-Button, img, span, [role='button']")]
             .filter(isVisible)
@@ -2258,11 +2261,24 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
             return text === "check" || text.includes("salva") || text.includes("save") || text.includes("floppy");
           });
           if (!saveBtn) return { found: false, reason: "save_button_not_found", buttonsCount: btns.length, allBtnInfo };
-          const rect = saveBtn.getBoundingClientRect();
+          // In GWT lo SPAN è decorativo: risale al parent cliccabile (A o TD con onclick)
+          let clickTarget = saveBtn;
+          let node = saveBtn.parentElement;
+          for (let i = 0; i < 4 && node && node !== popup; i += 1) {
+            const tag = node.tagName;
+            if (tag === "A" || tag === "BUTTON" || node.getAttribute("onclick") || node.getAttribute("role") === "button") {
+              clickTarget = node;
+              break;
+            }
+            if (tag === "TD" || tag === "DIV") { clickTarget = node; }
+            node = node.parentElement;
+          }
+          const rect = clickTarget.getBoundingClientRect();
           return {
             found: true,
-            buttonText: saveBtn.textContent || saveBtn.getAttribute("title") || saveBtn.getAttribute("alt") || "unknown",
-            buttonClass: saveBtn.className || "",
+            buttonText: saveBtn.textContent || saveBtn.getAttribute("title") || "check",
+            buttonClass: clickTarget.className || "",
+            clickTag: clickTarget.tagName,
             x: rect.left + rect.width / 2,
             y: rect.top + rect.height / 2,
             allBtnInfo,
@@ -2273,7 +2289,7 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
           logPhase("save_click", "btn_not_found", { reason: btnInfo?.reason, buttonsCount: btnInfo?.buttonsCount, allBtnInfo: btnInfo?.allBtnInfo });
           throw new Error(`Bottone salva non trovato: ${btnInfo?.reason || "unknown"}`);
         }
-        logPhase("save_click", "clicking", { buttonText: btnInfo.buttonText, buttonClass: btnInfo.buttonClass, x: Math.round(btnInfo.x), y: Math.round(btnInfo.y), allBtnInfo: btnInfo.allBtnInfo });
+        logPhase("save_click", "clicking", { buttonText: btnInfo.buttonText, buttonClass: btnInfo.buttonClass, clickTag: btnInfo.clickTag, x: Math.round(btnInfo.x), y: Math.round(btnInfo.y) });
         // Click Playwright nativo tramite coordinate — funziona anche con GWT e handler custom
         await page.mouse.click(btnInfo.x, btnInfo.y);
         logPhase("save_click", "clicked", { buttonText: btnInfo.buttonText });
