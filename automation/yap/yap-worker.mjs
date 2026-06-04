@@ -1453,10 +1453,10 @@ async function getPracticeWorkspaceState(page) {
   }).catch(() => "unknown");
 }
 
-async function fillBestEditableByKeywords(page, keywords, value, { append = false } = {}) {
+async function fillBestEditableByKeywords(page, keywords, value, { append = false, returnDebug = false } = {}) {
   const textValue = String(value || "").trim();
-  if (!textValue) return false;
-  return safeEvaluate(page, ({ keywordsRaw, text, appendMode }) => {
+  if (!textValue) return returnDebug ? { ok: false, debug: { reason: "empty_value" } } : false;
+  return safeEvaluate(page, ({ keywordsRaw, text, appendMode, wantDebugInner }) => {
     const keywords = (keywordsRaw || []).map((k) => String(k || "").toLowerCase().trim()).filter(Boolean);
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
@@ -1499,7 +1499,33 @@ async function fillBestEditableByKeywords(page, keywords, value, { append = fals
       .sort((a, b) => (b.score - a.score) || (a.y - b.y) || (a.x - b.x));
 
     const target = ranked[0]?.node;
-    if (!target) return false;
+    if (!target) {
+      return wantDebugInner
+        ? {
+            ok: false,
+            debug: {
+              candidateCount: editableNodes.length,
+              keywordCount: keywords.length,
+              keywords,
+              appendMode,
+              ranked: ranked.slice(0, 8).map(({ node, score, x, y }) => ({
+                tag: node.tagName,
+                type: node.getAttribute("type") || null,
+                name: node.getAttribute("name") || null,
+                id: node.getAttribute("id") || null,
+                placeholder: node.getAttribute("placeholder") || null,
+                ariaLabel: node.getAttribute("aria-label") || null,
+                role: node.getAttribute("role") || null,
+                score,
+                x: Math.round(x),
+                y: Math.round(y),
+              })),
+              selected: null,
+              reason: "no_keyword_match",
+            },
+          }
+        : false;
+    }
 
     const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA";
     const current = isInput ? (target.value || "") : (target.innerText || target.textContent || "");
@@ -1511,26 +1537,74 @@ async function fillBestEditableByKeywords(page, keywords, value, { append = fals
     target.dispatchEvent(new Event("input", { bubbles: true }));
     target.dispatchEvent(new Event("change", { bubbles: true }));
     target.blur();
-    return true;
-  }, { keywordsRaw: keywords, text: textValue, appendMode: Boolean(append) }).catch(() => false);
+    if (!wantDebugInner) return true;
+    return {
+      ok: true,
+      debug: {
+        candidateCount: editableNodes.length,
+        keywordCount: keywords.length,
+        keywords,
+        appendMode,
+        valueLength: text.length,
+        selected: {
+          tag: target.tagName,
+          type: target.getAttribute("type") || null,
+          name: target.getAttribute("name") || null,
+          id: target.getAttribute("id") || null,
+          placeholder: target.getAttribute("placeholder") || null,
+          ariaLabel: target.getAttribute("aria-label") || null,
+          role: target.getAttribute("role") || null,
+          className: String(target.className || ""),
+          textPreview: String(current || "").slice(0, 120),
+        },
+        ranked: ranked.slice(0, 8).map(({ node, score, x, y }) => ({
+          tag: node.tagName,
+          type: node.getAttribute("type") || null,
+          name: node.getAttribute("name") || null,
+          id: node.getAttribute("id") || null,
+          placeholder: node.getAttribute("placeholder") || null,
+          ariaLabel: node.getAttribute("aria-label") || null,
+          role: node.getAttribute("role") || null,
+          score,
+          x: Math.round(x),
+          y: Math.round(y),
+        })),
+      },
+    };
+  }, { keywordsRaw: keywords, text: textValue, appendMode: Boolean(append), wantDebugInner: Boolean(returnDebug) }).catch(() => returnDebug ? { ok: false, debug: { error: "evaluate_failed" } } : false);
 }
 
-async function fillWithRetry(page, attempts, value, options = {}, { debug = false, fieldId = "" } = {}) {
+async function fillWithRetry(page, attempts, value, options = {}, { debug = false, fieldId = "", returnDebug = false } = {}) {
   const plans = Array.isArray(attempts) ? attempts : [];
+  const attemptsDebug = [];
   for (let i = 0; i < plans.length; i++) {
     const attempt = plans[i];
     const keywords = Array.isArray(attempt) ? attempt : (attempt?.keywords || []);
     const append = typeof attempt === "object" && "append" in attempt ? attempt.append : options.append;
     if (debug) logPhase("fill_attempt", `plan_${i}`, { fieldId, keywords: keywords.slice(0, 3), value: String(value).slice(0, 50) });
-    const ok = await fillBestEditableByKeywords(page, keywords, value, { ...options, append });
+    const result = await fillBestEditableByKeywords(page, keywords, value, { ...options, append, returnDebug });
+    const ok = Boolean(result?.ok ?? result);
+    if (returnDebug) {
+      attemptsDebug.push({
+        index: i,
+        keywords: keywords.slice(0, 6),
+        append: Boolean(append),
+        ok,
+        debug: result?.debug || null,
+      });
+    }
     if (ok) {
       if (debug) logPhase("fill_success", fieldId, { plan: i, keywords: keywords.slice(0, 3) });
-      return true;
+      return returnDebug
+        ? { ok: true, debug: { fieldId, attempts: attemptsDebug, selected: result?.debug?.selected || null } }
+        : true;
     }
     await page.waitForTimeout(60).catch(() => {});
   }
   if (debug) logPhase("fill_failed", fieldId, { attempts: plans.length });
-  return false;
+  return returnDebug
+    ? { ok: false, debug: { fieldId, attempts: attemptsDebug } }
+    : false;
 }
 
 async function appendStructuredBlockToAnyTextarea(page, text, options = {}) {
@@ -1807,7 +1881,7 @@ async function writePracticeAndOdl(page, job, args) {
   // Scrivi note interne nella tab corrente (dati pratica) PRIMA di navigare all'ODL.
   if (job.internalNotes) {
     try {
-      writeReport.notes.success = await fillWithRetry(
+      const noteAttempt = await fillWithRetry(
         page,
         [
           ["note interne", "note", "pratica", "annotazioni"],
@@ -1816,7 +1890,15 @@ async function writePracticeAndOdl(page, job, args) {
         ],
         String(job.internalNotes).trim(),
         { append: true },
+        { debug: args.debug, fieldId: "notes.primary", returnDebug: args.debug },
       );
+      writeReport.notes.success = Boolean(noteAttempt?.ok ?? noteAttempt);
+      if (args.debug) {
+        writeReport.debug.notes = {
+          ...(writeReport.debug.notes || {}),
+          primaryAttempt: noteAttempt?.debug || null,
+        };
+      }
       if (!writeReport.notes.success) {
         // Diagnostica: conta elementi editabili visibili per debug.
         const editableCount = await safeEvaluate(page, () => {
@@ -1836,6 +1918,7 @@ async function writePracticeAndOdl(page, job, args) {
         );
         writeReport.notes.success = Boolean(noteFallback?.ok ?? noteFallback);
         writeReport.debug.notes = {
+          ...(writeReport.debug.notes || {}),
           editableCount,
           fallbackUsed: true,
           fallbackSuccess: Boolean(noteFallback?.ok ?? noteFallback),
@@ -1845,6 +1928,8 @@ async function writePracticeAndOdl(page, job, args) {
           editableCount,
           fallbackSuccess: Boolean(noteFallback?.ok ?? noteFallback),
           target: noteFallback?.debug?.selected?.tag || null,
+          targetRole: noteFallback?.debug?.selected?.role || null,
+          targetClass: noteFallback?.debug?.selected?.className || null,
         });
       }
       if (!writeReport.notes.success) writeReport.notes.error = "notes_field_not_found";
@@ -2018,11 +2103,17 @@ async function writePracticeAndOdl(page, job, args) {
   }
 
   const noteSummaryBlock = buildOdlSummaryText(job);
+  if (args.debug) {
+    writeReport.debug.notes = {
+      ...(writeReport.debug.notes || {}),
+      noteSummaryBlock: null,
+    };
+  }
   if (writeReport.openedOdl) {
     if (args.debug) {
       writeReport.bottomTabsBeforeNote = await snapshotBottomSectionTabs(page);
     }
-      logPhase("odl_notes_tab", "opening");
+    logPhase("odl_notes_tab", "opening");
     const noteTabOpened = await clickBottomSectionTab(page, "Note interne");
     if (noteTabOpened) {
       await page.waitForTimeout(120);
@@ -2044,6 +2135,8 @@ async function writePracticeAndOdl(page, job, args) {
         writeReport.notes.error = null;
         writeReport.fallbackSummaryWritten = true;
         writeReport.debug.notes.noteSummaryBlock = noteSummaryOk.debug || null;
+      } else if (args.debug) {
+        writeReport.debug.notes.noteSummaryBlock = noteSummaryOk?.debug || null;
       }
     }
   }
@@ -2062,13 +2155,24 @@ async function writePracticeAndOdl(page, job, args) {
       }
       await page.waitForTimeout(60);
     }
+    const sectionDebug = args.debug ? {
+      reparto,
+      yapReparto,
+      summaryLength: 0,
+      summaryPreview: "",
+      fields: {},
+    } : null;
     const sectionSummaryParts = [];
     if (job.internalNotes && !writeReport.notes.success && writeReport.odl.sections.length === 0) {
       sectionSummaryParts.push(`Note interne: ${String(job.internalNotes).trim()}`);
     }
     sectionSummaryParts.push(buildSectionSummary(section));
     const sectionSummary = sectionSummaryParts.join("\n");
-    const sectionWritten = await fillWithRetry(
+    if (sectionDebug) {
+      sectionDebug.summaryLength = sectionSummary.length;
+      sectionDebug.summaryPreview = sectionSummary.slice(0, 180);
+    }
+    const sectionWrittenResult = await fillWithRetry(
       page,
       [
         [...repartoKeys, "descrizione", "lavoro", "odl", "intervento", "note reparto"],
@@ -2077,13 +2181,18 @@ async function writePracticeAndOdl(page, job, args) {
       ],
       sectionSummary,
       { append: true },
+      { debug: args.debug, fieldId: `odl.${reparto}.descrizione`, returnDebug: args.debug },
     );
+    const sectionWritten = Boolean(sectionWrittenResult?.ok ?? sectionWrittenResult);
+    if (sectionDebug) {
+      sectionDebug.fields.descrizione = sectionWrittenResult?.debug || null;
+    }
     writeReport.odl.sections.push({ reparto, yapReparto, written: sectionWritten });
     writeReport.odl.success = writeReport.odl.success || sectionWritten;
 
     if (section.ore_man != null) {
       writeReport.hours.man.attempted = true;
-      const manOk = await fillWithRetry(
+      const manOkResult = await fillWithRetry(
         page,
         [
           [...repartoKeys, "man", "ore uomo", "manodopera"],
@@ -2091,14 +2200,18 @@ async function writePracticeAndOdl(page, job, args) {
           [...repartoKeys, "ore uomo", "man"],
         ],
         String(section.ore_man),
+        {},
+        { debug: args.debug, fieldId: `odl.${reparto}.man`, returnDebug: args.debug },
       );
+      const manOk = Boolean(manOkResult?.ok ?? manOkResult);
       writeReport.hours.man.success = writeReport.hours.man.success || manOk;
       if (!manOk && !writeReport.hours.man.error) writeReport.hours.man.error = "man_field_not_found";
+      if (sectionDebug) sectionDebug.fields.man = manOkResult?.debug || null;
       writeReport.odl.success = writeReport.odl.success || manOk;
     }
     if (section.ore_mac != null) {
       writeReport.hours.mac.attempted = true;
-      const macOk = await fillWithRetry(
+      const macOkResult = await fillWithRetry(
         page,
         [
           [...repartoKeys, "mac", "ore macchina", "manodopera"],
@@ -2106,14 +2219,18 @@ async function writePracticeAndOdl(page, job, args) {
           [...repartoKeys, "ore macchina", "mac"],
         ],
         String(section.ore_mac),
+        {},
+        { debug: args.debug, fieldId: `odl.${reparto}.mac`, returnDebug: args.debug },
       );
+      const macOk = Boolean(macOkResult?.ok ?? macOkResult);
       writeReport.hours.mac.success = writeReport.hours.mac.success || macOk;
       if (!macOk && !writeReport.hours.mac.error) writeReport.hours.mac.error = "mac_field_not_found";
+      if (sectionDebug) sectionDebug.fields.mac = macOkResult?.debug || null;
       writeReport.odl.success = writeReport.odl.success || macOk;
     }
     if (section.materiali_euro != null) {
       writeReport.materials.attempted = true;
-      const matOk = await fillWithRetry(
+      const matOkResult = await fillWithRetry(
         page,
         [
           [...repartoKeys, "materiali", "consumo", "euro"],
@@ -2121,13 +2238,17 @@ async function writePracticeAndOdl(page, job, args) {
           [...repartoKeys, "materiali"],
         ],
         String(section.materiali_euro),
+        {},
+        { debug: args.debug, fieldId: `odl.${reparto}.materiali`, returnDebug: args.debug },
       );
+      const matOk = Boolean(matOkResult?.ok ?? matOkResult);
       writeReport.materials.success = writeReport.materials.success || matOk;
       if (!matOk && !writeReport.materials.error) writeReport.materials.error = "materials_field_not_found";
+      if (sectionDebug) sectionDebug.fields.materiali = matOkResult?.debug || null;
     }
     if (section.smaltimento_applica) {
       writeReport.waste.attempted = true;
-      const smaltOk = await fillWithRetry(
+      const smaltOkResult = await fillWithRetry(
         page,
         [
           [...repartoKeys, "smaltimento", "rifiuti", "%"],
@@ -2135,9 +2256,13 @@ async function writePracticeAndOdl(page, job, args) {
           [...repartoKeys, "rifiuti", "percentuale"],
         ],
         String(section.smaltimento_percentuale ?? 2),
+        {},
+        { debug: args.debug, fieldId: `odl.${reparto}.smaltimento`, returnDebug: args.debug },
       );
+      const smaltOk = Boolean(smaltOkResult?.ok ?? smaltOkResult);
       writeReport.waste.success = writeReport.waste.success || smaltOk;
       if (!smaltOk && !writeReport.waste.error) writeReport.waste.error = "waste_field_not_found";
+      if (sectionDebug) sectionDebug.fields.smaltimento = smaltOkResult?.debug || null;
     }
     if ((section.ricambi || []).length) {
       writeReport.parts.attempted = true;
@@ -2150,7 +2275,7 @@ async function writePracticeAndOdl(page, job, args) {
         .filter(Boolean)
         .join("\n");
       if (partsText) {
-        const partsOk = await fillWithRetry(
+        const partsOkResult = await fillWithRetry(
           page,
           [
             [...repartoKeys, "ricambi", "articoli", "magazzino", "pezzi"],
@@ -2159,10 +2284,17 @@ async function writePracticeAndOdl(page, job, args) {
           ],
           partsText,
           { append: true },
+          { debug: args.debug, fieldId: `odl.${reparto}.parts`, returnDebug: args.debug },
         );
+        const partsOk = Boolean(partsOkResult?.ok ?? partsOkResult);
         writeReport.parts.success = writeReport.parts.success || partsOk;
         if (!partsOk && !writeReport.parts.error) writeReport.parts.error = "parts_field_not_found";
+        if (sectionDebug) sectionDebug.fields.parts = partsOkResult?.debug || null;
       }
+    }
+    if (sectionDebug) {
+      sectionDebug.written = sectionWritten;
+      writeReport.debug.sections.push(sectionDebug);
     }
   }
 

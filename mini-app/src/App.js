@@ -3016,8 +3016,21 @@ function App() {
                   {writeReportDebug.notes?.editableCount != null && (
                     <div><strong>note editable:</strong> {writeReportDebug.notes.editableCount}</div>
                   )}
+                  {writeReportDebug.notes?.primaryAttempt?.attempts?.length > 0 && (
+                    <div>
+                      <strong>note primary:</strong>{' '}
+                      {writeReportDebug.notes.primaryAttempt.attempts
+                        .map((attempt) => `${attempt.index}:${attempt.ok ? 'ok' : 'ko'}${attempt.debug?.selected?.tag ? `/${attempt.debug.selected.tag}` : ''}`)
+                        .join(' | ')}
+                    </div>
+                  )}
                   {writeReportDebug.notes?.fallbackSuccess != null && (
                     <div><strong>note fallback:</strong> {writeReportDebug.notes.fallbackSuccess ? 'ok' : 'failed'}</div>
+                  )}
+                  {writeReportDebug.notes?.noteSummaryBlock?.selected && (
+                    <div>
+                      <strong>note summary:</strong> {[writeReportDebug.notes.noteSummaryBlock.selected.tag, writeReportDebug.notes.noteSummaryBlock.selected.role].filter(Boolean).join(' | ')}
+                    </div>
                   )}
                   {writeReportDebug.notes?.fallbackDebug?.selected && (
                     <div>
@@ -3028,17 +3041,48 @@ function App() {
                       ].filter(Boolean).join(' | ')}
                     </div>
                   )}
+                  {writeReportDebug.odl?.routeReason && (
+                    <div><strong>odl route reason:</strong> {writeReportDebug.odl.routeReason}</div>
+                  )}
+                  {typeof writeReportDebug.odl?.odlRpcReady === 'boolean' && (
+                    <div><strong>odl rpc ready:</strong> {writeReportDebug.odl.odlRpcReady ? 'yes' : 'no'}</div>
+                  )}
+                  {Number.isFinite(writeReportDebug.odl?.odlWaitAttempts) && (
+                    <div><strong>odl wait:</strong> {writeReportDebug.odl.odlWaitAttempts} checks</div>
+                  )}
                   {Array.isArray(writeReportDebug.odl?.fallbackAttempts) && writeReportDebug.odl.fallbackAttempts.length > 0 && (
                     <div><strong>odl attempts:</strong> {writeReportDebug.odl.fallbackAttempts.join(' -> ')}</div>
                   )}
                   {writeReportDebug.odl?.routeResult && (
                     <div><strong>odl route:</strong> {JSON.stringify(writeReportDebug.odl.routeResult)}</div>
                   )}
+                  {Array.isArray(writeReportDebug.odl?.topCandidatesBeforeRetry) && writeReportDebug.odl.topCandidatesBeforeRetry.length > 0 && (
+                    <div>
+                      <strong>odl top before retry:</strong> {writeReportDebug.odl.topCandidatesBeforeRetry.slice(0, 3).map((item) => item.text || '?').join(' | ')}
+                    </div>
+                  )}
+                  {Array.isArray(writeReportDebug.odl?.topCandidates) && writeReportDebug.odl.topCandidates.length > 0 && (
+                    <div>
+                      <strong>odl top:</strong> {writeReportDebug.odl.topCandidates.slice(0, 3).map((item) => item.text || '?').join(' | ')}
+                    </div>
+                  )}
                   {writeReportDebug.odl?.workspaceStateBefore || writeReportDebug.odl?.workspaceStateAfter ? (
                     <div>
                       <strong>odl state:</strong> {writeReportDebug.odl.workspaceStateBefore || '-'} -> {writeReportDebug.odl.workspaceStateAfter || '-'}
                     </div>
                   ) : null}
+                  {Array.isArray(writeReportDebug.sections) && writeReportDebug.sections.length > 0 && (
+                    <div className="yap-result-tech-block">
+                      <strong>sectioni:</strong>
+                      <pre>{JSON.stringify(writeReportDebug.sections.map((section) => ({
+                        reparto: section.reparto,
+                        yapReparto: section.yapReparto,
+                        written: section.written,
+                        summaryLength: section.summaryLength,
+                        fields: Object.fromEntries(Object.entries(section.fields || {}).map(([key, value]) => [key, Boolean(value)])),
+                      })), null, 2)}</pre>
+                    </div>
+                  )}
                   <div className="yap-result-tech-block">
                     <strong>debug raw:</strong>
                     <pre>{JSON.stringify(writeReportDebug, null, 2)}</pre>
