@@ -888,6 +888,82 @@ async function snapshotTopOdlCandidates(page) {
   }).catch(() => []);
 }
 
+async function openFirstOdlEntryFromList(page) {
+  // Quando YAP è sul tab "Ordini di lavoro", mostra una lista ODL.
+  // Bisogna cliccare il primo entry per aprire il form ODL con i sub-tab.
+  const result = await safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    // Cerca righe/elementi nella lista ODL — escludi tab di navigazione, header, bottoni principali
+    const odlListRe = /ordini di lavoro|odl/i;
+    const navTabRe = /dettagli pratica|preventivi|note interne|ordini di lavoro|ordini cliente|fattura|archivio/i;
+    const subTabRe = /descrizione danni|materiali di consumo|smaltimento rifiuti|note interne|tempi|totali|ordini cliente|prospetti/i;
+
+    // Prova 1: bottone/link "Apri" o "Modifica" o simile dentro la lista ODL
+    const actionCandidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Button, .gwt-Anchor")]
+      .filter(isVisible)
+      .filter(el => {
+        const t = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+        return t === "apri" || t === "modifica" || t === "edit" || t === "open" || t === "seleziona";
+      });
+    if (actionCandidates.length) {
+      const target = actionCandidates[0];
+      const rect = target.getBoundingClientRect();
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return { clicked: true, strategy: "action_button", text: (target.textContent || "").trim(), x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2) };
+    }
+
+    // Prova 2: prima TR nella tabella lista ODL (dopo l'header) che ha click handler
+    const tableRows = [...document.querySelectorAll("tbody tr, .gwt-FlexTable tr, .gwt-Grid tr")]
+      .filter(isVisible)
+      .filter(el => {
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        if (!text || text.length < 3) return false;
+        if (subTabRe.test(text) || navTabRe.test(text)) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.height >= 16 && rect.height <= 80 && rect.width >= 100;
+      });
+    if (tableRows.length) {
+      const target = tableRows[0];
+      const rect = target.getBoundingClientRect();
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return { clicked: true, strategy: "table_row", text: (target.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80), x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2) };
+    }
+
+    // Prova 3: td/span/label con testo che contiene un numero (ID ODL) o pattern tipo stato
+    // Es: "ODL-1234", "preventivo", "in corso", "data creazione"
+    const idCandidates = [...document.querySelectorAll("td")]
+      .filter(isVisible)
+      .filter(el => {
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        if (!text || text.length < 2 || text.length > 40) return false;
+        if (navTabRe.test(text) || subTabRe.test(text)) return false;
+        // Cerca celle con numero o ID (pattern ODL comuni: "1", "ODL-1", "Aperto", date brevi)
+        if (!/\d/.test(text) && !/^(aperto|chiuso|in corso|preventivo|bozza)$/i.test(text)) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.height >= 16 && rect.height <= 50;
+      })
+      .sort((a, b) => a.getBoundingClientRect().y - b.getBoundingClientRect().y);
+    if (idCandidates.length) {
+      const target = idCandidates[0];
+      const rect = target.getBoundingClientRect();
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return { clicked: true, strategy: "id_cell", text: (target.textContent || "").trim().slice(0, 80), x: Math.round(rect.x + rect.width/2), y: Math.round(rect.y + rect.height/2) };
+    }
+
+    return { clicked: false, strategy: "none" };
+  }).catch(() => ({ clicked: false, strategy: "error" }));
+
+  if (result?.clicked) {
+    await page.mouse.click(result.x, result.y).catch(() => {});
+    await page.waitForTimeout(200).catch(() => {});
+  }
+  return result;
+}
+
 async function clickBottomSectionTab(page, label) {
   const needle = normalizeLoose(label);
   if (!needle) return false;
@@ -897,6 +973,9 @@ async function clickBottomSectionTab(page, label) {
       const style = window.getComputedStyle(el);
       return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
     };
+    // FIX: rimosso filtro y > innerHeight-140 — le tab ODL sono visibili
+    // ovunque nel viewport (y ~300-900) quando l'ODL è embedded nella pratica.
+    // Il ranking per punteggio + posizione garantisce ancora la scelta corretta.
     const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
       .filter(isVisible)
       .map((el) => ({
@@ -908,7 +987,7 @@ async function clickBottomSectionTab(page, label) {
         rect: el.getBoundingClientRect(),
       }))
       .filter((item) => item.text === target || item.text.includes(target))
-      .filter((item) => item.rect.y > (window.innerHeight - 140))
+      .filter((item) => item.rect.y > 50)
       .map((item) => {
         let score = 0;
         if (item.text === target) score += 20;
@@ -917,6 +996,8 @@ async function clickBottomSectionTab(page, label) {
         if (/tab|item|label/i.test(item.cls)) score += 4;
         if (item.rect.width >= 40 && item.rect.width <= 180) score += 4;
         if (item.rect.height >= 16 && item.rect.height <= 40) score += 3;
+        // Bonus per elementi nella metà inferiore dello schermo (più probabili tab ODL)
+        if (item.rect.y > window.innerHeight * 0.4) score += 2;
         return {
           ...item,
           score,
@@ -946,7 +1027,9 @@ async function snapshotBottomSectionTabs(page) {
       const style = window.getComputedStyle(el);
       return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
     };
-    return [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
+    // FIX: filtro y > innerHeight-160 rimosso — restituisce tab ODL ovunque nel viewport.
+    const odlTabRe = /descrizione danni|materiali di consumo|smaltimento rifiuti|note interne|tempi|totali|ordini cliente|prospetti/i;
+    const allItems = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
       .filter(isVisible)
       .map((el) => {
         const rect = el.getBoundingClientRect();
@@ -963,9 +1046,12 @@ async function snapshotBottomSectionTabs(page) {
         };
       })
       .filter((item) => item.text && item.text.length <= 80)
-      .filter((item) => item.y > (window.innerHeight - 160))
-      .sort((a, b) => a.y - b.y || a.x - b.x)
-      .slice(0, 60);
+      .filter((item) => item.y > 50)
+      .sort((a, b) => a.y - b.y || a.x - b.x);
+    // Restituisce prima le tab ODL riconosciute, poi il resto (limitato)
+    const odlTabs = allItems.filter((item) => odlTabRe.test(item.text));
+    const otherTabs = allItems.filter((item) => !odlTabRe.test(item.text)).slice(0, 30);
+    return [...odlTabs, ...otherTabs].slice(0, 60);
   }).catch(() => []);
 }
 
@@ -1852,15 +1938,38 @@ async function writePracticeAndOdl(page, job, args) {
   let autoAttempts = 0;
   const autoPollMs = Number(process.env.YAP_AUTOMATISMI_POLL_MS) || 1000;
   const autoMaxMs = Math.max(4000, Number(process.env.YAP_AUTOMATISMI_MAX_MS) || 20000);
-  const maxAutoAttempts = Math.ceil(autoMaxMs / autoPollMs); // default 20s / 1s = 20 tentativi, early-exit se pronto
+  const maxAutoAttempts = Math.ceil(autoMaxMs / autoPollMs);
   while ((workspaceState === "loading_shell" || workspaceState === "unknown") && autoAttempts < maxAutoAttempts) {
     await page.waitForTimeout(autoPollMs);
     workspaceState = await getPracticeWorkspaceState(page);
     autoAttempts++;
-    // Early exit se ODL pronto o pratica pronta
-    if (workspaceState === "odl_full" || workspaceState === "detail_form") {
+    // FIX: early-exit SOLO su odl_full. NON uscire su detail_form — gli automatismi
+    // YAP creano l'ODL in background e ci vuole qualche secondo dopo che la pratica
+    // ha mostrato il tab "Dettagli pratica". Uscire subito su detail_form significa
+    // che la navigazione all'ODL fallisce perché l'ODL non esiste ancora.
+    if (workspaceState === "odl_full") {
       logPhase("automatismi_early_exit", workspaceState, { attempts: autoAttempts });
       break;
+    }
+  }
+  // Se la pratica è su detail_form, aspetta che compaia il tab "Ordini di lavoro"
+  // (segnale che gli automatismi hanno creato l'ODL).
+  if (workspaceState === "detail_form" || workspaceState === "practice_shell") {
+    const odlBadgeWaitMs = Number(process.env.YAP_ODL_BADGE_WAIT_MS) || 8000;
+    logPhase("automatismi_odl_badge", "waiting", { state: workspaceState, waitMs: odlBadgeWaitMs });
+    const odlTabVisible = await page.waitForFunction(() => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      return [...document.querySelectorAll("button, a, span, div, td")]
+        .filter(isVisible)
+        .some((el) => /ordini di lavoro/i.test((el.textContent || "").replace(/\s+/g, " ").trim()));
+    }, null, { timeout: odlBadgeWaitMs }).then(() => true).catch(() => false);
+    logPhase("automatismi_odl_badge", odlTabVisible ? "found" : "not_found", { state: workspaceState });
+    if (odlTabVisible) {
+      workspaceState = await getPracticeWorkspaceState(page);
     }
   }
   // Se ancora loading, prova refresh e riprova
@@ -1878,61 +1987,70 @@ async function writePracticeAndOdl(page, job, args) {
     writeReport.practiceScreenshot = practiceShot;
   }
 
-  // Scrivi note interne nella tab corrente (dati pratica) PRIMA di navigare all'ODL.
+  // Scrivi note interne nella view pratica (sub-tab "Note interne") PRIMA di navigare all'ODL.
+  // FIX: su detail_form non ci sono textarea visibili direttamente — bisogna prima navigare
+  // alla sub-tab "Note interne" della pratica, oppure rimandare la scrittura all'ODL.
   if (job.internalNotes) {
     try {
-      const noteAttempt = await fillWithRetry(
-        page,
-        [
-          ["note interne", "note", "pratica", "annotazioni"],
-          ["note", "annotazioni"],
-          ["note"],
-        ],
-        String(job.internalNotes).trim(),
-        { append: true },
-        { debug: args.debug, fieldId: "notes.primary", returnDebug: args.debug },
-      );
-      writeReport.notes.success = Boolean(noteAttempt?.ok ?? noteAttempt);
-      if (args.debug) {
-        writeReport.debug.notes = {
-          ...(writeReport.debug.notes || {}),
-          primaryAttempt: noteAttempt?.debug || null,
-        };
+      // Step 1: prova a navigare al sub-tab "Note interne" nella vista pratica
+      const practiceNoteTabClicked = await clickBottomSectionTab(page, "Note interne").catch(() => false);
+      logPhase("notes_practice_tab", practiceNoteTabClicked ? "clicked" : "not_found", { state: workspaceState });
+      if (practiceNoteTabClicked) {
+        await page.waitForTimeout(200).catch(() => {});
       }
-      if (!writeReport.notes.success) {
-        // Diagnostica: conta elementi editabili visibili per debug.
-        const editableCount = await safeEvaluate(page, () => {
-          const isVisible = (el) => {
-            const r = el.getBoundingClientRect(); const s = window.getComputedStyle(el);
-            return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
-          };
-          return [...document.querySelectorAll("textarea, [contenteditable], [role='textbox']")]
-            .filter(el => isVisible(el) && el.getAttribute("contenteditable") !== "false").length;
-        }).catch(() => -1);
-        logPhase("notes_editable_scan", "info", { editableCount });
-        // Fallback: qualsiasi elemento editabile visibile nella pagina dati pratica.
-        const noteFallback = await appendStructuredBlockToAnyTextarea(
+
+      // Diagnostica: conta elementi editabili visibili
+      const editableCount = await safeEvaluate(page, () => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect(); const s = window.getComputedStyle(el);
+          return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        return [...document.querySelectorAll("textarea, [contenteditable], [role='textbox']")]
+          .filter(el => isVisible(el) && el.getAttribute("contenteditable") !== "false").length;
+      }).catch(() => -1);
+      logPhase("notes_editable_scan", "info", { editableCount, practiceNoteTabClicked });
+
+      if (editableCount > 0) {
+        // Step 2a: c'è un textarea — scrivi con keyword matching
+        const noteAttempt = await fillWithRetry(
           page,
+          [
+            ["note interne", "note", "pratica", "annotazioni"],
+            ["note", "annotazioni"],
+            ["note"],
+          ],
           String(job.internalNotes).trim(),
-          { keywords: ["note interne", "annotazioni", "dettagli pratica", "note"], returnDebug: true },
+          { append: true },
+          { debug: args.debug, fieldId: "notes.primary", returnDebug: args.debug },
         );
-        writeReport.notes.success = Boolean(noteFallback?.ok ?? noteFallback);
-        writeReport.debug.notes = {
-          ...(writeReport.debug.notes || {}),
-          editableCount,
-          fallbackUsed: true,
-          fallbackSuccess: Boolean(noteFallback?.ok ?? noteFallback),
-          fallbackDebug: noteFallback?.debug || null,
-        };
-        logPhase("notes_fallback", writeReport.notes.success ? "done" : "failed", {
-          editableCount,
-          fallbackSuccess: Boolean(noteFallback?.ok ?? noteFallback),
-          target: noteFallback?.debug?.selected?.tag || null,
-          targetRole: noteFallback?.debug?.selected?.role || null,
-          targetClass: noteFallback?.debug?.selected?.className || null,
-        });
+        writeReport.notes.success = Boolean(noteAttempt?.ok ?? noteAttempt);
+        if (args.debug) {
+          writeReport.debug.notes = { ...(writeReport.debug.notes || {}), primaryAttempt: noteAttempt?.debug || null, editableCount };
+        }
+        if (!writeReport.notes.success) {
+          // Fallback: qualsiasi textarea visibile nella pagina
+          const noteFallback = await appendStructuredBlockToAnyTextarea(
+            page,
+            String(job.internalNotes).trim(),
+            { keywords: ["note interne", "annotazioni", "note"], returnDebug: true },
+          );
+          writeReport.notes.success = Boolean(noteFallback?.ok ?? noteFallback);
+          if (args.debug) {
+            writeReport.debug.notes = { ...(writeReport.debug.notes || {}), fallbackUsed: true, fallbackDebug: noteFallback?.debug || null };
+          }
+          logPhase("notes_fallback", writeReport.notes.success ? "done" : "failed", { target: noteFallback?.debug?.selected?.tag || null });
+        }
+      } else {
+        // Step 2b: nessuna textarea visibile (nemmeno dopo aver cliccato il tab)
+        // — non fallire qui, la nota verrà scritta nell'ODL (phase notes_odl_tab).
+        logPhase("notes_practice_skip", "no_textarea", { editableCount, practiceNoteTabClicked });
       }
-      if (!writeReport.notes.success) writeReport.notes.error = "notes_field_not_found";
+      if (!writeReport.notes.success && editableCount <= 0) {
+        // Non è un errore definitivo — sarà scritto nell'ODL
+        writeReport.notes.error = "notes_deferred_to_odl";
+      } else if (!writeReport.notes.success) {
+        writeReport.notes.error = "notes_field_not_found";
+      }
     } catch (error) {
       writeReport.notes.error = error?.message || "notes_write_failed";
     }
@@ -2060,6 +2178,19 @@ async function writePracticeAndOdl(page, job, args) {
       await waitForOdlWorkspaceReady(page, 10000);
       workspaceState = await getPracticeWorkspaceState(page);
       writeReport.debug.odl.workspaceStateAfter = workspaceState;
+      if (!isEffectiveOdlState(workspaceState)) {
+        // FIX: dopo il click sul tab "Ordini di lavoro", YAP mostra la LISTA degli ODL,
+        // non il form direttamente. Bisogna cliccare il primo ODL della lista.
+        logPhase("odl_tab", "trying_list_entry", { state: workspaceState });
+        const listEntryResult = await openFirstOdlEntryFromList(page);
+        writeReport.debug.odl.listEntryAttempt = listEntryResult;
+        logPhase("odl_tab", listEntryResult?.clicked ? "list_entry_clicked" : "list_entry_not_found", { strategy: listEntryResult?.strategy, text: listEntryResult?.text?.slice(0, 60) });
+        if (listEntryResult?.clicked) {
+          await waitForOdlWorkspaceReady(page, 8000);
+          workspaceState = await getPracticeWorkspaceState(page);
+          writeReport.debug.odl.workspaceStateAfter = workspaceState;
+        }
+      }
       if (!isEffectiveOdlState(workspaceState)) {
         await dismissVehicleSearchOverlay(page);
         const secondOdl = await clickOdlSection(page, { candidateIndex: 1, maxY: 240, returnDebug: true });
@@ -2358,42 +2489,58 @@ async function writePracticeAndOdl(page, job, args) {
       writeReport.parts.error = null;
     }
   }
-  if (job.internalNotes && !writeReport.notes.success && hasNeedle(job.internalNotes)) {
-    writeReport.notes.success = true;
-    writeReport.notes.error = null;
-  }
-  for (const section of job.sections || []) {
-    if (section.ore_man != null && !writeReport.hours.man.success && hasNeedle(formatManNeedle(section.ore_man))) {
-      writeReport.hours.man.success = true;
-      writeReport.hours.man.error = null;
+  // FIX: usa verify per auto-recovery SOLO se l'ODL era effettivamente aperto.
+  // Se openedOdl=false, i "match" nel DOM sono falsi positivi (valori di default,
+  // date, numeri comuni come "2" del smaltimento che appaiono ovunque nella pagina).
+  if (writeReport.openedOdl) {
+    if (job.internalNotes && !writeReport.notes.success && hasNeedle(job.internalNotes)) {
+      writeReport.notes.success = true;
+      writeReport.notes.error = null;
     }
-    if (section.ore_mac != null && !writeReport.hours.mac.success && hasNeedle(formatMacNeedle(section.ore_mac))) {
-      writeReport.hours.mac.success = true;
-      writeReport.hours.mac.error = null;
-    }
-    if (section.materiali_euro != null && !writeReport.materials.success && hasNeedle(String(section.materiali_euro))) {
-      writeReport.materials.success = true;
-      writeReport.materials.error = null;
-    }
-    if (section.smaltimento_applica && !writeReport.waste.success && hasNeedle(String(section.smaltimento_percentuale ?? 2))) {
-      writeReport.waste.success = true;
-      writeReport.waste.error = null;
-    }
-    if ((section.ricambi || []).length && !writeReport.parts.success) {
-      const partsSeen = (section.ricambi || []).every((part) => {
-        const name = String(part?.name || part?.nome || "").trim();
-        const qty = String(part?.quantity || part?.quantita || "").trim();
-        if (!name) return true;
-        if (qty) return hasNeedle(`${name} x ${qty}`) || (hasNeedle(name) && hasNeedle(qty));
-        return hasNeedle(name);
-      });
-      if (partsSeen) {
-        writeReport.parts.success = true;
-        writeReport.parts.error = null;
+    for (const section of job.sections || []) {
+      if (section.ore_man != null && !writeReport.hours.man.success && hasNeedle(formatManNeedle(section.ore_man))) {
+        writeReport.hours.man.success = true;
+        writeReport.hours.man.error = null;
+      }
+      if (section.ore_mac != null && !writeReport.hours.mac.success && hasNeedle(formatMacNeedle(section.ore_mac))) {
+        writeReport.hours.mac.success = true;
+        writeReport.hours.mac.error = null;
+      }
+      if (section.materiali_euro != null && !writeReport.materials.success && hasNeedle(String(section.materiali_euro))) {
+        writeReport.materials.success = true;
+        writeReport.materials.error = null;
+      }
+      // FIX: per smaltimento, il valore "2" è troppo generico come needle —
+      // non fare auto-recovery su valori a singola cifra tramite verify scan.
+      const smaltValue = String(section.smaltimento_percentuale ?? 2);
+      if (section.smaltimento_applica && !writeReport.waste.success && smaltValue.length > 1 && hasNeedle(smaltValue)) {
+        writeReport.waste.success = true;
+        writeReport.waste.error = null;
+      }
+      if ((section.ricambi || []).length && !writeReport.parts.success) {
+        const partsSeen = (section.ricambi || []).every((part) => {
+          const name = String(part?.name || part?.nome || "").trim();
+          const qty = String(part?.quantity || part?.quantita || "").trim();
+          if (!name) return true;
+          if (qty) return hasNeedle(`${name} x ${qty}`) || (hasNeedle(name) && hasNeedle(qty));
+          return hasNeedle(name);
+        });
+        if (partsSeen) {
+          writeReport.parts.success = true;
+          writeReport.parts.error = null;
+        }
       }
     }
   }
-  const matched = needles.filter((needle) => normalizedScoped.includes(normalizeLoose(needle))).length;
+  const matchedNeedles = needles.filter((needle) => normalizedScoped.includes(normalizeLoose(needle)));
+  const matched = matchedNeedles.length;
+  // FIX: logga i needle che hanno matchato per diagnostica
+  logPhase("verify_needles", "info", {
+    matched,
+    total: needles.length,
+    matchedList: matchedNeedles.slice(0, 10),
+    notMatchedList: needles.filter((n) => !normalizedScoped.includes(normalizeLoose(n))).slice(0, 10),
+  });
   writeReport.verify = {
     matched,
     total: needles.length,
@@ -2418,6 +2565,22 @@ async function writePracticeAndOdl(page, job, args) {
     writeReport.summary = summary;
   }
   writeReport.fields = buildFieldWriteReport(job, writeReport);
+  // Riepilogo strutturato finale — un solo evento per vedere lo stato completo
+  logPhase("write_summary", "result", {
+    ok: writeReport.ok,
+    openedPractice: writeReport.openedPractice,
+    openedOdl: writeReport.openedOdl,
+    workspaceState: writeReport.workspaceState,
+    notes: writeReport.notes?.success ? "ok" : (writeReport.notes?.error || "failed"),
+    odl: writeReport.odl?.success ? "ok" : (writeReport.odl?.error || "failed"),
+    odlSections: (writeReport.odl?.sections || []).map(s => `${s.reparto}:${s.written ? "ok" : "fail"}`).join(","),
+    materials: writeReport.materials?.success ? "ok" : (writeReport.materials?.attempted ? "fail" : "skip"),
+    waste: writeReport.waste?.success ? "ok" : (writeReport.waste?.attempted ? "fail" : "skip"),
+    hours: `man:${writeReport.hours?.man?.success ? "ok" : (writeReport.hours?.man?.attempted ? "fail" : "skip")} mac:${writeReport.hours?.mac?.success ? "ok" : (writeReport.hours?.mac?.attempted ? "fail" : "skip")}`,
+    parts: writeReport.parts?.success ? "ok" : (writeReport.parts?.attempted ? "fail" : "skip"),
+    verify: `${writeReport.verify?.matched}/${writeReport.verify?.total}`,
+    odlRoute: writeReport.odlRouteEffective ? "route" : (writeReport.odlFallbackClickUsed ? "click" : "none"),
+  });
   return writeReport;
 }
 
