@@ -2907,6 +2907,7 @@ function App() {
       if (phaseSummary && hasFailedPhase) diagnosticItems.push(phaseSummary);
     }
     const writeReport = safeResult.write_report || safeResult.yap?.result?.write_report || null;
+    const writeReportDebug = writeReport?.debug || null;
     if (writeReport?.ok === false) {
       const issues = [
         writeReport.notes?.error ? formatYapWriteReportIssue('note', writeReport.notes.error) : null,
@@ -3005,6 +3006,43 @@ function App() {
                       <pre>{technicalDiagnostics.stderrTail}</pre>
                     </div>
                   )}
+                </div>
+              </details>
+            )}
+            {writeReportDebug && (
+              <details className="yap-result-tech" open={status !== 'complete_synced' && status !== 'deleted' && status !== 'not_found'}>
+                <summary>Debug YAP</summary>
+                <div className="yap-result-tech-body">
+                  {writeReportDebug.notes?.editableCount != null && (
+                    <div><strong>note editable:</strong> {writeReportDebug.notes.editableCount}</div>
+                  )}
+                  {writeReportDebug.notes?.fallbackSuccess != null && (
+                    <div><strong>note fallback:</strong> {writeReportDebug.notes.fallbackSuccess ? 'ok' : 'failed'}</div>
+                  )}
+                  {writeReportDebug.notes?.fallbackDebug?.selected && (
+                    <div>
+                      <strong>note target:</strong> {[
+                        writeReportDebug.notes.fallbackDebug.selected.tag,
+                        writeReportDebug.notes.fallbackDebug.selected.role,
+                        writeReportDebug.notes.fallbackDebug.selected.contenteditable,
+                      ].filter(Boolean).join(' | ')}
+                    </div>
+                  )}
+                  {Array.isArray(writeReportDebug.odl?.fallbackAttempts) && writeReportDebug.odl.fallbackAttempts.length > 0 && (
+                    <div><strong>odl attempts:</strong> {writeReportDebug.odl.fallbackAttempts.join(' -> ')}</div>
+                  )}
+                  {writeReportDebug.odl?.routeResult && (
+                    <div><strong>odl route:</strong> {JSON.stringify(writeReportDebug.odl.routeResult)}</div>
+                  )}
+                  {writeReportDebug.odl?.workspaceStateBefore || writeReportDebug.odl?.workspaceStateAfter ? (
+                    <div>
+                      <strong>odl state:</strong> {writeReportDebug.odl.workspaceStateBefore || '-'} -> {writeReportDebug.odl.workspaceStateAfter || '-'}
+                    </div>
+                  ) : null}
+                  <div className="yap-result-tech-block">
+                    <strong>debug raw:</strong>
+                    <pre>{JSON.stringify(writeReportDebug, null, 2)}</pre>
+                  </div>
                 </div>
               </details>
             )}

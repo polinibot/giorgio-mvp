@@ -791,8 +791,8 @@ async function clickAppointmentPopupFooterSlot(page, slotIndex) {
   return { clicked: true, label: target.label };
 }
 
-async function clickOdlSection(page, { candidateIndex = 0, maxY = 220 } = {}) {
-  const candidate = await safeEvaluate(page, ({ index, topLimit }) => {
+async function clickOdlSection(page, { candidateIndex = 0, maxY = 220, returnDebug = false } = {}) {
+  const candidate = await safeEvaluate(page, ({ index, topLimit, wantDebug }) => {
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
@@ -832,12 +832,33 @@ async function clickOdlSection(page, { candidateIndex = 0, maxY = 220 } = {}) {
         };
       })
       .sort((a, b) => b.score - a.score || a.y - b.y || a.x - b.x);
-    return ranked[index] || ranked[0] || null;
-  }, { index: Math.max(0, Number(candidateIndex) || 0), topLimit: Math.max(120, Number(maxY) || 220) }).catch(() => null);
-  if (!candidate) return { clicked: false, label: null };
-  await page.mouse.click(candidate.x, candidate.y).catch(() => {});
+    const selectedIndex = Math.min(Math.max(0, Number(index) || 0), Math.max(0, ranked.length - 1));
+    const selected = ranked[selectedIndex] || ranked[0] || null;
+    if (!wantDebug) return selected;
+    return {
+      selected,
+      ranked: ranked.slice(0, 8),
+      selectedIndex,
+      candidateCount: ranked.length,
+    };
+  }, { index: Math.max(0, Number(candidateIndex) || 0), topLimit: Math.max(120, Number(maxY) || 220), wantDebug: Boolean(returnDebug) }).catch(() => null);
+  const selected = returnDebug ? candidate?.selected : candidate;
+  if (!selected) return returnDebug ? { clicked: false, label: null, debug: candidate || null } : { clicked: false, label: null };
+  await page.mouse.click(selected.x, selected.y).catch(() => {});
   await page.waitForTimeout(120).catch(() => {});
-  return { clicked: true, label: String(candidate.text || "").slice(0, 100) };
+  return returnDebug
+    ? {
+        clicked: true,
+        label: String(selected.text || "").slice(0, 100),
+        debug: {
+          candidateCount: candidate?.candidateCount || 0,
+          selectedIndex: candidate?.selectedIndex ?? 0,
+          ranked: candidate?.ranked || [],
+          selected: candidate?.selected || null,
+          topLimit: Math.max(120, Number(maxY) || 220),
+        },
+      }
+    : { clicked: true, label: String(selected.text || "").slice(0, 100) };
 }
 
 async function snapshotTopOdlCandidates(page) {
@@ -1515,7 +1536,8 @@ async function fillWithRetry(page, attempts, value, options = {}, { debug = fals
 async function appendStructuredBlockToAnyTextarea(page, text, options = {}) {
   const payload = String(text || "").trim();
   if (!payload) return false;
-  return safeEvaluate(page, ({ blockText, keywordsRaw }) => {
+  const wantDebug = Boolean(options.returnDebug);
+  return safeEvaluate(page, ({ blockText, keywordsRaw, wantDebugInner }) => {
     const keywords = Array.isArray(keywordsRaw)
       ? keywordsRaw.map((item) => String(item || "").toLowerCase().trim()).filter(Boolean)
       : [];
@@ -1568,7 +1590,7 @@ async function appendStructuredBlockToAnyTextarea(page, text, options = {}) {
     const target = targets
       .map((el) => ({ el, score: scoreTarget(el) }))
       .sort((a, b) => b.score - a.score || b.el.getBoundingClientRect().height - a.el.getBoundingClientRect().height)[0]?.el;
-    if (!target) return false;
+    if (!target) return wantDebugInner ? { ok: false, debug: { candidateCount: targets.length, keywords, selected: null } } : false;
     const isInput = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
     const current = isInput ? (target.value || "") : (target.innerText || target.textContent || "");
     const nextValue = current ? `${current}\n${blockText}` : blockText;
@@ -1597,8 +1619,24 @@ async function appendStructuredBlockToAnyTextarea(page, text, options = {}) {
     target.dispatchEvent(new Event("change", { bubbles: true }));
     target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
     target.blur();
-    return true;
-  }, { blockText: payload, keywordsRaw: options.keywords || [] }).catch(() => false);
+    if (!wantDebugInner) return true;
+    return {
+      ok: true,
+      debug: {
+        candidateCount: targets.length,
+        keywords,
+        selected: {
+          tag: target.tagName,
+          role: target.getAttribute("role") || null,
+          className: String(target.className || ""),
+          placeholder: target.getAttribute("placeholder") || null,
+          ariaLabel: target.getAttribute("aria-label") || null,
+          contenteditable: target.getAttribute("contenteditable") || null,
+          textPreview: String(current || "").slice(0, 120),
+        },
+      },
+    };
+  }, { blockText: payload, keywordsRaw: options.keywords || [], wantDebugInner: wantDebug }).catch(() => wantDebug ? { ok: false, debug: { error: "evaluate_failed" } } : false);
 }
 
 async function clickGenericSaveInPractice(page) {
@@ -1690,6 +1728,11 @@ async function writePracticeAndOdl(page, job, args) {
     verify: {
       matched: 0,
       total: 0,
+    },
+    debug: {
+      notes: {},
+      odl: {},
+      sections: [],
     },
     workspaceState: WORKSPACE_STATES.UNKNOWN,
   };
@@ -1789,10 +1832,20 @@ async function writePracticeAndOdl(page, job, args) {
         const noteFallback = await appendStructuredBlockToAnyTextarea(
           page,
           String(job.internalNotes).trim(),
-          { keywords: ["note interne", "annotazioni", "dettagli pratica", "note"] },
+          { keywords: ["note interne", "annotazioni", "dettagli pratica", "note"], returnDebug: true },
         );
-        writeReport.notes.success = noteFallback;
-        logPhase("notes_fallback", noteFallback ? "done" : "failed");
+        writeReport.notes.success = Boolean(noteFallback?.ok ?? noteFallback);
+        writeReport.debug.notes = {
+          editableCount,
+          fallbackUsed: true,
+          fallbackSuccess: Boolean(noteFallback?.ok ?? noteFallback),
+          fallbackDebug: noteFallback?.debug || null,
+        };
+        logPhase("notes_fallback", writeReport.notes.success ? "done" : "failed", {
+          editableCount,
+          fallbackSuccess: Boolean(noteFallback?.ok ?? noteFallback),
+          target: noteFallback?.debug?.selected?.tag || null,
+        });
       }
       if (!writeReport.notes.success) writeReport.notes.error = "notes_field_not_found";
     } catch (error) {
@@ -1819,19 +1872,33 @@ async function writePracticeAndOdl(page, job, args) {
   // F3+F4: naviga all'ODL via hash in-place + gating su RPC
   let odlNavigated = false;
   const practiceUrl = page.url();
+  writeReport.debug.odl = {
+    routeAttempted: false,
+    routeResult: null,
+    fallbackAttempts: [],
+    topCandidatesBeforeRetry: [],
+    topCandidates: [],
+    workspaceStateBefore: workspaceState,
+    workspaceStateAfter: null,
+    urlAfterRoute: null,
+    urlAfterOdl: null,
+  };
   if (/#!pratica/i.test(practiceUrl)) {
     writeReport.odlRouteAttempted = true;
+    writeReport.debug.odl.routeAttempted = true;
     const odlReadyPromise = page.waitForResponse(
       (r) => /\/yap\/action\/(OdlGetAnagraficheDepositoVeicoloAction|OdlGetAction|OdlTableAction|PraticaOdlGetOverviewAction)/.test(r.url()) && r.status() === 200,
       { timeout: 20000 },
     ).then(() => true).catch(() => false);
     const routeResult = await openOdlByRoute(page, practiceUrl);
     if (args.debug) writeReport.odlRouteResult = routeResult;
+    writeReport.debug.odl.routeResult = routeResult;
     logPhase("odl_route", routeResult.navigated ? "navigated" : "failed", { reason: routeResult.reason, idCompanyFolder: routeResult.idCompanyFolder });
     if (routeResult.navigated) {
       logPhase("odl_tab", "route_navigated", { idCompanyFolder: routeResult.idCompanyFolder });
       const odlRpcReady = await odlReadyPromise;
       if (args.debug) writeReport.odlRpcReady = odlRpcReady;
+      writeReport.debug.odl.odlRpcReady = odlRpcReady;
       logPhase("odl_route", "waiting_ready", { rpcReady: odlRpcReady });
       await waitForOdlWorkspaceReady(page, 15000);
       await page.waitForTimeout(400);
@@ -1843,23 +1910,31 @@ async function writePracticeAndOdl(page, job, args) {
         odlWaitAttempts++;
       }
       if (args.debug) writeReport.odlWaitAttempts = odlWaitAttempts;
+      writeReport.debug.odl.odlWaitAttempts = odlWaitAttempts;
       writeReport.workspaceState = workspaceState;
+      writeReport.debug.odl.workspaceStateAfter = workspaceState;
       const urlAfterRoute = page.url();
       writeReport.urlAfterOdlRoute = urlAfterRoute;
+      writeReport.debug.odl.urlAfterRoute = urlAfterRoute;
       const parsedAfterRoute = parsePraticaHashPayload(urlAfterRoute);
       writeReport.pageEnumAfterRoute = parsedAfterRoute.pageEnum ?? (parsedAfterRoute.ok ? "no_page_field" : parsedAfterRoute.reason);
+      writeReport.debug.odl.pageEnumAfterRoute = writeReport.pageEnumAfterRoute;
       if (isEffectiveOdlState(workspaceState)) {
         odlNavigated = true;
         writeReport.odlRouteEffective = true;
         writeReport.openedOdl = true;
+        writeReport.debug.odl.routeEffective = true;
       } else {
         writeReport.odlRouteEffective = false;
         writeReport.odl.error = "odl_route_ineffective";
         writeReport.odlRouteReason = `state_after_route:${workspaceState}`;
+        writeReport.debug.odl.routeEffective = false;
+        writeReport.debug.odl.routeReason = writeReport.odlRouteReason;
         logPhase("odl_route", "ineffective", { workspaceState, pageEnum: writeReport.pageEnumAfterRoute });
       }
     } else {
       writeReport.odlRouteReason = routeResult.reason || "odl_route_failed";
+      writeReport.debug.odl.routeReason = writeReport.odlRouteReason;
     }
   }
 
@@ -1885,6 +1960,7 @@ async function writePracticeAndOdl(page, job, args) {
       }
     }
     if (args.debug) writeReport.odlFallbackAttempts = fallbackAttempts;
+    writeReport.debug.odl.fallbackAttempts = fallbackAttempts;
     if (!odlTab?.clicked) {
       const fallbackOdl = page.locator("button, a, [role='button'], .gwt-Label, span, div, td").filter({ hasText: /ordini di lavoro|\bodl\b/i }).first();
       if (await fallbackOdl.count()) {
@@ -1894,16 +1970,20 @@ async function writePracticeAndOdl(page, job, args) {
     }
     if (odlTab?.clicked) {
       if (args.debug) writeReport.odlTopCandidates = await snapshotTopOdlCandidates(page);
+      writeReport.debug.odl.topCandidates = await snapshotTopOdlCandidates(page);
       logPhase("odl_tab", "click_opened", { label: odlTab.label });
       await waitForOdlWorkspaceReady(page, 10000);
       workspaceState = await getPracticeWorkspaceState(page);
+      writeReport.debug.odl.workspaceStateAfter = workspaceState;
       if (!isEffectiveOdlState(workspaceState)) {
         await dismissVehicleSearchOverlay(page);
-        const secondOdl = await clickOdlSection(page);
+        const secondOdl = await clickOdlSection(page, { candidateIndex: 1, maxY: 240, returnDebug: true });
         if (secondOdl?.clicked) {
           logPhase("odl_tab", "click_hop2", { label: secondOdl.label });
           await waitForOdlWorkspaceReady(page, 10000);
           workspaceState = await getPracticeWorkspaceState(page);
+          writeReport.debug.odl.workspaceStateAfter = workspaceState;
+          writeReport.debug.odl.secondAttempt = secondOdl.debug || null;
         }
       }
       writeReport.workspaceState = workspaceState;
@@ -1957,12 +2037,13 @@ async function writePracticeAndOdl(page, job, args) {
       const noteSummaryOk = await appendStructuredBlockToAnyTextarea(
         page,
         noteSummaryBlock,
-        { keywords: ["note interne", "odl", "descrizione danni", "prospetti"] },
+        { keywords: ["note interne", "odl", "descrizione danni", "prospetti"], returnDebug: true },
       );
-      if (noteSummaryOk) {
+      if (noteSummaryOk?.ok) {
         writeReport.notes.success = true;
         writeReport.notes.error = null;
         writeReport.fallbackSummaryWritten = true;
+        writeReport.debug.notes.noteSummaryBlock = noteSummaryOk.debug || null;
       }
     }
   }
@@ -2096,10 +2177,13 @@ async function writePracticeAndOdl(page, job, args) {
     const fallbackOk = await appendStructuredBlockToAnyTextarea(
       page,
       summary,
-      { keywords: ["odl", "descrizione", "intervento", "note reparto", "materiali di consumo"] },
+      { keywords: ["odl", "descrizione", "intervento", "note reparto", "materiali di consumo"], returnDebug: true },
     );
-    writeReport.notes.success = writeReport.notes.success || fallbackOk;
-    if (fallbackOk && writeReport.notes.error === "notes_field_not_found") writeReport.notes.error = null;
+    writeReport.notes.success = writeReport.notes.success || Boolean(fallbackOk?.ok ?? fallbackOk);
+    if ((fallbackOk?.ok ?? fallbackOk) && writeReport.notes.error === "notes_field_not_found") writeReport.notes.error = null;
+    if (fallbackOk?.debug) {
+      writeReport.debug.notes.genericFallback = fallbackOk.debug;
+    }
   }
 
   logPhase("odl_sections", "done");
