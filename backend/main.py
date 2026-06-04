@@ -1316,6 +1316,55 @@ def _build_incomplete_post_write_audit(audit_detail: Any, write_report: Optional
     }
 
 
+def _build_inline_sync_audit_result(
+    result_data: Dict[str, Any],
+    write_report: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    inline_audit = result_data.get("inline_audit")
+    if not isinstance(inline_audit, dict):
+        return None
+
+    if inline_audit.get("error"):
+        return _build_incomplete_post_write_audit(
+            {
+                "message": str(inline_audit.get("error") or "Audit inline non completato."),
+                "summary": inline_audit.get("summary"),
+            },
+            write_report,
+        )
+
+    present = list(inline_audit.get("present") or [])
+    missing = list(inline_audit.get("missing") or [])
+    mismatch = list(inline_audit.get("mismatch") or [])
+    verified = bool(inline_audit.get("verified"))
+    summary = inline_audit.get("summary") if isinstance(inline_audit.get("summary"), dict) else None
+
+    status_value = "complete_synced" if verified else ("partial_synced" if (present or missing or mismatch) else "agenda_synced")
+    if status_value == "complete_synced":
+        message = "Appuntamento YAP scritto e verificato automaticamente."
+    elif status_value == "partial_synced":
+        message = "Appuntamento scritto su YAP. Verifica automatica completata: alcuni campi sono da ricontrollare."
+    else:
+        message = "Appuntamento scritto su YAP. Verifica automatica non conclusa."
+
+    return {
+        "ok": verified,
+        "completed": True,
+        "technical_failure": False,
+        "verified": verified,
+        "status": status_value,
+        "message": message,
+        "present": present,
+        "missing": missing,
+        "mismatch": mismatch,
+        "summary": summary or {
+            "present": len(present),
+            "missing": len(missing),
+            "mismatch": len(mismatch),
+        },
+    }
+
+
 def _audit_status_from_result(audit_result: Dict[str, Any]) -> str:
     status_value = str(audit_result.get("status") or "").strip()
     if status_value in {"complete_synced", "partial_synced", "agenda_synced", "sync_failed"}:
@@ -2748,6 +2797,8 @@ async def sync_practice_to_yap(
         response_status = "dry_run"
         response_message = result_data.get("message") or result.get("message") or "Dry-run YAP completato: nessuna modifica eseguita."
         audit_result = None
+        response_worker_phases = result.get("worker_phases") or []
+        response_runner = runtime_telemetry.get("runner") if isinstance(runtime_telemetry, dict) else None
 
         if body.dry_run:
             response_status = "dry_run"
@@ -2755,20 +2806,28 @@ async def sync_practice_to_yap(
             external_id = result_data.get("externalId") or result_data.get("external_id")
             if external_id:
                 practice.management_external_id = str(external_id)
-            # Audit inline rimosso: la sync scrive su YAP e salva stato 'agenda_synced'.
-            # L'audit (piÃ¹ lento, apre pratica+ODL) viene eseguito solo on-demand via
-            # il pulsante "Verifica YAP", cosÃ¬ la sync completa in ~30-60s invece di 300s+.
-            practice.synced = True
-            practice.management_sync_status = "agenda_synced"
-            practice.management_last_sync_at = datetime.now(timezone.utc)
-            practice.updated_by_telegram_id = user_data["id"]
-            db.commit()
-            _cache_invalidate_practice(practice.id)
-            response_status = "agenda_synced"
-            response_message = "Appuntamento scritto su YAP. Premi Verifica YAP per controllare tutti i campi."
-            audit_result = None
-            close_phase("audit", "skipped", "Audit rinviato: usa Verifica YAP per il controllo completo.")
-            close_phase("finalize", "completed", "Stato finale persistito.")
+            audit_result = _build_inline_sync_audit_result(result_data, write_report)
+            if audit_result:
+                response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
+                response_message = _audit_message_for_status(response_status, audit_result)
+                close_phase("audit", "completed" if response_status == "complete_synced" else "partial", response_message)
+                close_phase("finalize", "completed", "Stato finale persistito.")
+            else:
+                practice.synced = True
+                practice.management_sync_status = "duplicate" if duplicate else "agenda_synced"
+                practice.management_last_sync_at = datetime.now(timezone.utc)
+                practice.updated_by_telegram_id = user_data["id"]
+                db.commit()
+                _cache_invalidate_practice(practice.id)
+                response_status = "duplicate" if duplicate else "agenda_synced"
+                response_message = result_data.get("message") or (
+                    "Appuntamento già presente in YAP: nessuna modifica necessaria."
+                    if duplicate else
+                    "Appuntamento scritto su YAP. Verifica automatica non disponibile in questa esecuzione."
+                )
+                audit_result = None
+                close_phase("audit", "skipped", "Audit inline non disponibile nel risultato worker.")
+                close_phase("finalize", "completed", "Stato finale persistito.")
         else:
             practice.synced = False
             practice.management_sync_status = "sync_failed"
@@ -2812,6 +2871,8 @@ async def sync_practice_to_yap(
                 "phase_timeline": phase_timeline,
                 "telemetry": runtime_telemetry,
                 "write_report": write_report,
+                "worker_phases": response_worker_phases,
+                "runner": response_runner,
                 "yap": result,
                 "practice": {
                     "id": practice.id,
@@ -2915,6 +2976,8 @@ async def audit_practice_yap(
                 "retryable": action_meta["retryable"] if audit_status == "sync_failed" else audit_status in {"partial_synced"},
                 "audit": audit_result,
                 "telemetry": runtime_telemetry,
+                "worker_phases": audit_result.get("worker_phases") or [],
+                "runner": runtime_telemetry.get("runner") if isinstance(runtime_telemetry, dict) else None,
                 "practice": {
                     "id": practice.id,
                     "synced": practice.synced,
@@ -2946,6 +3009,34 @@ async def audit_practice_yap(
                 practice.updated_by_telegram_id = user_data["id"]
                 db.commit()
                 _cache_invalidate_practice(practice.id)
+                runtime_telemetry = _extract_yap_runtime_telemetry(exc_detail)
+                action_meta = _build_yap_action_from_error(str(exc_detail.get("reason") or exc_detail.get("message") or "audit_deferred"))
+                return APIResponse(
+                    success=True,
+                    data={
+                        "status": prev_status,
+                        "message": deferred_audit["message"],
+                        "status_reason": "audit_deferred",
+                        "error_code": exc_detail.get("error_code") or action_meta["error_code"],
+                        "next_action": "Verifica YAP",
+                        "action_target": "audit",
+                        "retryable": True,
+                        "audit": deferred_audit,
+                        "telemetry": runtime_telemetry,
+                        "worker_phases": exc_detail.get("worker_phases") or [],
+                        "runner": exc_detail.get("runner") or (runtime_telemetry.get("runner") if isinstance(runtime_telemetry, dict) else None),
+                        "stderr_tail": exc_detail.get("stderr_tail"),
+                        "stdout_tail": exc_detail.get("stdout_tail"),
+                        "practice": {
+                            "id": practice.id,
+                            "synced": practice.synced,
+                            "management_sync_status": practice.management_sync_status,
+                            "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
+                            "management_external_id": practice.management_external_id,
+                            "management_audit_result": deferred_audit,
+                        },
+                    },
+                )
             except Exception:
                 db.rollback()
         raise

@@ -109,6 +109,29 @@ function classifyError(err) {
   return detail || 'Errore sconosciuto. Riprova.';
 }
 
+function buildYapErrorResult(err, fallbackStatus = 'sync_failed') {
+  const detail = err?.response?.data?.detail || err?.response?.data || {};
+  const safeDetail = detail && typeof detail === 'object' ? detail : {};
+  const message = safeDetail.message || safeDetail.error || classifyError(err);
+  return normalizeYapResult({
+    status: fallbackStatus,
+    message,
+    status_reason: safeDetail.status_reason || safeDetail.reason || null,
+    error_code: safeDetail.error_code || null,
+    next_action: safeDetail.next_action || '',
+    action_target: safeDetail.action_target || '',
+    retryable: typeof safeDetail.retryable === 'boolean' ? safeDetail.retryable : true,
+    worker_phases: safeDetail.worker_phases || [],
+    runner: safeDetail.runner || null,
+    stderr_tail: safeDetail.stderr_tail || '',
+    stdout_tail: safeDetail.stdout_tail || '',
+    telemetry: safeDetail.telemetry || null,
+    audit: safeDetail.audit || null,
+    practice: safeDetail.practice || null,
+    error: safeDetail,
+  });
+}
+
 function actionLabelFromTarget(actionTarget) {
   if (actionTarget === 'sync') return 'Riprova sync';
   if (actionTarget === 'audit') return 'Verifica YAP';
@@ -316,38 +339,58 @@ function formatProgressElapsed(startedAt) {
   return Math.max(0, Math.round(elapsedMs / 1000));
 }
 
+function getYapProgressPercent(action, startedAt) {
+  const elapsed = formatProgressElapsed(startedAt);
+  const pointsByAction = {
+    sync: [[0, 4], [6, 10], [16, 22], [28, 38], [42, 56], [58, 70], [78, 82], [98, 89], [130, 93], [190, 95]],
+    audit: [[0, 4], [7, 12], [18, 26], [34, 44], [52, 60], [76, 74], [110, 82], [150, 88], [210, 92]],
+    delete: [[0, 4], [6, 14], [18, 32], [30, 50], [44, 66], [62, 78], [90, 86], [140, 91]],
+  };
+  const points = pointsByAction[action] || pointsByAction.audit;
+  if (elapsed <= points[0][0]) return points[0][1];
+  for (let i = 1; i < points.length; i += 1) {
+    const [prevTime, prevPercent] = points[i - 1];
+    const [nextTime, nextPercent] = points[i];
+    if (elapsed <= nextTime) {
+      const ratio = (elapsed - prevTime) / Math.max(1, nextTime - prevTime);
+      return Number((prevPercent + ((nextPercent - prevPercent) * ratio)).toFixed(1));
+    }
+  }
+  return points[points.length - 1][1];
+}
+
 function getYapProgressLabel(action, startedAt, fallback = '') {
   const elapsed = formatProgressElapsed(startedAt);
   const hints = {
     sync: [
       [0,   'YAP: avvio browser...'],
-      [5,   'YAP: ripristino sessione in corso...'],
-      [15,  'YAP: navigazione agenda...'],
-      [25,  'YAP: controllo duplicati...'],
-      [32,  'YAP: apertura slot e compilazione popup...'],
-      [42,  'YAP: salvataggio agenda in corso...'],
-      [52,  'YAP: scrittura pratica e ODL...'],
-      [75,  'YAP: elaborazione in corso (ci vuole un po\')...'],
-      [110, 'YAP: quasi pronto, attendere...'],
-      [150, 'YAP: operazione lunga, non chiudere...'],
+      [6,   'YAP: ripristino sessione...'],
+      [14,  'YAP: accesso al portale...'],
+      [26,  'YAP: apertura agenda...'],
+      [38,  'YAP: controllo duplicati...'],
+      [50,  'YAP: salvataggio appuntamento...'],
+      [64,  'YAP: scrittura pratica e ODL...'],
+      [82,  'YAP: verifica automatica campi...'],
+      [110, 'YAP: conferma finale della verifica...'],
+      [150, 'YAP: portale lento, attendere ancora...'],
     ],
     audit: [
       [0,  'YAP: avvio browser...'],
-      [5,  'YAP: ripristino sessione...'],
-      [15, 'YAP: apertura appuntamento in agenda...'],
-      [30, 'YAP: lettura campi e tag...'],
-      [50, 'YAP: confronto audit in corso...'],
-      [75, 'YAP: verifica completamento campi...'],
-      [110, 'YAP: quasi pronto, attendere...'],
-      [150, 'YAP: operazione lunga, non chiudere...'],
+      [7,  'YAP: ripristino sessione...'],
+      [18, 'YAP: apertura appuntamento in agenda...'],
+      [34, 'YAP: lettura campi e tag...'],
+      [52, 'YAP: confronto con i dati della pratica...'],
+      [76, 'YAP: verifica finale campi...'],
+      [110, 'YAP: chiusura verifica...'],
+      [150, 'YAP: portale lento, attendere ancora...'],
     ],
     delete: [
       [0,  'YAP: avvio browser...'],
-      [5,  'YAP: ripristino sessione...'],
-      [15, 'YAP: ricerca appuntamento in agenda...'],
-      [25, 'YAP: apertura dettagli...'],
-      [35, 'YAP: conferma eliminazione...'],
-      [50, 'YAP: verifica rimozione...'],
+      [6,  'YAP: ripristino sessione...'],
+      [18, 'YAP: ricerca appuntamento in agenda...'],
+      [30, 'YAP: apertura dettagli...'],
+      [44, 'YAP: conferma eliminazione...'],
+      [62, 'YAP: verifica rimozione...'],
     ],
   };
   const actionHints = hints[action] || [];
@@ -368,7 +411,7 @@ function getYapAuditResult(resultOrPractice) {
 function formatYapStatusReason(reason) {
   const normalized = String(reason || '').trim().toLowerCase();
   if (!normalized) return '';
-  if (normalized === 'audit_deferred') return 'verifica completa in attesa';
+  if (normalized === 'audit_deferred') return 'verifica automatica non conclusa';
   if (normalized === 'appointment_not_verified') return 'appuntamento non verificato';
   if (normalized === 'audit_not_completed') return 'audit non completato';
   if (normalized.startsWith('strict_mismatch_missing_')) return 'alcuni campi non coincidono con l’atteso';
@@ -401,7 +444,7 @@ function formatYapPracticeStatus(practice) {
   const status = String(practice?.management_sync_status || '').trim();
   if (status === 'complete_synced') return 'Completa';
   if (status === 'partial_synced') return 'Parziale';
-  if (status === 'agenda_synced') return 'Agenda scritta (verifica in attesa)';
+  if (status === 'agenda_synced') return 'Agenda scritta (verifica incompleta)';
   if (status === 'sync_failed') return 'Sync YAP fallita';
   if (status === 'deleted') return 'Appuntamento eliminato da YAP';
   if (status === 'blocked_by_odl') return 'Eliminazione bloccata da ODL';
@@ -1755,16 +1798,12 @@ function App() {
     yapActionProgressTimerRef.current = setInterval(() => {
       setYapActionProgress((current) => {
         if (!current || current.status !== 'running') return current;
-        const caps = { sync: 93, delete: 91, audit: 91 };
-        const cap = caps[current.action] ?? 91;
-        const elapsed = (Date.now() - current.startedAt) / 1000;
-        const increment = elapsed < 10 ? 1.8 : elapsed < 30 ? 0.9 : elapsed < 60 ? 0.45 : 0.18;
-        const nextPercent = Math.min(cap, Number((current.percent + increment).toFixed(1)));
+        const nextPercent = getYapProgressPercent(current.action, current.startedAt);
         const nextLabel = getYapProgressLabel(current.action, current.startedAt, current.label);
         if (nextPercent === current.percent && nextLabel === current.label) return current;
         return { ...current, percent: nextPercent, label: nextLabel };
       });
-    }, 400);
+    }, 800);
   }, [stopYapActionProgressTimers]);
 
   const finishYapActionProgress = useCallback((label, status = 'success', clearDelay = 1400) => {
@@ -2563,25 +2602,15 @@ function App() {
       if (['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(data.status)) {
         invalidatePracticeCaches(id);
         if (!silent) {
-          // Appuntamento scritto su YAP (RPC confermata): mostralo SUBITO come successo.
-          // La verifica parte in background e non blocca piu' la UI con "risposta lenta".
+          const tone = data.status === 'complete_synced'
+            ? 'success'
+            : (data.status === 'duplicate' ? 'info' : 'warning');
           addToast(data.status === 'duplicate'
             ? (data.message || 'Agenda già presente in YAP: nessuna modifica necessaria')
             : (data.message || 'Appuntamento salvato su YAP ✓ (verifica in corso...)'),
-            'success');
+            tone);
         }
         loadDetail(id);
-        if (['agenda_synced', 'partial_synced', 'complete_synced', 'synced'].includes(data.status)) {
-          console.log('[YAP] Auto-audit scheduled for practice', id, 'status:', data.status);
-          setTimeout(() => {
-            if (auditYapAppointmentRef.current) {
-              console.log('[YAP] Starting auto-audit...');
-              auditYapAppointmentRef.current(id, { debug: false, background: true });
-            } else {
-              console.warn('[YAP] Auto-audit skipped: ref not ready');
-            }
-          }, 2000);
-        }
       } else if (data.status === 'dry_run') {
         if (!silent) addToast('Dry-run YAP completato: nessuna modifica eseguita', 'info');
       } else if (data.status === 'not_ready') {
@@ -2606,12 +2635,7 @@ function App() {
           '\nphases:', JSON.stringify(detail.worker_phases || [], null, 2),
           '\nstderr_tail:\n', detail.stderr_tail || '');
       }
-      const errorResult = {
-        status: 'sync_failed',
-        message: classifyError(err),
-        retryable: true,
-        error: detail || err?.message || 'sync_failed',
-      };
+      const errorResult = buildYapErrorResult(err, 'sync_failed');
       setYapLastResult(errorResult);
       if (!silent) addToast(errorResult.message, 'error');
       if (!silent) finishYapActionProgress(errorResult.message || 'Sync YAP fallita', 'error', 0);
@@ -2678,12 +2702,7 @@ function App() {
       return data;
     } catch (err) {
       rememberError('yap.delete', err);
-      const errorResult = {
-        status: 'delete_failed',
-        message: classifyError(err),
-        retryable: true,
-        error: err?.response?.data?.detail || err?.response?.data || err?.message || 'delete_failed',
-      };
+      const errorResult = buildYapErrorResult(err, 'delete_failed');
       setYapLastResult(errorResult);
       addToast(errorResult.message, 'error');
       finishYapActionProgress(errorResult.message || 'Eliminazione YAP fallita', 'error', 0);
@@ -2743,12 +2762,7 @@ function App() {
         return { status: 'cancelled' };
       }
       rememberError('yap.audit', err);
-      const errorResult = {
-        status: 'sync_failed',
-        message: classifyError(err),
-        retryable: true,
-        error: err?.response?.data?.detail || err?.response?.data || err?.message || 'audit_failed',
-      };
+      const errorResult = buildYapErrorResult(err, 'sync_failed');
       if (background) {
         // Verifica in background fallita: NON tocchiamo il risultato della sync
         // (l'appuntamento e' stato comunque scritto). Niente toast/spinner di errore.
@@ -2855,8 +2869,6 @@ function App() {
     if (Number.isFinite(safeResult.preSync?.score)) primaryMeta.push(`Pre-sync ${safeResult.preSync.score}/100`);
     const saveAttempts = Number(telemetry?.saveAttempts || safeResult.yap?.result?.telemetry?.saveAttempts || 0);
     if (saveAttempts > 0) primaryMeta.push(`${saveAttempts} ${saveAttempts === 1 ? 'tentativo' : 'tentativi'}`);
-    const phaseProgress = summarizePhaseProgress(safeResult.phase_timeline);
-    if (phaseProgress) primaryMeta.push(phaseProgress);
     const elapsedLabel = formatYapElapsedMs(telemetry?.total_elapsed_ms);
     if (elapsedLabel) primaryMeta.push(`Tempo ${elapsedLabel}`);
     const sessionLabel = formatYapSessionLabel(telemetry, status);
@@ -2880,7 +2892,7 @@ function App() {
       const phaseSummary = summarizePhaseTimeline(safeResult.phase_timeline);
       const hasFailedPhase = Array.isArray(safeResult.phase_timeline)
         && safeResult.phase_timeline.some((phase) => phase?.status === 'failed');
-      if (phaseSummary && (!phaseProgress || hasFailedPhase)) diagnosticItems.push(phaseSummary);
+      if (phaseSummary && hasFailedPhase) diagnosticItems.push(phaseSummary);
     }
     const writeReport = safeResult.write_report || safeResult.yap?.result?.write_report || null;
     if (writeReport?.ok === false) {
@@ -2911,7 +2923,7 @@ function App() {
       }
     }
     const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
-    const canAudit = showRetry && resolvedPracticeId && ['sync_failed', 'audit_failed'].includes(status);
+    const canAudit = showRetry && resolvedPracticeId && ['sync_failed', 'audit_failed', 'partial_synced', 'agenda_synced'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
     const canActionHint = Boolean(
       resolvedPracticeId
@@ -2921,12 +2933,15 @@ function App() {
     const showSyncHint = canActionHint && actionTarget === 'sync' && !canRetry;
     const showAuditHint = canActionHint && actionTarget === 'audit' && !canAudit;
     const showDeleteHint = canActionHint && actionTarget === 'delete' && !canDelete;
+    const statusTitle = audit?.technical_failure === true
+      ? 'Verifica YAP incompleta'
+      : (titleMap[status] || titleMap.unknown);
 
     return (
       <div className={`yap-result-banner ${toneClass}`}>
         <div className="yap-result-summary">
           <div>
-            <div className="yap-result-status">{titleMap[status] || titleMap.unknown}</div>
+            <div className="yap-result-status">{statusTitle}</div>
             {message && <div className="yap-result-message">{message}</div>}
             {primaryMeta.length > 0 && (
               <div className="yap-result-badges">
@@ -2943,7 +2958,7 @@ function App() {
               </div>
             )}
             {technicalDiagnostics && (
-              <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed'}>
+              <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || audit?.technical_failure === true}>
                 <summary>Crash log YAP</summary>
                 <div className="yap-result-tech-body">
                   {technicalDiagnostics.runner?.finished_at && (
@@ -2982,7 +2997,7 @@ function App() {
                 </div>
               </details>
             )}
-            {status === 'sync_failed' && ['YAP_TIMEOUT', 'YAP_GENERIC_ERROR', 'YAP_SAVE_NOT_CONFIRMED'].includes(errorCode) && (
+            {(technicalDiagnostics || status === 'sync_failed' || audit?.technical_failure === true) && (
               <YapCrashLogButton initData={initData} telegramUserId={telegramUserId} />
             )}
           </div>

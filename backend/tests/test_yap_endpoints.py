@@ -178,7 +178,7 @@ class TestYapSyncEndpoints:
         assert "Configurazione YAP mancante" in data["detail"]["message"]
         assert called["value"] is False
 
-    def test_yap_sync_returns_agenda_written_state_and_defers_audit(self, client, sample_practice, monkeypatch):
+    def test_yap_sync_returns_complete_status_when_inline_audit_verifies_everything(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
@@ -197,8 +197,15 @@ class TestYapSyncEndpoints:
                 "result": {
                     "saved": True,
                     "mode": "commit",
-                    "message": "Appuntamento salvato su YAP.",
+                    "message": "Appuntamento YAP scritto e verificato: tutto ok.",
+                    "status": "complete_synced",
                     "telemetry": {"saveAttempts": 1},
+                    "inline_audit": {
+                        "verified": True,
+                        "present": [{"field": "cosa", "expected": "YAPTEST01"}],
+                        "missing": [],
+                        "summary": {"present": 1, "missing": 0, "fields": ["cosa"]},
+                    },
                     "write_report": {
                         "attempted": True,
                         "ok": True,
@@ -219,20 +226,20 @@ class TestYapSyncEndpoints:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["status"] == "agenda_synced"
-        assert "premi verifica yap" in data["message"].lower()
-        assert data["status_reason"] == "audit_deferred"
-        assert data["practice"]["management_sync_status"] == "agenda_synced"
+        assert data["status"] == "complete_synced"
+        assert "verificato automaticamente" in data["message"].lower()
+        assert data["status_reason"] == "strict_match_complete"
+        assert data["practice"]["management_sync_status"] == "complete_synced"
         assert data["practice"]["synced"] is True
-        assert data["audit"] is None
+        assert data["audit"]["verified"] is True
         assert isinstance(data.get("phase_timeline"), list)
         assert data["telemetry"]["saveAttempts"] == 1
         assert any(item.get("name") == "precheck" for item in data["phase_timeline"])
         assert any(item.get("name") == "write" for item in data["phase_timeline"])
-        assert any(item.get("name") == "audit" and item.get("status") == "skipped" for item in data["phase_timeline"])
+        assert any(item.get("name") == "audit" and item.get("status") == "completed" for item in data["phase_timeline"])
         assert isinstance(data.get("write_report"), dict)
 
-    def test_yap_sync_keeps_write_report_details_when_audit_is_deferred(self, client, sample_practice, monkeypatch):
+    def test_yap_sync_keeps_write_report_details_when_inline_audit_is_partial(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
@@ -251,8 +258,15 @@ class TestYapSyncEndpoints:
                 "result": {
                     "saved": True,
                     "mode": "commit",
-                    "message": "Appuntamento salvato su YAP.",
+                    "message": "Appuntamento scritto su YAP. Verifica automatica completata: alcuni campi sono da ricontrollare.",
+                    "status": "agenda_synced",
                     "telemetry": {"saveAttempts": 1},
+                    "inline_audit": {
+                        "verified": False,
+                        "present": [{"field": "cosa", "expected": "YAPTEST01"}],
+                        "missing": [{"field": "odl_notes", "expected": "note interne"}],
+                        "summary": {"present": 1, "missing": 1, "fields": ["cosa"]},
+                    },
                     "write_report": {
                         "attempted": True,
                         "ok": False,
@@ -273,15 +287,15 @@ class TestYapSyncEndpoints:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["status"] == "agenda_synced"
-        assert data["status_reason"] == "audit_deferred"
+        assert data["status"] == "partial_synced"
+        assert data["status_reason"] == "strict_mismatch_missing_1_mismatch_0"
         assert data["error_code"] is None
         assert data["action_target"] is None
         assert data["next_action"] is None
-        assert data["practice"]["management_sync_status"] == "agenda_synced"
-        assert data["practice"]["synced"] is True
-        assert data["audit"] is None
-        assert any(item.get("name") == "audit" and item.get("status") == "skipped" for item in data["phase_timeline"])
+        assert data["practice"]["management_sync_status"] == "partial_synced"
+        assert data["practice"]["synced"] is False
+        assert data["audit"]["missing"][0]["field"] == "odl_notes"
+        assert any(item.get("name") == "audit" and item.get("status") == "partial" for item in data["phase_timeline"])
         assert data["write_report"]["notes"]["error"] == "notes_field_not_found"
 
     def test_yap_sync_surfaces_worker_phase_details_on_timeout(self, client, sample_practice, monkeypatch):
@@ -400,7 +414,13 @@ class TestYapSyncEndpoints:
             json={},
         )
 
-        assert response.status_code == 504
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "agenda_synced"
+        assert data["status_reason"] == "audit_deferred"
+        assert data["error_code"] == "YAP_TIMEOUT"
+        assert data["action_target"] == "audit"
+        assert data["audit"]["completed"] is False
         db_session.refresh(practice)
         persisted = _json.loads(practice.management_audit_result)
         assert persisted["status"] == "agenda_synced"
