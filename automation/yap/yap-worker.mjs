@@ -3077,24 +3077,23 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 4 } = {}) {
       // ("Salvataggio non confermato dopo 3 tentativi") quando la coordinata cadeva
       // sulla barra-titolo/drag del popup invece che sull'icona. Il locator colpisce
       // l'elemento reale.
-      let locatorClicked = false;
       try {
         const popupScope = page.locator(".gwt-DecoratedPopupPanel, .gwt-PopupPanel").last();
-        const saveLeaf = popupScope.locator("span.gwt-InlineLabel, .gwt-InlineLabel, span")
+        const saveLeaf = popupScope.locator("span.gwt-InlineLabel")
           .filter({ hasText: /^check$/ }).first();
         if (await saveLeaf.count().catch(() => 0)) {
           await saveLeaf.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
-          await saveLeaf.click({ timeout: 2500 }).catch(() => {});
-          locatorClicked = true;
+          await saveLeaf.click({ timeout: 2000 }).catch(() => {});
+          await page.waitForTimeout(80).catch(() => {});
         }
-      } catch (_e) { /* fallback sotto */ }
-      // FALLBACK: coordinate del candidate (page.mouse.click è OS-level).
-      // Prima move per simulare hover (alcuni GWT button attivano solo su hover+click).
-      if (!locatorClicked) {
-        await page.mouse.move(candidate.x, candidate.y);
-        await page.waitForTimeout(60).catch(() => {});
-        await page.mouse.click(candidate.x, candidate.y, { button: "left", clickCount: 1 });
-      }
+      } catch (_e) { /* il click a coordinate sotto resta comunque */ }
+      // Click a coordinate del candidate (page.mouse.click è OS-level): eseguito
+      // SEMPRE — anche dopo il locator — perché è la via storicamente affidabile e
+      // non va mai saltata. Prima move per simulare hover (alcuni GWT button
+      // attivano solo su hover+click).
+      await page.mouse.move(candidate.x, candidate.y);
+      await page.waitForTimeout(60).catch(() => {});
+      await page.mouse.click(candidate.x, candidate.y, { button: "left", clickCount: 1 });
       // Secondo tentativo: cerca la foglia SPAN e clicca anche lì (per sicurezza)
       const domClicked = await safeEvaluate(page, () => {
         const isVisible = (el) => {
