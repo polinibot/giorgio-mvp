@@ -124,15 +124,17 @@ def _initialize_database() -> None:
         raise
 
 # --- CORS ---
-# The localhost/127.0.0.1 origin regex is only enabled in DEBUG so it is never
-# accepted in production.
+# Il regex localhost è abilitato in DEBUG o quando SMOKE_TEST_SECRET è configurato
+# (i test Playwright prod-smoke girano su 127.0.0.1:34000 e puntano alla prod API).
+# 127.0.0.1 non è raggiungibile dall'esterno, quindi questo non apre rischi CORS reali.
+_allow_localhost_cors = DEBUG or bool(settings.smoke_test_secret)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=LOCAL_DEV_ORIGIN_REGEX if DEBUG else None,
+    allow_origin_regex=LOCAL_DEV_ORIGIN_REGEX if _allow_localhost_cors else None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Telegram-Init-Data", "X-Telegram-User-Id", "X-Yap-Worker-Secret"],
+    allow_headers=["Content-Type", "Authorization", "X-Telegram-Init-Data", "X-Telegram-User-Id", "X-Yap-Worker-Secret", "X-Smoke-Secret"],
 )
 
 

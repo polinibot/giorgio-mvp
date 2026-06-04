@@ -6,7 +6,7 @@ const WEB_PORT = process.env.SMOKE_PROD_WEB_PORT || '34000';
 
 module.exports = defineConfig({
   testDir: './smoke',
-  testMatch: /.*\.prod\.spec\.js$/,
+  testMatch: ['**/prod-smoke.spec.js'],
   timeout: 60_000,
   fullyParallel: false,
   retries: 1,
