@@ -472,8 +472,13 @@ test('eliminazione multipla: crea 2 pratiche, seleziona tutto e elimina', async 
   // di Railway che renderebbe il test flaky.
   // Registrate DOPO setupSmokeAuth (beforeEach) → LIFO: hanno priorità.
   //
+  // NB: usiamo RegExp invece di glob. I glob Playwright devono matchare l'URL
+  // INTERO inclusa la query string; il frontend aggiunge ?user_id=... a ogni
+  // chiamata, quindi un glob '.../yap/appointment' NON matcha
+  // '.../yap/appointment?user_id=123' e il mock non scatterebbe.
+  //
   // 1. DELETE /practices/{id}/yap/appointment → mock "not_found" istantaneo
-  await page.route(`${PROD_API}/practices/*/yap/appointment`, async (route) => {
+  await page.route(/\/practices\/\d+\/yap\/appointment/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -481,9 +486,9 @@ test('eliminazione multipla: crea 2 pratiche, seleziona tutto e elimina', async 
     });
   });
   // 2. DELETE /practices/{id} (delete locale) → mock 200 istantaneo.
-  //    Il glob '*' non attraversa '/', quindi NON matcha .../yap/appointment.
-  //    Solo i DELETE vengono mockati; POST/GET passano a setupSmokeAuth via fallback.
-  await page.route(`${PROD_API}/practices/*`, async (route) => {
+  //    La regex termina con (\?|$) → NON matcha .../practices/{id}/yap/appointment
+  //    (dopo l'id c'è '/'). Solo i DELETE vengono mockati; il resto passa oltre.
+  await page.route(/\/practices\/\d+(\?|$)/, async (route) => {
     if (route.request().method() === 'DELETE') {
       await route.fulfill({
         status: 200,
@@ -548,8 +553,9 @@ test('eliminazione multipla: crea 2 pratiche, seleziona tutto e elimina', async 
 // ─────────────────────────────────────────────────────────────
 
 test('elimina da YAP: il bottone avvia l\'operazione e mostra una risposta', async ({ page }) => {
-  // Mock YAP (LIFO → ha priorità su setupSmokeAuth): evita worker reale Railway
-  await page.route(`${PROD_API}/practices/*/yap/appointment`, async (route) => {
+  // Mock YAP via RegExp (LIFO → priorità su setupSmokeAuth): evita worker reale.
+  // RegExp necessaria: il glob non matcherebbe la query ?user_id=... appesa dal FE.
+  await page.route(/\/practices\/\d+\/yap\/appointment/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
