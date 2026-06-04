@@ -1282,6 +1282,14 @@ def _write_report_issue_labels(write_report: Optional[Dict[str, Any]]) -> List[s
         value = write_report.get(key)
         if isinstance(value, dict) and value.get("error"):
             issues.append(label)
+    if not issues and write_report.get("ok") is False:
+        generic_error = str(write_report.get("error") or "").strip().lower()
+        if "odl" in generic_error:
+            issues.append("ODL")
+        elif "note" in generic_error:
+            issues.append("note")
+        else:
+            issues.append("post-scrittura")
     return issues
 
 
@@ -1369,7 +1377,8 @@ def _build_inline_sync_audit_result(
         return None
 
     if inline_audit.get("error"):
-        if _write_report_issue_labels(write_report) or inline_audit.get("present") or inline_audit.get("missing") or inline_audit.get("mismatch"):
+        write_issues = _write_report_issue_labels(write_report)
+        if write_issues or write_report.get("ok") is False or write_report.get("error") or inline_audit.get("present") or inline_audit.get("missing") or inline_audit.get("mismatch"):
             return _build_post_write_review_audit(
                 {
                     "message": str(inline_audit.get("error") or "Verifica automatica parziale."),

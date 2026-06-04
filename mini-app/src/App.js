@@ -2957,7 +2957,7 @@ function App() {
                 ))}
               </div>
             )}
-            {technicalDiagnostics && (
+            {technicalDiagnostics && (status === 'sync_failed' || status === 'delete_failed' || showTechnicalAuditState) && (
               <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || showTechnicalAuditState}>
                 <summary>Crash log YAP</summary>
                 <div className="yap-result-tech-body">

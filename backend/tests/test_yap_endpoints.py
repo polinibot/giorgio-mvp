@@ -353,6 +353,58 @@ class TestYapSyncEndpoints:
         assert "da ricontrollare" in data["message"].lower()
         assert data["write_report"]["odl"]["error"] == "odl_route_ineffective"
 
+    def test_yap_sync_softens_top_level_write_report_errors_for_partial_inline_audit(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+        from automation_service import AutomationService
+
+        monkeypatch.setattr(
+            AutomationService,
+            "pre_sync_check",
+            staticmethod(lambda payload: {"ready": True, "score": 92, "issues": [], "warnings": []}),
+        )
+
+        async def fake_run_yap_script(script_name, *args, **kwargs):
+            assert script_name == "yap-worker.mjs"
+            return {
+                "result": {
+                    "saved": True,
+                    "mode": "commit",
+                    "message": "Appuntamento scritto su YAP. Verifica automatica parziale.",
+                    "status": "agenda_synced",
+                    "telemetry": {"saveAttempts": 1},
+                    "inline_audit": {
+                        "verified": False,
+                        "error": "Popup not found for audit",
+                        "summary": {"present": 0, "missing": 0},
+                    },
+                    "write_report": {
+                        "attempted": True,
+                        "ok": False,
+                        "error": "odl write crashed before field-level report",
+                    },
+                },
+                "stdout": "",
+                "stderr": "",
+            }
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/sync?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "partial_synced"
+        assert data["status_reason"] == "post_write_review_needed"
+        assert data["error_code"] is None
+        assert data["audit"]["technical_failure"] is False
+        assert "odl" in data["message"].lower()
+
     def test_yap_sync_surfaces_worker_phase_details_on_timeout(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
