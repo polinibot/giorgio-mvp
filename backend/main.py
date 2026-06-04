@@ -1316,6 +1316,50 @@ def _build_incomplete_post_write_audit(audit_detail: Any, write_report: Optional
     }
 
 
+def _build_post_write_review_audit(audit_detail: Any, write_report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    detail = audit_detail if isinstance(audit_detail, dict) else {"message": str(audit_detail or "Verifica automatica parziale.")}
+    write_issues = _write_report_issue_labels(write_report)
+    present = list(detail.get("present") or [])
+    missing = list(detail.get("missing") or [])
+    mismatch = list(detail.get("mismatch") or [])
+    summary = detail.get("summary") if isinstance(detail.get("summary"), dict) else None
+
+    message = "Appuntamento scritto su YAP. Verifica automatica parziale."
+    if write_issues:
+        message = f"Appuntamento scritto su YAP. Da ricontrollare: {', '.join(write_issues)}."
+
+    next_steps = ["Apri la tab YAP e premi Verifica YAP per completare il controllo."]
+    if write_issues:
+        next_steps.append("Controlla prima i campi post-scrittura indicati e poi rilancia la verifica.")
+
+    return {
+        "ok": False,
+        "completed": False,
+        "technical_failure": False,
+        "verified": False,
+        "status": "partial_synced",
+        "status_reason": "post_write_review_needed",
+        "message": message,
+        "error": detail,
+        "error_code": None,
+        "next_action": "Verifica YAP",
+        "action_target": "audit",
+        "retryable": True,
+        "present": present,
+        "missing": missing,
+        "mismatch": mismatch,
+        "summary": summary or {
+            "present": len(present),
+            "missing": len(missing),
+            "mismatch": len(mismatch),
+        },
+        "feedback": {
+            "summary": "La scrittura su YAP risulta avviata, ma alcuni campi post-scrittura sono da ricontrollare.",
+            "nextSteps": next_steps,
+        },
+    }
+
+
 def _build_inline_sync_audit_result(
     result_data: Dict[str, Any],
     write_report: Optional[Dict[str, Any]],
@@ -1325,6 +1369,17 @@ def _build_inline_sync_audit_result(
         return None
 
     if inline_audit.get("error"):
+        if _write_report_issue_labels(write_report) or inline_audit.get("present") or inline_audit.get("missing") or inline_audit.get("mismatch"):
+            return _build_post_write_review_audit(
+                {
+                    "message": str(inline_audit.get("error") or "Verifica automatica parziale."),
+                    "summary": inline_audit.get("summary"),
+                    "present": inline_audit.get("present"),
+                    "missing": inline_audit.get("missing"),
+                    "mismatch": inline_audit.get("mismatch"),
+                },
+                write_report,
+            )
         return _build_incomplete_post_write_audit(
             {
                 "message": str(inline_audit.get("error") or "Audit inline non completato."),

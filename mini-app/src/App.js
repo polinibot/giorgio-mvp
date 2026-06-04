@@ -407,6 +407,7 @@ function formatYapStatusReason(reason) {
   if (normalized === 'audit_deferred') return 'verifica automatica non conclusa';
   if (normalized === 'appointment_not_verified') return 'appuntamento non verificato';
   if (normalized === 'audit_not_completed') return 'audit non completato';
+  if (normalized === 'post_write_review_needed') return 'alcuni campi post-scrittura sono da ricontrollare';
   if (normalized.startsWith('strict_mismatch_missing_')) return 'alcuni campi non coincidono con l’atteso';
   if (normalized === 'strict_match_complete') return 'verifica completa riuscita';
   return normalized.replaceAll('_', ' ');
@@ -418,6 +419,8 @@ function formatYapWriteReportIssue(fieldLabel, errorCode) {
   if (!field && !error) return '';
   if (error === 'notes_field_not_found') return 'note da ricontrollare';
   if (error === 'odl_tab_not_found') return 'ODL da ricontrollare';
+  if (error === 'odl_route_ineffective') return 'ODL da ricontrollare';
+  if (error === 'odl_unavailable_no_vehicle') return 'ODL non disponibile';
   if (error === 'materials_field_not_found') return 'materiali da ricontrollare';
   if (error === 'parts_field_not_found') return 'ricambi da ricontrollare';
   if (error === 'waste_field_not_found') return 'smaltimento da ricontrollare';
@@ -2870,9 +2873,12 @@ function App() {
     if (safeResult.duplicate) diagnosticItems.push('Dedup attivo');
     if (audit) {
       const auditCount = (audit.present?.length || 0) + (audit.missing?.length || 0) + (audit.mismatch?.length || 0);
-      const auditIncomplete = audit.completed === false || audit.technical_failure === true || audit.status_reason === 'audit_not_completed';
-      if (auditIncomplete && auditCount === 0) {
+      const auditTechnicalFailure = audit.technical_failure === true || audit.status_reason === 'audit_not_completed';
+      const auditNeedsReview = audit.status_reason === 'post_write_review_needed';
+      if (auditTechnicalFailure && auditCount === 0) {
         diagnosticItems.push('Audit non completato');
+      } else if (auditNeedsReview && auditCount === 0) {
+        diagnosticItems.push('Verifica automatica parziale');
       } else {
         diagnosticItems.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
       }
@@ -2926,7 +2932,8 @@ function App() {
     const showSyncHint = canActionHint && actionTarget === 'sync' && !canRetry;
     const showAuditHint = canActionHint && actionTarget === 'audit' && !canAudit;
     const showDeleteHint = canActionHint && actionTarget === 'delete' && !canDelete;
-    const statusTitle = audit?.technical_failure === true
+    const showTechnicalAuditState = audit?.technical_failure === true || audit?.status_reason === 'audit_not_completed';
+    const statusTitle = showTechnicalAuditState
       ? 'Verifica YAP incompleta'
       : (titleMap[status] || titleMap.unknown);
 
@@ -2951,7 +2958,7 @@ function App() {
               </div>
             )}
             {technicalDiagnostics && (
-              <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || audit?.technical_failure === true}>
+              <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || showTechnicalAuditState}>
                 <summary>Crash log YAP</summary>
                 <div className="yap-result-tech-body">
                   {technicalDiagnostics.runner?.finished_at && (
@@ -2990,7 +2997,7 @@ function App() {
                 </div>
               </details>
             )}
-            {(technicalDiagnostics || status === 'sync_failed' || audit?.technical_failure === true) && (
+            {(!technicalDiagnostics && (status === 'sync_failed' || showTechnicalAuditState)) && (
               <YapCrashLogButton initData={initData} telegramUserId={telegramUserId} />
             )}
           </div>
@@ -3076,7 +3083,8 @@ function App() {
     const nextSteps = Array.isArray(feedback.nextSteps) ? feedback.nextSteps : [];
     const byGroup = feedback.byGroup || {};
     const totalItems = groups.reduce((sum, group) => sum + group.items.length, 0);
-    const auditIncomplete = audit.completed === false || audit.technical_failure === true || audit.status_reason === 'audit_not_completed';
+    const auditTechnicalFailure = audit.technical_failure === true || audit.status_reason === 'audit_not_completed';
+    const auditNeedsReview = audit.status_reason === 'post_write_review_needed';
     const groupOrder = ['tags', 'agenda', 'odl', 'notes', 'materials', 'parts', 'waste'];
     const groupLabel = {
       tags: 'Tag',
@@ -3097,10 +3105,16 @@ function App() {
           </span>
         </div>
         {audit.message && <div className="yap-audit-message">{audit.message}</div>}
-        {auditIncomplete && totalItems === 0 && (
+        {auditTechnicalFailure && totalItems === 0 && (
           <div className="yap-audit-message">
             <strong>Audit non completato:</strong> la scrittura su YAP e' partita, ma la verifica automatica non ha prodotto campi affidabili.
             {audit.error_code ? ` Codice ${audit.error_code}.` : ''}
+            {audit.next_action ? ` Azione: ${audit.next_action}.` : ''}
+          </div>
+        )}
+        {auditNeedsReview && totalItems === 0 && (
+          <div className="yap-audit-message">
+            <strong>Verifica automatica parziale:</strong> la scrittura su YAP risulta avviata, ma alcuni campi post-scrittura sono da ricontrollare.
             {audit.next_action ? ` Azione: ${audit.next_action}.` : ''}
           </div>
         )}
@@ -3143,7 +3157,7 @@ function App() {
               .join(' | ')}
           </div>
         )}
-        {!(auditIncomplete && totalItems === 0) && (
+        {!((auditTechnicalFailure || auditNeedsReview) && totalItems === 0) && (
           <div className="yap-audit-grid">
             {groups.map(group => (
               <div key={group.key} className={`yap-audit-card yap-audit-${group.key}`}>
