@@ -2,7 +2,7 @@ const { defineConfig } = require('@playwright/test');
 
 module.exports = defineConfig({
   testDir: './smoke',
-  testMatch: /.*\.spec\.js$/,
+  testMatch: ['**/smoke.spec.js'],
   timeout: 45_000,
   fullyParallel: false,
   retries: 0,

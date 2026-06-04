@@ -105,17 +105,18 @@ async function main() {
   console.log('');
 
   try {
-    // 1. Build mini-app puntando alla prod API
-    console.log('📦  Build mini-app → prod API...');
+    // 1. Build mini-app puntando alla prod API in una directory separata
+    // per non sovrascrivere build/ del mock smoke se i due runner girano in parallelo.
+    console.log('📦  Build mini-app → prod API (build-prod/)...');
     await runNpmScript('smoke:build', {
       cwd: appDir,
-      env: { ...process.env, REACT_APP_API_URL: PROD_API },
+      env: { ...process.env, REACT_APP_API_URL: PROD_API, BUILD_PATH: 'build-prod' },
     });
 
-    // 2. Avvia server statico per la build
+    // 2. Avvia server statico puntando a build-prod/
     spawnChild(process.execPath, [path.join(appDir, 'scripts', 'static-server.mjs')], {
       cwd: appDir,
-      env: { ...process.env, PORT: WEB_PORT },
+      env: { ...process.env, PORT: WEB_PORT, BUILD_PATH: 'build-prod' },
     });
     await waitForUrl(`http://127.0.0.1:${WEB_PORT}/`);
 

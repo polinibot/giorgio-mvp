@@ -5,7 +5,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const buildDir = path.resolve(__dirname, '..', 'build');
+const buildDir = path.resolve(__dirname, '..', process.env.BUILD_PATH || 'build');
 const port = Number(process.env.PORT || 3000);
 
 const MIME_TYPES = {
