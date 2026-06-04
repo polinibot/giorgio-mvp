@@ -2734,7 +2734,7 @@ async function runYapAutomation(job, args) {
       logPhase("session", "restored");
     } catch (restoreError) {
       const message = String(restoreError?.message || "");
-      const recoverable = /agenda_redirected_to_login|Timeout|ERR_FAILED|ERR_ABORTED|waiting for locator|agenda_date_not_reached|Target crashed/i.test(message);
+      const recoverable = /agenda_redirected_to_login|Timeout|ERR_FAILED|ERR_ABORTED|waiting for locator|agenda_date_not_reached|Target crashed|login_form_not_visible/i.test(message);
       if (!recoverable) throw restoreError;
       logPhase("session", "restore_failed", { error: message.slice(0, 180) });
       // Se il browser è crashato, ricrea il runtime con profilo pulito

@@ -1220,6 +1220,24 @@ export async function scanVisibleAgendaEventTargets(page, { includeStyle = false
 export async function loginYap(page, username, password) {
   const _loginStart = Date.now();
   const _logLogin = (status, extra = {}) => process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "loginYap", status, elapsed_ms: Date.now() - _loginStart, ts: new Date().toISOString(), ...extra }) + "\n");
+  const _detectLoginInputVisible = async (timeout = 2500) => evalWithTimeout(
+    page,
+    () => {
+      const input = document.querySelector('input[name="u"]');
+      if (!input) return false;
+      const rect = input.getBoundingClientRect();
+      const style = window.getComputedStyle(input);
+      return rect.width > 8
+        && rect.height > 8
+        && style.display !== "none"
+        && style.visibility !== "hidden"
+        && style.opacity !== "0";
+    },
+    undefined,
+    Math.max(1500, timeout),
+    false,
+    "loginInputVisible",
+  );
   _logLogin("start");
   const _cookieLog = [];
   const _cookieListener = (response) => {
@@ -1249,17 +1267,24 @@ export async function loginYap(page, username, password) {
     _logLogin("waiting_boot_surface");
     const bootSurface = await waitForYapBootSurface(page, 10000).catch(() => "unknown");
     _logLogin("boot_surface", { surface: bootSurface });
-    const ssSnapshot = await page.evaluate((origin) => {
-      try {
-        if (window.location.origin !== origin) return { origin: window.location.origin, keys: [] };
-        const keys = [];
-        for (let i = 0; i < window.sessionStorage.length; i += 1) {
-          const key = window.sessionStorage.key(i);
-          if (key != null) keys.push(key);
-        }
-        return { origin: window.location.origin, keys };
-      } catch (_) { return null; }
-    }, new URL(YAP_BASE_URL).origin).catch(() => null);
+    const ssSnapshot = await evalWithTimeout(
+      page,
+      (origin) => {
+        try {
+          if (window.location.origin !== origin) return { origin: window.location.origin, keys: [] };
+          const keys = [];
+          for (let i = 0; i < window.sessionStorage.length; i += 1) {
+            const key = window.sessionStorage.key(i);
+            if (key != null) keys.push(key);
+          }
+          return { origin: window.location.origin, keys };
+        } catch (_) { return null; }
+      },
+      new URL(YAP_BASE_URL).origin,
+      3000,
+      null,
+      "login_session_snapshot",
+    ).catch(() => null);
     process.stderr.write(JSON.stringify({
       event: "yap:session",
       status: "boot_surface_detected",
@@ -1283,10 +1308,12 @@ export async function loginYap(page, username, password) {
       } catch {}
     }
 
-    const loginInputVisible = bootSurface === "login"
-      || await page.locator('input[name="u"]').first().isVisible({ timeout: 2500 }).catch(() => false);
+    let loginInputVisible = bootSurface === "login"
+      || await _detectLoginInputVisible(2500);
+    _logLogin("login_input_probe", { visible: loginInputVisible, surface: bootSurface });
     if (!loginInputVisible) {
       const alreadyIn = await hasYapAppShell(page, 3000).catch(() => false);
+      _logLogin("app_shell_probe", { alreadyIn });
       if (alreadyIn) {
         try {
           await openAgendaFromAppShell(page, 12000);
@@ -1297,9 +1324,15 @@ export async function loginYap(page, username, password) {
       await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
       await dismissUnsupportedBrowserWarningRobust(page, { timeout: 8000 });
       const agendaReady = await waitForAgendaReady(page, 5000).then(() => true).catch(() => false);
+      _logLogin("agenda_probe", { agendaReady });
       if (agendaReady) {
         await persistYapSession(page.context()).catch(() => {});
         return;
+      }
+      loginInputVisible = await _detectLoginInputVisible(2500);
+      _logLogin("login_input_retry", { visible: loginInputVisible });
+      if (!loginInputVisible) {
+        throw new Error("login_form_not_visible");
       }
     }
 
