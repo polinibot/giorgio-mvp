@@ -380,12 +380,22 @@ def validate_telegram_init_data(
     x_telegram_init_data: str = Header(None, alias="X-Telegram-Init-Data"),
     user_id: Optional[int] = None,
     x_telegram_user_id: Optional[str] = Header(None, alias="X-Telegram-User-Id"),
+    x_smoke_secret: Optional[str] = Header(None, alias="X-Smoke-Secret"),
 ):
     """Extract Telegram user from initData.
 
     In production (DEBUG=False), if HMAC validation fails, return 401.
     In debug mode, fall back to a test user.
     """
+    # Smoke-test bypass: attivo solo se SMOKE_TEST_SECRET è impostato nel backend
+    # e la richiesta porta l'header X-Smoke-Secret con il valore corretto.
+    # Usato dai test Playwright/e2e su produzione senza sessione Telegram reale.
+    _smoke_secret = settings.smoke_test_secret
+    if _smoke_secret and x_smoke_secret and hmac.compare_digest(x_smoke_secret, _smoke_secret):
+        uid = settings.smoke_test_user_id or 761118078
+        logger.info("Smoke-test bypass auth for user %s", uid)
+        return {"id": uid, "first_name": "Smoke", "last_name": "Test", "username": "smoketest"}
+
     raw_init_data = x_telegram_init_data or init_data
     auth_snapshot = _auth_debug_snapshot(request, init_data, x_telegram_init_data, user_id, x_telegram_user_id)
     _log_auth_debug("start", auth_snapshot, level="info")

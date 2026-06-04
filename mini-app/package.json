@@ -20,6 +20,7 @@
     "smoke:build": "node scripts/build-smoke.mjs",
     "smoke:test": "playwright test",
     "smoke": "node scripts/run-smoke.mjs",
+    "smoke:prod": "node scripts/run-prod-smoke.mjs",
     "eject": "react-scripts eject",
     "dev": "react-scripts start"
   },

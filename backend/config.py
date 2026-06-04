@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # Debug flag
     debug: bool = False
 
+    # Smoke test bypass — se impostato, le richieste con header X-Smoke-Secret
+    # corrispondente vengono autenticate come smoke_test_user_id senza initData.
+    # Lasciare vuoto in produzione se non si vuole abilitare il bypass.
+    smoke_test_secret: str = ""
+    smoke_test_user_id: int = 761118078
+
     # ALLOWED_ORIGINS for CORS
     allowed_origins: List[str] = [
         "https://web.telegram.org",
