@@ -1464,6 +1464,16 @@ async function _openAgendaInAppInner(page) {
   const initialSurface = await waitForYapBootSurface(page, 8000).catch(() => "unknown");
   _logShared("openAgenda", "boot_surface", { surface: initialSurface, ms: Date.now() - _t1 });
   await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
+  // Short-circuit: se la sessione è scaduta la prima rilevazione su #!agenda dà
+  // "login" in modo pulito e affidabile (~2.8s). NON tentare la navigation-recovery
+  // verso la base URL nuda: in pratica manda il GWT in redirect-loop e la rilevazione
+  // diventa "timeout", bruciando i 75s del deadline e corrompendo lo stato della
+  // pagina PRIMA che il chiamante possa fare un login pulito con credenziali.
+  // Usciamo subito → openAgendaWithRecovery pulisce cookie/storage e chiama loginYap.
+  if (initialSurface === "login") {
+    _logShared("openAgenda", "login_surface_fastfail", { ms: Date.now() - _t0 });
+    throw new Error("agenda_redirected_to_login");
+  }
   if (initialSurface === "app_shell") {
     _logShared("openAgenda", "app_shell_open_start");
     await openAgendaFromAppShell(page, 12000).catch(() => {});
@@ -1574,7 +1584,12 @@ export async function openAgendaWithRecovery(
         try { window.localStorage?.clear?.(); } catch {}
         try { window.sessionStorage?.clear?.(); } catch {}
       }).catch(() => {});
-      await page.goto(YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+      // Naviga a #!agenda (non alla base URL nuda): con sessione pulita questa rotta
+      // presenta la schermata di login in modo rilevabile (surface "login" ~2.8s),
+      // mentre la base URL nuda entra in redirect-loop e dà surface "timeout",
+      // impedendo a loginYap di trovare il form. loginYap vedrà already_on_yap e
+      // resterà su questa rotta per compilare le credenziali.
+      await page.goto(`${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" }).catch(() => {});
       await loginYap(page, username, password);
       if (attempt === maxAttempts) {
         await openAgendaInApp(page);
