@@ -574,3 +574,42 @@ test('elimina da YAP: il bottone avvia l\'operazione e mostra una risposta', asy
 
   await expect(page.locator('body')).not.toContainText('Errore di rete');
 });
+
+// ─────────────────────────────────────────────────────────────
+// 9. SYNC YAP REALE (dry-run) — esercita login + agenda sul portale vero
+// ─────────────────────────────────────────────────────────────
+
+test('sync YAP reale (dry-run): il login al portale completa senza timeout', async () => {
+  // Questo è l'UNICO test che esercita l'automazione YAP REALE contro
+  // yap.mmbsoftware.it. Usa dry_run:true → fa login, apre l'agenda e scansiona
+  // i duplicati, ma NON scrive l'appuntamento (non distruttivo). Cattura le
+  // regressioni del login worker (es. redirect-loop / timeout a 210s a sessione
+  // scaduta) che i test mockati non possono vedere.
+  test.setTimeout(240000); // l'automazione reale può richiedere fino a ~210s
+  const id = await createSmokePractice('YAPDRY');
+  try {
+    const res = await apiPost(`/practices/${id}/yap/sync`,
+      { dry_run: true, debug: true },
+      { timeout: 220000, retries: 0 });
+
+    expect(res.status, `HTTP inatteso dalla sync: ${res.status}`).toBeLessThan(300);
+    const data = res.json?.data || {};
+    // Su FALLIMENTO il backend mette le fasi in data.worker_phases; su dry_run
+    // success vanno sotto data.telemetry.runner.worker_phases. Le raccogliamo da
+    // entrambi i path solo per arricchire il messaggio d'errore in caso di regressione.
+    const failPhases = (data.worker_phases || data.telemetry?.runner?.worker_phases || [])
+      .map((p) => `${p.phase}:${p.status}`).join(' → ');
+
+    // Segnale autoritativo = status. 'dry_run'/'appointment_not_verified' è
+    // producibile SOLO se il worker si è loggato, ha aperto l'agenda e scansionato
+    // i duplicati. La regressione (redirect-loop a sessione scaduta) dà invece
+    // 'sync_failed' con reason "timeout during loginYap": è ciò che blocchiamo.
+    expect(
+      data.status,
+      `Sync YAP fallita (login non riuscito?): status=${data.status} reason=${data.status_reason}. Fasi: ${failPhases}`
+    ).toBe('dry_run');
+    expect(String(data.status_reason || '')).not.toMatch(/timeout/i);
+  } finally {
+    await deleteSmokePractice(id).catch(() => {});
+  }
+});
