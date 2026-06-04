@@ -454,6 +454,28 @@ h2 {
   font-weight: 600;
 }
 
+/* Accento sinistro sulla card in base allo stato sync YAP */
+.card-status-sync-failed {
+  border-left: 3px solid rgba(239, 68, 68, 0.55);
+}
+.card-status-complete-synced {
+  border-left: 3px solid rgba(74, 222, 128, 0.5);
+}
+.card-status-partial-synced,
+.card-status-agenda-synced {
+  border-left: 3px solid rgba(251, 191, 36, 0.45);
+}
+
+/* Telefono e ora sulla card */
+.practice-card-phone {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.practice-card-time {
+  color: var(--text-muted);
+}
+
 .sync-pill {
   display: inline-flex;
   align-items: center;

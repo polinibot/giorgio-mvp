@@ -4441,7 +4441,7 @@ function App() {
               return (
               <div
                 key={p.id}
-                className={`practice-card ${isLocalDraft ? 'practice-card-draft' : ''} ${selectionMode && isSelected ? 'practice-card-selected' : ''}`}
+                className={`practice-card ${isLocalDraft ? 'practice-card-draft' : ''} ${selectionMode && isSelected ? 'practice-card-selected' : ''} ${!isLocalDraft && p.management_sync_status ? `card-status-${p.management_sync_status.replace(/_/g, '-')}` : ''}`}
                 onClick={() => {
                   if (selectionMode && !isLocalDraft) { toggleSelect(p.id, { stopPropagation: () => {} }); return; }
                   if (isLocalDraft) openNewPracticeForm(); else navigateTo('detail', { practiceId: p.id });
@@ -4458,21 +4458,28 @@ function App() {
                   <div className="practice-card-customer">{p.customer_name || (isLocalDraft ? 'Compilazione non completata' : '—')}</div>
                   {showDeveloperUi && <div className="practice-card-id">#{p.id}</div>}
                 </div>
+                {!isLocalDraft && p.phone && (
+                  <div className="practice-card-phone">📞 {p.phone}</div>
+                )}
                 <div className="practice-card-badges">
                   {normalizeContexts(p.contexts).map(ctx => (
                     <span key={ctx} className="context-badge" style={{ background: CONTEXT_COLORS[ctx]?.bg, color: CONTEXT_COLORS[ctx]?.color, borderColor: CONTEXT_COLORS[ctx]?.border }}>
                       {ctx.charAt(0).toUpperCase() + ctx.slice(1)}
                     </span>
                   ))}
-                  {showDeveloperUi && preSync && (
+                  {preSync && preSyncScore !== null && (
                     <span className={`pre-sync-pill ${preSyncReady ? 'pre-sync-pill-ready' : 'pre-sync-pill-not-ready'}`}>
-                      {preSyncReady ? 'Ready' : 'Non ready'}
-                      {preSyncScore !== null ? ` • Score ${preSyncScore}/100` : ''}
+                      {preSyncScore}/100
                     </span>
                   )}
                 </div>
                 <div className="practice-card-footer">
-                  <span className="practice-card-date">📅 {formatDate(p.appointment_date || p.created_at)}</span>
+                  <span className="practice-card-date">
+                    📅 {formatDate(p.appointment_date || p.created_at)}
+                    {!isLocalDraft && p.appointment_time && (
+                      <span className="practice-card-time"> • {p.appointment_time}</span>
+                    )}
+                  </span>
                   {selectionMode && !isLocalDraft ? (
                     <span className={`card-select-indicator ${isSelected ? 'card-select-indicator-on' : ''}`}>
                       {isSelected ? '✓' : '○'}
