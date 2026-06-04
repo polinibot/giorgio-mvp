@@ -246,8 +246,9 @@ function summarizePhaseTimeline(phaseTimeline, fallback = '') {
   return `${done}/${phases.length} fasi completate (${Math.round(totalMs / 1000)}s)`;
 }
 
-function workerPhasesToLabel(workerPhases) {
+function workerPhasesToLabel(workerPhases, options = {}) {
   if (!Array.isArray(workerPhases) || !workerPhases.length) return null;
+  const softenFailure = options.softenFailure === true;
   const meaningful = [...workerPhases].reverse().find((phase) => (
     phase
     && phase.phase !== 'inline_audit'
@@ -258,7 +259,10 @@ function workerPhasesToLabel(workerPhases) {
   const phaseLabel = YAP_PHASE_LABELS[last.phase] || last.phase;
   const elapsedS = Math.round((last.elapsed_ms || 0) / 1000);
   const statusMap = { starting: 'avvio', done: 'completato', ready: 'pronto', failed: 'fallito', ineffective: 'da ricontrollare', scanning: 'scansione', opening: 'apertura', filled: 'compilato', found: 'trovato', not_found: 'non trovato', partial: 'parziale' };
-  const statusLabel = statusMap[last.status] || last.status;
+  const rawStatus = String(last.status || '').toLowerCase();
+  const statusLabel = softenFailure && rawStatus === 'failed'
+    ? 'da ricontrollare'
+    : (statusMap[last.status] || last.status);
   return `YAP: ${phaseLabel} ${statusLabel} (${elapsedS}s)`;
 }
 
@@ -2870,6 +2874,10 @@ function App() {
     const telemetry = safeResult.telemetry || extractYapTelemetry(safeResult);
     const primaryMeta = [];
     const diagnosticItems = [];
+    const statusReason = safeResult.status_reason || safeResult?.yap?.error?.reason || null;
+    const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
+    const isPostWriteReview = status === 'partial_synced' && statusReason === 'post_write_review_needed';
+    const workerPhaseLabel = workerPhasesToLabel(safeResult.worker_phases, { softenFailure: isPostWriteReview });
     if (Number.isFinite(safeResult.preSync?.score)) primaryMeta.push(`Pre-sync ${safeResult.preSync.score}/100`);
     const saveAttempts = Number(telemetry?.saveAttempts || safeResult.yap?.result?.telemetry?.saveAttempts || 0);
     if (saveAttempts > 0) primaryMeta.push(`${saveAttempts} ${saveAttempts === 1 ? 'tentativo' : 'tentativi'}`);
@@ -2891,7 +2899,6 @@ function App() {
         diagnosticItems.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
       }
     }
-    const workerPhaseLabel = workerPhasesToLabel(safeResult.worker_phases);
     const technicalDiagnostics = extractYapTechnicalDiagnostics(safeResult);
     if (workerPhaseLabel) {
       diagnosticItems.push(workerPhaseLabel);
@@ -2915,12 +2922,9 @@ function App() {
       }
     }
     const errorCode = safeResult.error_code || safeResult?.yap?.error?.error_code || null;
-    const statusReason = safeResult.status_reason || safeResult?.yap?.error?.reason || null;
-    const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
-    const isPostWriteReview = status === 'partial_synced' && statusReason === 'post_write_review_needed';
     diagnosticItems.push(...buildYapTelemetryDetails(telemetry, status).filter(Boolean));
     if (errorCode && errorCode !== 'YAP_TIMEOUT') diagnosticItems.push(`Codice ${errorCode}`);
-    if (statusReason) {
+    if (statusReason && !isPostWriteReview) {
       const reasonStr = String(statusReason).trim().toLowerCase();
       if (!reasonStr.startsWith('timeout')) {
         const formattedReason = formatYapStatusReason(statusReason);
@@ -4061,7 +4065,10 @@ function App() {
               : syncResult.status === 'not_ready'
                 ? `Pratica ${actionLabel}, ma non pronta per YAP.`
                 : `Pratica ${actionLabel}, ma sync YAP fallita: ${syncResult.message || 'errore sconosciuto'}`;
-          const finalSyncResult = { ...syncResult, message: finalMessage };
+          const bannerSyncResult = ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(syncResult.status)
+            ? syncResult
+            : { ...syncResult, message: finalMessage };
+          const finalSyncResult = { ...bannerSyncResult };
           setYapLastResult(finalSyncResult);
           finishSaveProgress(finalMessage, syncResult.status === 'sync_failed' ? 'error' : 'success', syncResult.status === 'sync_failed' ? 0 : 1400);
           setSelectedPracticeId(practiceId);
