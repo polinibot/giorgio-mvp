@@ -791,8 +791,8 @@ async function clickAppointmentPopupFooterSlot(page, slotIndex) {
   return { clicked: true, label: target.label };
 }
 
-async function clickOdlSection(page) {
-  const candidate = await safeEvaluate(page, () => {
+async function clickOdlSection(page, { candidateIndex = 0, maxY = 220 } = {}) {
+  const candidate = await safeEvaluate(page, ({ index, topLimit }) => {
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
@@ -803,16 +803,23 @@ async function clickOdlSection(page) {
       if (!(t.includes("ordini di lavoro") || t === "odl" || t.startsWith("ordini di lavoro"))) return false;
       if (t.length >= 60) return false;
       const rect = el.getBoundingClientRect();
-      return rect.y < 140;
+      return rect.y < topLimit;
     });
     const ranked = candidates
       .map((el) => {
         const rect = el.getBoundingClientRect();
         const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        const cls = String(el.className || "");
+        const role = String(el.getAttribute("role") || "");
+        const title = String(el.getAttribute("title") || "");
+        const ariaSelected = String(el.getAttribute("aria-selected") || "");
         let score = 0;
         if (/^ordini di lavoro$/i.test(text)) score += 20;
         if (/^ordini di lavoro/i.test(text)) score += 12;
-        if (/tab|item|label/i.test(String(el.className || ""))) score += 6;
+        if (/tab|item|label|button/i.test(cls)) score += 8;
+        if (role === "tab") score += 12;
+        if (ariaSelected === "false") score += 6;
+        if (/ordini di lavoro/i.test(title)) score += 4;
         if (rect.width >= 40 && rect.width <= 180) score += 4;
         if (rect.height >= 18 && rect.height <= 42) score += 4;
         return {
@@ -825,8 +832,8 @@ async function clickOdlSection(page) {
         };
       })
       .sort((a, b) => b.score - a.score || a.y - b.y || a.x - b.x);
-    return ranked[0] || null;
-  }).catch(() => null);
+    return ranked[index] || ranked[0] || null;
+  }, { index: Math.max(0, Number(candidateIndex) || 0), topLimit: Math.max(120, Number(maxY) || 220) }).catch(() => null);
   if (!candidate) return { clicked: false, label: null };
   await page.mouse.click(candidate.x, candidate.y).catch(() => {});
   await page.waitForTimeout(120).catch(() => {});
@@ -1191,18 +1198,26 @@ async function openOdlByRoute(page, currentUrl) {
       };
     }
 
-    const token = JSON.stringify({
+    const nextPayload = {
+      ...(parsed.payload && typeof parsed.payload === "object" ? parsed.payload : {}),
       IdCompanyFolder: parsed.idCompanyFolder,
       Page: "ODL",
-      ShowOdlMarcatempo: true,
-    });
-    await page.evaluate((t) => { window.location.hash = `#!pratica|${t}`; }, token);
+      PageEnum: "ODL",
+      ShowOdlMarcatempo: parsed.payload?.ShowOdlMarcatempo ?? true,
+    };
+    const token = JSON.stringify(nextPayload);
+    await page.evaluate((t) => {
+      window.location.hash = `#!pratica|${t}`;
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    }, token);
+    await page.waitForTimeout(220).catch(() => {});
     return {
       attempted: true,
       navigated: true,
       reason: null,
       idCompanyFolder: parsed.idCompanyFolder,
       pageEnum: "ODL",
+      payloadKeys: Object.keys(nextPayload || {}),
     };
   } catch (error) {
     return { attempted: true, navigated: false, reason: String(error?.message || "error") };
@@ -1497,10 +1512,13 @@ async function fillWithRetry(page, attempts, value, options = {}, { debug = fals
   return false;
 }
 
-async function appendStructuredBlockToAnyTextarea(page, text) {
+async function appendStructuredBlockToAnyTextarea(page, text, options = {}) {
   const payload = String(text || "").trim();
   if (!payload) return false;
-  return safeEvaluate(page, (blockText) => {
+  return safeEvaluate(page, ({ blockText, keywordsRaw }) => {
+    const keywords = Array.isArray(keywordsRaw)
+      ? keywordsRaw.map((item) => String(item || "").toLowerCase().trim()).filter(Boolean)
+      : [];
     const isVisible = (el) => {
       const rect = el.getBoundingClientRect();
       const style = window.getComputedStyle(el);
@@ -1512,6 +1530,34 @@ async function appendStructuredBlockToAnyTextarea(page, text) {
       "[contenteditable]",
       "[role='textbox']",
     ];
+    const normalize = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const scoreTarget = (el) => {
+      const rect = el.getBoundingClientRect();
+      const ownText = normalize([
+        el.getAttribute("name"),
+        el.getAttribute("id"),
+        el.getAttribute("placeholder"),
+        el.getAttribute("aria-label"),
+        el.getAttribute("title"),
+        el.className,
+      ].join(" "));
+      let ctxNode = el;
+      let ctxText = ownText;
+      for (let i = 0; i < 5 && ctxNode?.parentElement; i += 1) {
+        ctxNode = ctxNode.parentElement;
+        ctxText += ` ${normalize((ctxNode.textContent || "").slice(0, 500))}`;
+      }
+      let score = Math.min(40, Math.round(rect.height / 8));
+      for (const keyword of keywords) {
+        if (!keyword) continue;
+        if (ownText.includes(keyword)) score += 12;
+        if (ctxText.includes(keyword)) score += 6;
+      }
+      if (el.tagName === "TEXTAREA") score += 8;
+      if (el.getAttribute("role") === "textbox") score += 4;
+      if (el.getAttribute("contenteditable") === "true") score += 6;
+      return score;
+    };
     const targets = [...document.querySelectorAll(selectors.join(", "))].filter(el => {
       if (!isVisible(el)) return false;
       const ce = el.getAttribute("contenteditable");
@@ -1519,7 +1565,10 @@ async function appendStructuredBlockToAnyTextarea(page, text) {
       return true;
     });
     if (!targets.length) return false;
-    const target = targets.sort((a, b) => b.getBoundingClientRect().height - a.getBoundingClientRect().height)[0];
+    const target = targets
+      .map((el) => ({ el, score: scoreTarget(el) }))
+      .sort((a, b) => b.score - a.score || b.el.getBoundingClientRect().height - a.el.getBoundingClientRect().height)[0]?.el;
+    if (!target) return false;
     const isInput = target.tagName === "TEXTAREA" || target.tagName === "INPUT";
     const current = isInput ? (target.value || "") : (target.innerText || target.textContent || "");
     const nextValue = current ? `${current}\n${blockText}` : blockText;
@@ -1530,13 +1579,26 @@ async function appendStructuredBlockToAnyTextarea(page, text) {
       if (nativeInputValueSetter) nativeInputValueSetter.call(target, nextValue);
       else target.value = nextValue;
     } else {
-      target.textContent = nextValue;
+      if (typeof document.execCommand === "function") {
+        try {
+          document.execCommand("selectAll", false, null);
+          document.execCommand("insertText", false, nextValue);
+        } catch {
+          target.textContent = nextValue;
+        }
+      } else {
+        target.textContent = nextValue;
+      }
+      if ((target.innerText || target.textContent || "").trim() !== nextValue.trim()) {
+        target.textContent = nextValue;
+      }
     }
     target.dispatchEvent(new Event("input", { bubbles: true }));
     target.dispatchEvent(new Event("change", { bubbles: true }));
+    target.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
     target.blur();
     return true;
-  }, payload).catch(() => false);
+  }, { blockText: payload, keywordsRaw: options.keywords || [] }).catch(() => false);
 }
 
 async function clickGenericSaveInPractice(page) {
@@ -1724,7 +1786,11 @@ async function writePracticeAndOdl(page, job, args) {
         }).catch(() => -1);
         logPhase("notes_editable_scan", "info", { editableCount });
         // Fallback: qualsiasi elemento editabile visibile nella pagina dati pratica.
-        const noteFallback = await appendStructuredBlockToAnyTextarea(page, String(job.internalNotes).trim());
+        const noteFallback = await appendStructuredBlockToAnyTextarea(
+          page,
+          String(job.internalNotes).trim(),
+          { keywords: ["note interne", "annotazioni", "dettagli pratica", "note"] },
+        );
         writeReport.notes.success = noteFallback;
         logPhase("notes_fallback", noteFallback ? "done" : "failed");
       }
@@ -1800,13 +1866,25 @@ async function writePracticeAndOdl(page, job, args) {
   // Fallback: click sul tab (se la route non era disponibile o la navigazione è fallita)
   if (!odlNavigated) {
     writeReport.odlFallbackClickUsed = true;
-    let odlTab = await clickOdlSection(page);
-    if (!odlTab?.clicked) {
-      if (args.debug) writeReport.odlTopCandidatesBeforeRetry = await snapshotTopOdlCandidates(page);
-      await dismissVehicleSearchOverlay(page);
-      await page.waitForTimeout(200);
-      odlTab = await clickOdlSection(page);
+    let odlTab = null;
+    const fallbackAttempts = [];
+    for (let candidateIndex = 0; candidateIndex < 3 && !odlTab?.clicked; candidateIndex += 1) {
+      let currentAttempt = await clickOdlSection(page, { candidateIndex, maxY: 220 });
+      if (!currentAttempt?.clicked) {
+        if (args.debug && candidateIndex === 0) writeReport.odlTopCandidatesBeforeRetry = await snapshotTopOdlCandidates(page);
+        await dismissVehicleSearchOverlay(page);
+        await page.waitForTimeout(200);
+        currentAttempt = await clickOdlSection(page, { candidateIndex, maxY: 240 });
+      }
+      fallbackAttempts.push(currentAttempt?.label || `candidate_${candidateIndex}`);
+      if (currentAttempt?.clicked) {
+        if (candidateIndex > 0) {
+          logPhase("odl_tab", "retry_candidate", { candidateIndex, label: currentAttempt.label });
+        }
+        odlTab = currentAttempt;
+      }
     }
+    if (args.debug) writeReport.odlFallbackAttempts = fallbackAttempts;
     if (!odlTab?.clicked) {
       const fallbackOdl = page.locator("button, a, [role='button'], .gwt-Label, span, div, td").filter({ hasText: /ordini di lavoro|\bodl\b/i }).first();
       if (await fallbackOdl.count()) {
@@ -1864,7 +1942,7 @@ async function writePracticeAndOdl(page, job, args) {
     if (args.debug) {
       writeReport.bottomTabsBeforeNote = await snapshotBottomSectionTabs(page);
     }
-    logPhase("odl_notes_tab", "opening");
+      logPhase("odl_notes_tab", "opening");
     const noteTabOpened = await clickBottomSectionTab(page, "Note interne");
     if (noteTabOpened) {
       await page.waitForTimeout(120);
@@ -1876,7 +1954,11 @@ async function writePracticeAndOdl(page, job, args) {
         await page.screenshot({ path: noteTabShot, fullPage: true }).catch(() => {});
         writeReport.noteTabScreenshot = noteTabShot;
       }
-      const noteSummaryOk = await appendStructuredBlockToAnyTextarea(page, noteSummaryBlock);
+      const noteSummaryOk = await appendStructuredBlockToAnyTextarea(
+        page,
+        noteSummaryBlock,
+        { keywords: ["note interne", "odl", "descrizione danni", "prospetti"] },
+      );
       if (noteSummaryOk) {
         writeReport.notes.success = true;
         writeReport.notes.error = null;
@@ -2011,7 +2093,11 @@ async function writePracticeAndOdl(page, job, args) {
     && !writeReport.materials.success
     && !writeReport.parts.success
   ) {
-    const fallbackOk = await appendStructuredBlockToAnyTextarea(page, summary);
+    const fallbackOk = await appendStructuredBlockToAnyTextarea(
+      page,
+      summary,
+      { keywords: ["odl", "descrizione", "intervento", "note reparto", "materiali di consumo"] },
+    );
     writeReport.notes.success = writeReport.notes.success || fallbackOk;
     if (fallbackOk && writeReport.notes.error === "notes_field_not_found") writeReport.notes.error = null;
   }

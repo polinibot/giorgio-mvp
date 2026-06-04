@@ -2890,11 +2890,8 @@ function App() {
     if (audit) {
       const auditCount = (audit.present?.length || 0) + (audit.missing?.length || 0) + (audit.mismatch?.length || 0);
       const auditTechnicalFailure = audit.technical_failure === true || audit.status_reason === 'audit_not_completed';
-      const auditNeedsReview = audit.status_reason === 'post_write_review_needed';
       if (auditTechnicalFailure && auditCount === 0) {
         diagnosticItems.push('Audit non completato');
-      } else if (auditNeedsReview && auditCount === 0) {
-        diagnosticItems.push('Verifica automatica parziale');
       } else {
         diagnosticItems.push(`Audit: ${audit.present?.length || 0} presenti, ${audit.missing?.length || 0} mancanti, ${audit.mismatch?.length || 0} diversi`);
       }
