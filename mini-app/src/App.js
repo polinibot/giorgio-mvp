@@ -254,13 +254,6 @@ function workerPhasesToLabel(workerPhases) {
   return `YAP: ${phaseLabel} ${statusLabel} (${elapsedS}s)`;
 }
 
-function summarizePhaseProgress(phaseTimeline) {
-  const phases = Array.isArray(phaseTimeline) ? phaseTimeline : [];
-  if (!phases.length) return '';
-  const done = phases.filter((phase) => phase?.status === 'completed').length;
-  return `${done}/${phases.length} fasi`;
-}
-
 function formatYapElapsedMs(totalElapsedMs) {
   const totalSeconds = Math.max(0, Math.round((Number(totalElapsedMs) || 0) / 1000));
   if (!totalSeconds) return '';
