@@ -1383,24 +1383,43 @@ export async function loginYap(page, username, password) {
       }
     }
 
-    const okBtn = page.getByRole("button", { name: /^OK$/i }).or(page.getByText("OK", { exact: true }));
-    try {
-      await okBtn.first().waitFor({ state: "visible", timeout: 5000 });
-      await okBtn.first().click({ force: true });
-    } catch {
-      await page.evaluate(() => {
-        const btns = [...document.querySelectorAll("button, .gwt-Button, [role=\"button\"]")];
-        const ok = btns.find((b) => b.textContent.trim().toUpperCase() === "OK");
-        if (ok) ok.click();
-      });
+    // FIX: clicca "OK" SOLO se il login input NON è visibile — significa che un popup
+    // sta coprendo il form. Se l'input è già visibile, il click OK potrebbe colpire
+    // un elemento GWT errato e navigare via dalla pagina di login.
+    const inputBeforeOkClick = await _detectLoginInputVisible(800);
+    if (!inputBeforeOkClick) {
+      const okBtn = page.getByRole("button", { name: /^OK$/i }).or(page.getByText("OK", { exact: true }));
+      try {
+        await okBtn.first().waitFor({ state: "visible", timeout: 3000 });
+        await okBtn.first().click({ force: true });
+      } catch {
+        await page.evaluate(() => {
+          const btns = [...document.querySelectorAll("button, .gwt-Button, [role=\"button\"]")];
+          const ok = btns.find((b) => b.textContent.trim().toUpperCase() === "OK");
+          if (ok) ok.click();
+        });
+      }
     }
 
     _logLogin("filling_credentials");
     await page.waitForTimeout(100);
     await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
     _logLogin("waiting_input_visible");
-    await page.waitForTimeout(500);
-    await page.locator('input[name="u"]').waitFor({ state: "visible", timeout: 25000 });
+    await page.waitForTimeout(300);
+    // FIX: usa _detectLoginInputVisible (evalWithTimeout-safe, fast-fail) invece di
+    // waitFor 25s. Se l'input è sparito (popup navigazione errata), ri-naviga alla
+    // pagina login e riprova una volta sola prima di fallire.
+    const inputAfterDismiss = await _detectLoginInputVisible(5000);
+    if (!inputAfterDismiss) {
+      _logLogin("input_disappeared_recovering");
+      await navigateWithRetry(page, YAP_BASE_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await page.waitForTimeout(300);
+      await dismissUnsupportedBrowserWarningRobust(page, { timeout: 3000 });
+      const recoveredInput = await _detectLoginInputVisible(8000);
+      if (!recoveredInput) {
+        throw new Error("login_input_disappeared_after_dismiss");
+      }
+    }
     _logLogin("input_ready");
     const filled = await page.evaluate(({ u, p }) => {
       const userEl = document.querySelector('input[name="u"]');
