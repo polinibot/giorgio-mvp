@@ -465,39 +465,20 @@ test('eliminazione singola: crea pratica, la elimina dalla UI e verifica scompar
 // ─────────────────────────────────────────────────────────────
 
 test('eliminazione multipla: crea 2 pratiche, seleziona tutto e elimina', async ({ page }) => {
-  // Questo test verifica il FLUSSO UI del bulk delete (selection mode, seleziona
-  // tutte, conferma, rimozione dalla lista). La reale cancellazione backend è già
-  // coperta da "eliminazione singola" (#15). Qui mockiamo le chiamate di rete del
-  // bulk loop per renderlo deterministico e veloce, evitando la latenza variabile
-  // di Railway che renderebbe il test flaky.
-  // Registrate DOPO setupSmokeAuth (beforeEach) → LIFO: hanno priorità.
+  // Verifica la cancellazione multipla reale: selection mode → seleziona tutte →
+  // conferma → le pratiche vengono davvero rimosse dal backend e spariscono dalla
+  // lista dopo loadDashboard(). Il mock (registrato DOPO setupSmokeAuth → LIFO ha
+  // priorità) tocca SOLO la YAP automation (lenta ~30-60s e distruttiva su YAP
+  // reale); la DELETE locale resta reale (skip_yap=true → soft-delete istantaneo).
   //
-  // NB: usiamo RegExp invece di glob. I glob Playwright devono matchare l'URL
-  // INTERO inclusa la query string; il frontend aggiunge ?user_id=... a ogni
-  // chiamata, quindi un glob '.../yap/appointment' NON matcha
-  // '.../yap/appointment?user_id=123' e il mock non scatterebbe.
-  //
-  // 1. DELETE /practices/{id}/yap/appointment → mock "not_found" istantaneo
+  // NB: RegExp (non glob): i glob Playwright richiedono il match dell'URL intero
+  // inclusa la query ?user_id=... appesa dal frontend a ogni chiamata.
   await page.route(/\/practices\/\d+\/yap\/appointment/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ success: true, data: { status: 'not_found' } }),
     });
-  });
-  // 2. DELETE /practices/{id} (delete locale) → mock 200 istantaneo.
-  //    La regex termina con (\?|$) → NON matcha .../practices/{id}/yap/appointment
-  //    (dopo l'id c'è '/'). Solo i DELETE vengono mockati; il resto passa oltre.
-  await page.route(/\/practices\/\d+(\?|$)/, async (route) => {
-    if (route.request().method() === 'DELETE') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, data: { message: 'Pratica cancellata' } }),
-      });
-    } else {
-      await route.fallback();
-    }
   });
 
   // Creazione via API (Node context, non toccata dai page.route)
@@ -534,13 +515,15 @@ test('eliminazione multipla: crea 2 pratiche, seleziona tutto e elimina', async 
     await expect(page.getByRole('button', { name: 'Conferma' })).toBeVisible({ timeout: 5000 });
     await page.getByRole('button', { name: 'Conferma' }).click();
 
-    // Con i delete mockati il bulk loop esce da selection mode rapidamente
-    await expect(page.locator('.selection-cancel-btn')).not.toBeAttached({ timeout: 30000 });
-
-    // Le 2 pratiche MUL non devono più essere visibili nella lista
-    const mul1 = await page.locator('.practice-card').filter({ hasText: 'SMKMUL1' }).count();
-    const mul2 = await page.locator('.practice-card').filter({ hasText: 'SMKMUL2' }).count();
-    expect(mul1 + mul2, 'Pratiche smoke ancora presenti dopo eliminazione multipla').toBe(0);
+    // NB: il frontend chiama setSelectionMode(false) all'INIZIO di onConfirm,
+    // prima del loop di delete: quindi non possiamo usare l'uscita da selection
+    // mode come segnale di completamento (sparisce subito). Aspettiamo invece che
+    // le card SMKMUL spariscano davvero dopo i delete reali + loadDashboard().
+    // toHaveCount fa auto-retry fino al timeout, assorbendo l'asincronia.
+    await expect(
+      page.locator('.practice-card').filter({ hasText: /SMKMUL/ }),
+      'Pratiche smoke ancora presenti dopo eliminazione multipla'
+    ).toHaveCount(0, { timeout: 30000 });
   } finally {
     // Cleanup reale (i delete UI erano mockati → le pratiche esistono ancora su Railway)
     await deleteSmokePractice(id1).catch(() => {});
