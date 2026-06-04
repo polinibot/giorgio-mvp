@@ -1806,6 +1806,9 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 "page crashed",
                 "browser has been closed",
                 "execution context was destroyed",
+                "login_form_not_visible",
+                "agenda_viewport_state_timeout",
+                "agenda_event_population_timeout",
             )
             message_lc = str(failure_detail.get("message") or "").lower()
             is_recoverable = any(signal in message_lc for signal in recoverable_signals)
