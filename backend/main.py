@@ -1267,9 +1267,33 @@ def _build_yap_action_from_error(reason: str) -> Dict[str, Any]:
     return {"error_code": "YAP_GENERIC_ERROR", "next_action": "Riprova sync", "action_target": "sync", "failed_phase": None, "retryable": True}
 
 
-def _write_report_issue_labels(write_report: Optional[Dict[str, Any]]) -> List[str]:
-    if not isinstance(write_report, dict):
+def _infer_issue_labels_from_worker_phases(worker_phases: Any) -> List[str]:
+    if not isinstance(worker_phases, list):
         return []
+    issues: List[str] = []
+    for phase in worker_phases:
+        if not isinstance(phase, dict):
+            continue
+        phase_name = str(phase.get("phase") or "").strip().lower()
+        phase_status = str(phase.get("status") or "").strip().lower()
+        if phase_status not in {"failed", "ineffective"}:
+            continue
+        if phase_name in {"notes_fallback", "notes", "notes_write"} and "note" not in issues:
+            issues.append("note")
+        elif phase_name in {"odl", "odl_route", "odl_tab", "practice_odl"} and "ODL" not in issues:
+            issues.append("ODL")
+        elif phase_name in {"materials", "materials_write"} and "materiali" not in issues:
+            issues.append("materiali")
+        elif phase_name in {"parts", "parts_write"} and "ricambi" not in issues:
+            issues.append("ricambi")
+        elif phase_name in {"waste", "waste_write"} and "smaltimento" not in issues:
+            issues.append("smaltimento")
+    return issues
+
+
+def _write_report_issue_labels(write_report: Optional[Dict[str, Any]], worker_phases: Any = None) -> List[str]:
+    if not isinstance(write_report, dict):
+        return _infer_issue_labels_from_worker_phases(worker_phases)
     labels = {
         "notes": "note",
         "odl": "ODL",
@@ -1288,14 +1312,20 @@ def _write_report_issue_labels(write_report: Optional[Dict[str, Any]]) -> List[s
             issues.append("ODL")
         elif "note" in generic_error:
             issues.append("note")
-        else:
+        inferred_issues = _infer_issue_labels_from_worker_phases(worker_phases)
+        for inferred_issue in inferred_issues:
+            if inferred_issue not in issues:
+                issues.append(inferred_issue)
+        if not issues:
             issues.append("post-scrittura")
+    elif not issues:
+        issues.extend(_infer_issue_labels_from_worker_phases(worker_phases))
     return issues
 
 
-def _build_incomplete_post_write_audit(audit_detail: Any, write_report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_incomplete_post_write_audit(audit_detail: Any, write_report: Optional[Dict[str, Any]], worker_phases: Any = None) -> Dict[str, Any]:
     detail = audit_detail if isinstance(audit_detail, dict) else {"message": str(audit_detail or "Audit YAP non completato.")}
-    write_issues = _write_report_issue_labels(write_report)
+    write_issues = _write_report_issue_labels(write_report, worker_phases)
     message = "Appuntamento YAP scritto, ma audit non completato."
     if write_issues:
         message += f" Da ricontrollare: {', '.join(write_issues)}."
@@ -1324,9 +1354,9 @@ def _build_incomplete_post_write_audit(audit_detail: Any, write_report: Optional
     }
 
 
-def _build_post_write_review_audit(audit_detail: Any, write_report: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_post_write_review_audit(audit_detail: Any, write_report: Optional[Dict[str, Any]], worker_phases: Any = None) -> Dict[str, Any]:
     detail = audit_detail if isinstance(audit_detail, dict) else {"message": str(audit_detail or "Verifica automatica parziale.")}
-    write_issues = _write_report_issue_labels(write_report)
+    write_issues = _write_report_issue_labels(write_report, worker_phases)
     present = list(detail.get("present") or [])
     missing = list(detail.get("missing") or [])
     mismatch = list(detail.get("mismatch") or [])
@@ -1371,13 +1401,14 @@ def _build_post_write_review_audit(audit_detail: Any, write_report: Optional[Dic
 def _build_inline_sync_audit_result(
     result_data: Dict[str, Any],
     write_report: Optional[Dict[str, Any]],
+    worker_phases: Any = None,
 ) -> Optional[Dict[str, Any]]:
     inline_audit = result_data.get("inline_audit")
     if not isinstance(inline_audit, dict):
         return None
 
     if inline_audit.get("error"):
-        write_issues = _write_report_issue_labels(write_report)
+        write_issues = _write_report_issue_labels(write_report, worker_phases)
         if write_issues or write_report.get("ok") is False or write_report.get("error") or inline_audit.get("present") or inline_audit.get("missing") or inline_audit.get("mismatch"):
             return _build_post_write_review_audit(
                 {
@@ -1388,6 +1419,7 @@ def _build_inline_sync_audit_result(
                     "mismatch": inline_audit.get("mismatch"),
                 },
                 write_report,
+                worker_phases,
             )
         return _build_incomplete_post_write_audit(
             {
@@ -1395,6 +1427,7 @@ def _build_inline_sync_audit_result(
                 "summary": inline_audit.get("summary"),
             },
             write_report,
+            worker_phases,
         )
 
     present = list(inline_audit.get("present") or [])
@@ -2870,7 +2903,7 @@ async def sync_practice_to_yap(
             external_id = result_data.get("externalId") or result_data.get("external_id")
             if external_id:
                 practice.management_external_id = str(external_id)
-            audit_result = _build_inline_sync_audit_result(result_data, write_report)
+            audit_result = _build_inline_sync_audit_result(result_data, write_report, response_worker_phases)
             if audit_result:
                 response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
                 response_message = _audit_message_for_status(response_status, audit_result)

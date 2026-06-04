@@ -386,6 +386,11 @@ class TestYapSyncEndpoints:
                         "error": "odl write crashed before field-level report",
                     },
                 },
+                "worker_phases": [
+                    {"phase": "notes_fallback", "status": "failed", "elapsed_ms": 98000},
+                    {"phase": "odl", "status": "failed", "elapsed_ms": 102000},
+                    {"phase": "inline_audit", "status": "partial", "elapsed_ms": 106000},
+                ],
                 "stdout": "",
                 "stderr": "",
             }
@@ -404,6 +409,7 @@ class TestYapSyncEndpoints:
         assert data["error_code"] is None
         assert data["audit"]["technical_failure"] is False
         assert "odl" in data["message"].lower()
+        assert "note" in data["message"].lower()
 
     def test_yap_sync_surfaces_worker_phase_details_on_timeout(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")

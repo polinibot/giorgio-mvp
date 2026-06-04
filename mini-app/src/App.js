@@ -224,6 +224,9 @@ const YAP_PHASE_LABELS = {
   popup: 'popup appuntamento',
   save: 'salvataggio',
   odl: 'scrittura pratica/ODL',
+  odl_route: 'apertura ODL',
+  odl_tab: 'tab ODL',
+  notes_fallback: 'scrittura note',
   event_click: 'ricerca evento',
   practice_odl: 'apertura pratica e ODL',
 };
@@ -245,11 +248,16 @@ function summarizePhaseTimeline(phaseTimeline, fallback = '') {
 
 function workerPhasesToLabel(workerPhases) {
   if (!Array.isArray(workerPhases) || !workerPhases.length) return null;
-  const last = workerPhases[workerPhases.length - 1];
+  const meaningful = [...workerPhases].reverse().find((phase) => (
+    phase
+    && phase.phase !== 'inline_audit'
+    && ['failed', 'ineffective'].includes(String(phase.status || '').toLowerCase())
+  ));
+  const last = meaningful || workerPhases[workerPhases.length - 1];
   if (!last) return null;
   const phaseLabel = YAP_PHASE_LABELS[last.phase] || last.phase;
   const elapsedS = Math.round((last.elapsed_ms || 0) / 1000);
-  const statusMap = { starting: 'avvio', done: 'completato', ready: 'pronto', failed: 'fallito', scanning: 'scansione', opening: 'apertura', filled: 'compilato', found: 'trovato', not_found: 'non trovato', partial: 'parziale' };
+  const statusMap = { starting: 'avvio', done: 'completato', ready: 'pronto', failed: 'fallito', ineffective: 'da ricontrollare', scanning: 'scansione', opening: 'apertura', filled: 'compilato', found: 'trovato', not_found: 'non trovato', partial: 'parziale' };
   const statusLabel = statusMap[last.status] || last.status;
   return `YAP: ${phaseLabel} ${statusLabel} (${elapsedS}s)`;
 }
@@ -2909,6 +2917,7 @@ function App() {
     const errorCode = safeResult.error_code || safeResult?.yap?.error?.error_code || null;
     const statusReason = safeResult.status_reason || safeResult?.yap?.error?.reason || null;
     const actionTarget = safeResult.action_target || safeResult?.yap?.error?.action_target || '';
+    const isPostWriteReview = status === 'partial_synced' && statusReason === 'post_write_review_needed';
     diagnosticItems.push(...buildYapTelemetryDetails(telemetry, status).filter(Boolean));
     if (errorCode && errorCode !== 'YAP_TIMEOUT') diagnosticItems.push(`Codice ${errorCode}`);
     if (statusReason) {
@@ -2921,7 +2930,7 @@ function App() {
         }
       }
     }
-    const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status);
+    const canRetry = showRetry && resolvedPracticeId && ['sync_failed', 'not_ready', 'dry_run', 'duplicate', 'partial_synced', 'agenda_synced'].includes(status) && !isPostWriteReview;
     const canAudit = showRetry && resolvedPracticeId && ['sync_failed', 'audit_failed', 'partial_synced', 'agenda_synced'].includes(status);
     const canDelete = showDelete && resolvedPracticeId && ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'dry_run', 'not_ready', 'sync_failed'].includes(status);
     const canActionHint = Boolean(
