@@ -2615,7 +2615,7 @@ async function runYapAutomation(job, args) {
   }
 
   logPhase("browser", "starting");
-  const runtime = await createYapRuntime(chromium, {
+  let runtime = await createYapRuntime(chromium, {
     headed: args.headed,
     freshLogin: args.freshLogin,
     launchArgs,
@@ -2651,6 +2651,24 @@ async function runYapAutomation(job, args) {
     try { await page.close({ runBeforeUnload: false }); } catch {}
     page = await context.newPage();
     _attachCrashHandler(page);
+  }
+
+  async function scanVisibleAgendaEventsWithRecovery(dateIso) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await scanVisibleAgendaEvents(page);
+      } catch (error) {
+        const message = String(error?.message || "");
+        const recoverable = _isCrash(message)
+          || /agenda_event_population_timeout|agenda_viewport_state_timeout|Execution context was destroyed|Cannot find context with specified id|Target closed|Page closed|Browser has been closed/i.test(message);
+        if (!recoverable || attempt === 3) throw error;
+        logPhase("dedup", "scan_retry", { attempt, error: message.slice(0, 180) });
+        await recreatePageAfterCrash(attempt);
+        await openAgendaWithRecovery(dateIso);
+        await page.waitForTimeout(350 * attempt).catch(() => {});
+      }
+    }
+    return [];
   }
 
   async function openAgendaWithRecovery(dateIso) {
@@ -2738,6 +2756,7 @@ async function runYapAutomation(job, args) {
           launchArgs, preferPersistentProfile: !args.noPersistProfile,
           resolveModule: requireFromYap.resolve.bind(requireFromYap), cwd: ROOT_DIR,
         });
+        runtime = newRuntime;
         ({ browser, context, page } = newRuntime);
         page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
       }
@@ -2773,7 +2792,7 @@ async function runYapAutomation(job, args) {
       );
     }
     logPhase("dedup", "scanning");
-    const existingEvents = await scanVisibleAgendaEvents(page);
+    const existingEvents = await scanVisibleAgendaEventsWithRecovery(job.appointment.date);
     const dedup = findExistingAppointment(existingEvents, {
       plate: job.customer.plate,
       date: job.appointment.date,

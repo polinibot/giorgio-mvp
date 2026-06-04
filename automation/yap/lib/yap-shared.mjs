@@ -973,105 +973,116 @@ export async function gotoAgendaDate(page, isoDate) {
 }
 
 export async function readAgendaViewportState(page) {
-  return page.evaluate(() => {
-    const normalizeText = (value) => String(value || "")
-      .normalize("NFD")
-      .replace(/\p{Diacritic}/gu, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    const normalizeClass = (value) => String(value || "").toLowerCase();
-    const isVisible = (node) => {
-      const rect = node.getBoundingClientRect();
-      const style = window.getComputedStyle(node);
-      return rect.width > 6
-        && rect.height > 6
-        && style.display !== "none"
-        && style.visibility !== "hidden"
-        && style.opacity !== "0";
-    };
-    const roots = [
-      ...document.querySelectorAll(".fc-view-container, .fc-agenda-view, .fc-time-grid"),
-    ].filter(isVisible);
-    const primaryRoot = roots[0] || document.body;
-    const allNodes = [...document.querySelectorAll("h1, h2, h3, div, span, td")].filter(isVisible);
-    const headerNodes = allNodes
-      .map((node) => {
+  const state = await evalWithTimeout(
+    page,
+    () => {
+      const normalizeText = (value) => String(value || "")
+        .normalize("NFD")
+        .replace(/\p{Diacritic}/gu, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const normalizeClass = (value) => String(value || "").toLowerCase();
+      const isVisible = (node) => {
         const rect = node.getBoundingClientRect();
-        return {
-          text: normalizeText((node.textContent || "").slice(0, 120)),
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height,
-        };
-      })
-      .filter((node) =>
-        node.x > 220
-        && node.y < 260
-        && /\b\d{1,2}\b.*\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)\b.*\b20\d{2}\b/i.test(node.text),
-      )
-      .sort((a, b) => (b.width * b.height) - (a.width * a.height));
-    const calendarRoot = document.querySelector(".view-switch")?.parentElement?.parentElement?.parentElement || document.body;
-    const selectedMiniDay = [...calendarRoot.querySelectorAll("button, div, span, td, a")]
-      .filter(isVisible)
-      .map((node) => ({
-        text: normalizeText(node.textContent || ""),
-        classes: [
-          normalizeClass(node.className || ""),
-          normalizeClass(node.parentElement?.className || ""),
-        ].join(" "),
-      }))
-      .find((node) =>
-        /^\d{1,2}$/.test(node.text)
-        && /\b(selected|active|current|today)\b/.test(node.classes),
-      )?.text || null;
-    const events = [...primaryRoot.querySelectorAll(".fc-time-grid-event, .fc-event")]
-      .filter((el) => {
-        const rect = el.getBoundingClientRect();
-        const style = window.getComputedStyle(el);
-        return rect.x > 220
-          && rect.width > 20
+        const style = window.getComputedStyle(node);
+        return rect.width > 6
           && rect.height > 6
           && style.display !== "none"
           && style.visibility !== "hidden"
           && style.opacity !== "0";
-      })
-      .map((el) => {
-        const titleEl = el.querySelector(".fc-title") || el;
-        const timeEl = el.querySelector(".fc-time");
-        const style = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        const repartoClass =
-          String(el.className || "")
-            .split(/\s+/)
-            .find((c) => /^LCWVQRD-b-[a-z]$/.test(c)) || "";
-        return {
-          time: normalizeText(timeEl?.textContent || ""),
-          title: normalizeText(titleEl.textContent || ""),
-          repartoClass,
-          bgColor: style.backgroundColor,
-          borderColor: style.borderColor,
-          left: `${Math.round(rect.left)}px`,
-          width: `${Math.round(rect.width)}px`,
-        };
-      })
-      .filter((ev) => ev.title);
-    const uniqueEvents = [];
-    const seen = new Set();
-    for (const ev of events) {
-      const key = `${ev.time}|${ev.title}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      uniqueEvents.push(ev);
-    }
-    return {
-      viewSwitchLabel: normalizeText(document.querySelector(".view-switch")?.textContent || ""),
-      centerDateLabel: headerNodes[0]?.text || "",
-      selectedMiniDay,
-      visibleEventCount: uniqueEvents.length,
-      visibleEvents: uniqueEvents,
-    };
-  });
+      };
+      const roots = [
+        ...document.querySelectorAll(".fc-view-container, .fc-agenda-view, .fc-time-grid"),
+      ].filter(isVisible);
+      const primaryRoot = roots[0] || document.body;
+      const allNodes = [...document.querySelectorAll("h1, h2, h3, div, span, td")].filter(isVisible);
+      const headerNodes = allNodes
+        .map((node) => {
+          const rect = node.getBoundingClientRect();
+          return {
+            text: normalizeText((node.textContent || "").slice(0, 120)),
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          };
+        })
+        .filter((node) =>
+          node.x > 220
+          && node.y < 260
+          && /\b\d{1,2}\b.*\b(gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|dicembre|novembre)\b.*\b20\d{2}\b/i.test(node.text),
+        )
+        .sort((a, b) => (b.width * b.height) - (a.width * a.height));
+      const calendarRoot = document.querySelector(".view-switch")?.parentElement?.parentElement?.parentElement || document.body;
+      const selectedMiniDay = [...calendarRoot.querySelectorAll("button, div, span, td, a")]
+        .filter(isVisible)
+        .map((node) => ({
+          text: normalizeText(node.textContent || ""),
+          classes: [
+            normalizeClass(node.className || ""),
+            normalizeClass(node.parentElement?.className || ""),
+          ].join(" "),
+        }))
+        .find((node) =>
+          /^\d{1,2}$/.test(node.text)
+          && /\b(selected|active|current|today)\b/.test(node.classes),
+        )?.text || null;
+      const events = [...primaryRoot.querySelectorAll(".fc-time-grid-event, .fc-event")]
+        .filter((el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.x > 220
+            && rect.width > 20
+            && rect.height > 6
+            && style.display !== "none"
+            && style.visibility !== "hidden"
+            && style.opacity !== "0";
+        })
+        .map((el) => {
+          const titleEl = el.querySelector(".fc-title") || el;
+          const timeEl = el.querySelector(".fc-time");
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          const repartoClass =
+            String(el.className || "")
+              .split(/\s+/)
+              .find((c) => /^LCWVQRD-b-[a-z]$/.test(c)) || "";
+          return {
+            time: normalizeText(timeEl?.textContent || ""),
+            title: normalizeText(titleEl.textContent || ""),
+            repartoClass,
+            bgColor: style.backgroundColor,
+            borderColor: style.borderColor,
+            left: `${Math.round(rect.left)}px`,
+            width: `${Math.round(rect.width)}px`,
+          };
+        })
+        .filter((ev) => ev.title);
+      const uniqueEvents = [];
+      const seen = new Set();
+      for (const ev of events) {
+        const key = `${ev.time}|${ev.title}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueEvents.push(ev);
+      }
+      return {
+        viewSwitchLabel: normalizeText(document.querySelector(".view-switch")?.textContent || ""),
+        centerDateLabel: headerNodes[0]?.text || "",
+        selectedMiniDay,
+        visibleEventCount: uniqueEvents.length,
+        visibleEvents: uniqueEvents,
+      };
+    },
+    null,
+    Number(process.env.YAP_VIEWPORT_EVAL_TIMEOUT_MS) || 4000,
+    null,
+    "readAgendaViewportState",
+  );
+  if (!state) {
+    throw new Error("agenda_viewport_state_timeout");
+  }
+  return state;
 }
 
 export async function waitForAgendaEventPopulation(
@@ -1084,7 +1095,7 @@ export async function waitForAgendaEventPopulation(
   } = {},
 ) {
   const started = Date.now();
-  let latest = await readState(page);
+  let latest = await readState(page).catch(() => null);
   let polls = 0;
   let emptyReads = (latest?.visibleEventCount || 0) === 0 ? 1 : 0;
   if ((latest?.visibleEventCount || 0) > 0) {
@@ -1103,7 +1114,7 @@ export async function waitForAgendaEventPopulation(
   while ((Date.now() - started) < timeoutMs) {
     await page.waitForTimeout(pollMs).catch(() => {});
     polls += 1;
-    latest = await readState(page).catch(() => latest);
+    latest = await readState(page).catch(() => null) || latest;
     if ((latest?.visibleEventCount || 0) > 0) {
       return {
         ...latest,
@@ -1117,6 +1128,9 @@ export async function waitForAgendaEventPopulation(
       };
     }
     emptyReads += 1;
+  }
+  if (!latest) {
+    throw new Error("agenda_event_population_timeout");
   }
   return {
     ...latest,
