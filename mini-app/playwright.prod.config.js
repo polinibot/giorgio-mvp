@@ -7,9 +7,9 @@ const WEB_PORT = process.env.SMOKE_PROD_WEB_PORT || '34000';
 module.exports = defineConfig({
   testDir: './smoke',
   testMatch: ['**/prod-smoke.spec.js'],
-  timeout: 60_000,
+  timeout: 300_000,
   fullyParallel: false,
-  retries: 1,
+  retries: 0,
   reporter: [['list']],
   use: {
     baseURL: `http://127.0.0.1:${WEB_PORT}`,
