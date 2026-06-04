@@ -973,78 +973,90 @@ async function isBottomSectionTabSelected(page, needle) {
   }, needle).catch(() => false);
 }
 
+// Coordinate del centro del WRAPPER tab GWT che contiene `needle` (per click reale).
+async function _bottomTabCoords(page, needle) {
+  return safeEvaluate(page, (target) => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const cands = [...document.querySelectorAll(".gwt-TabLayoutPanelTab, button, a, [role='button'], .gwt-Label, span, div, td")]
+      .filter(isVisible)
+      .map((el) => ({ el, cls: String(el.className || ""), text: norm(el.textContent), rect: el.getBoundingClientRect() }))
+      .filter((it) => (it.text === target || it.text.includes(target)) && it.rect.y > 50)
+      .map((it) => {
+        let s = 0;
+        if (it.text === target) s += 20;
+        if (/\bgwt-TabLayoutPanelTab\b/.test(it.cls) && !/Inner/.test(it.cls)) s += 14;
+        if (it.rect.width >= 40 && it.rect.width <= 220) s += 4;
+        if (it.rect.y > window.innerHeight * 0.4) s += 2;
+        return { it, s };
+      })
+      .sort((a, b) => b.s - a.s || b.it.rect.y - a.it.rect.y);
+    if (!cands.length) return null;
+    const r = cands[0].it.rect;
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, needle).catch(() => null);
+}
+
 async function clickBottomSectionTab(page, label) {
   const needle = normalizeLoose(label);
   if (!needle) return false;
-  // Se è GIÀ selezionata non facciamo nulla (evita di "deselezionare" o ri-animare).
+  // Se è GIÀ selezionata non facciamo nulla (evita di "deselezionare"/ri-animare).
   if (await isBottomSectionTabSelected(page, needle)) return true;
-  // Le tab GWT TabLayoutPanel hanno spesso un glifo-icona in coda alla label
-  // (es. "Note interne ư") quindi il match è per INCLUSIONE. CRITICO: il click
-  // deve colpire il WRAPPER esterno .gwt-TabLayoutPanelTab (non l'inner .gwt-HTML),
-  // altrimenti GWT non commuta la tab — era il bug per cui le note non venivano
-  // mai scritte. Proviamo: dispatch DOM completo sul wrapper + click reale del mouse,
-  // poi confermiamo la selezione e ritentiamo.
-  let lastCoords = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const candidate = await safeEvaluate(page, (target) => {
-      const isVisible = (el) => {
-        const rect = el.getBoundingClientRect();
-        const style = window.getComputedStyle(el);
-        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
-      };
-      const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, .gwt-TabLayoutPanelTab, .gwt-TabLayoutPanelTabInner, span, div, td")]
-        .filter(isVisible)
-        .map((el) => ({
-          el,
-          rawText: (el.textContent || "").replace(/\s+/g, " ").trim(),
-          cls: String(el.className || ""),
-          title: String(el.getAttribute("title") || ""),
-          tag: el.tagName,
-          text: norm(el.textContent),
-          rect: el.getBoundingClientRect(),
-        }))
-        .filter((item) => item.text === target || item.text.includes(target))
-        .filter((item) => item.rect.y > 50)
-        .map((item) => {
-          let score = 0;
-          if (item.text === target) score += 20;
-          if (item.title.toLowerCase() === target) score += 8;
-          // Preferenza FORTE per il wrapper esterno della tab GWT (non l'inner).
-          if (/gwt-TabLayoutPanelTab(?:\s|$)/.test(item.cls) || /\bgwt-TabLayoutPanelTab\b/.test(item.cls)) {
-            if (!/TabLayoutPanelTabInner/.test(item.cls)) score += 14;
-          }
-          if (/td|span|a|button/i.test(item.tag)) score += 2;
-          if (/tab|item|label/i.test(item.cls)) score += 3;
-          if (item.rect.width >= 40 && item.rect.width <= 220) score += 4;
-          if (item.rect.height >= 14 && item.rect.height <= 44) score += 3;
-          if (item.rect.y > window.innerHeight * 0.4) score += 2;
-          return { ...item, score };
-        });
-      const best = candidates.sort((a, b) => b.score - a.score || b.rect.y - a.rect.y || a.rect.x - b.rect.x)[0];
-      if (!best) return null;
-      const r = best.rect;
-      const cx = r.x + (r.width / 2);
-      const cy = r.y + (r.height / 2);
-      // Click in-page: sequenza eventi completa che GWT intercetta via delegation.
-      const fire = (type) => best.el.dispatchEvent(new MouseEvent(type, {
-        bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0,
-      }));
-      try { fire("mousedown"); fire("mouseup"); fire("click"); } catch (e) {}
-      try { if (typeof best.el.click === "function") best.el.click(); } catch (e) {}
-      return { x: cx, y: cy, text: best.rawText, score: best.score };
-    }, needle).catch(() => null);
-    if (!candidate) return false;
-    lastCoords = candidate;
-    // Backup: click reale del mouse sulle stesse coordinate (copre i casi in cui
-    // GWT richiede il vero evento nativo).
-    await page.mouse.click(candidate.x, candidate.y).catch(() => {});
+  // Le tab GWT hanno un glifo-icona in coda alla label (es. "Note interne ư") →
+  // match per INCLUSIONE via regex. CRITICO: il click sintetico (dispatchEvent,
+  // isTrusted=false) a volte NON commuta la tab GWT — causa l'intermittenza per cui
+  // le note non venivano scritte e il verify scendeva a 4/10. Quindi prima usiamo il
+  // LOCATOR Playwright (eventi nativi *trusted*, auto-wait, scroll-into-view,
+  // attesa di non-occlusione), poi confermiamo la selezione e solo come ultimo
+  // fallback usiamo il dispatch DOM. Ritorniamo lo stato REALE di selezione.
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const labelRe = new RegExp(escaped, "i");
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    // 1) Wrapper tab via locator (il più affidabile per GWT).
+    const wrapper = page.locator(".gwt-TabLayoutPanelTab", { hasText: labelRe }).first();
+    if (await wrapper.count().catch(() => 0)) {
+      await wrapper.scrollIntoViewIfNeeded({ timeout: 1500 }).catch(() => {});
+      await wrapper.click({ timeout: 2500 }).catch(() => {});
+      await page.waitForTimeout(180).catch(() => {});
+      if (await isBottomSectionTabSelected(page, needle)) return true;
+      // 2) A volte serve colpire l'inner.
+      const inner = page.locator(".gwt-TabLayoutPanelTabInner", { hasText: labelRe }).first();
+      if (await inner.count().catch(() => 0)) {
+        await inner.click({ timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(180).catch(() => {});
+        if (await isBottomSectionTabSelected(page, needle)) return true;
+      }
+    }
+    // 3) Fallback: click reale del mouse alle coordinate del wrapper.
+    const coords = await _bottomTabCoords(page, needle);
+    if (coords) {
+      await page.mouse.click(coords.x, coords.y).catch(() => {});
+      await page.waitForTimeout(180).catch(() => {});
+      if (await isBottomSectionTabSelected(page, needle)) return true;
+      // 4) Ultimo fallback: dispatch DOM completo sul wrapper.
+      await safeEvaluate(page, (target) => {
+        const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const el = [...document.querySelectorAll(".gwt-TabLayoutPanelTab")]
+          .find((n) => norm(n.textContent).includes(target));
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+        for (const t of ["mousedown", "mouseup", "click"]) {
+          el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 }));
+        }
+        try { el.click(); } catch (e) {}
+        return true;
+      }, needle).catch(() => false);
+      await page.waitForTimeout(180).catch(() => {});
+      if (await isBottomSectionTabSelected(page, needle)) return true;
+    }
     await page.waitForTimeout(220).catch(() => {});
-    if (await isBottomSectionTabSelected(page, needle)) return true;
   }
-  // Non confermata come selezionata, ma un click è stato emesso: lasciamo decidere
-  // al chiamante (che verifica la presenza della textarea).
-  return Boolean(lastCoords);
+  return await isBottomSectionTabSelected(page, needle);
 }
 
 async function _legacyClickBottomSectionTab(page, label) {
@@ -2897,7 +2909,7 @@ async function runInlineAudit(page, job, managementWrite) {
   };
 }
 
-async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
+async function saveAppointmentPopup(page, { maxSaveAttempts = 4 } = {}) {
   let putResponse = null;
   let saveAttemptsUsed = 0;
   let lastSaveError = null;
@@ -3059,12 +3071,30 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
         candidateCount,
         candidateScore: candidate.score,
       });
-      // Usa le coordinate del candidate (già promosso al DIV/clickTarget da readPopupState).
-      // page.mouse.click è un evento OS-level che GWT non può ignorare.
+      // STRATEGIA PRIMARIA: click via locator Playwright sul bottone "check" del
+      // popup (eventi nativi *trusted*, auto-wait, scroll-into-view, attesa di
+      // non-occlusione). Il click a coordinate calcolate falliva in modo intermittente
+      // ("Salvataggio non confermato dopo 3 tentativi") quando la coordinata cadeva
+      // sulla barra-titolo/drag del popup invece che sull'icona. Il locator colpisce
+      // l'elemento reale.
+      let locatorClicked = false;
+      try {
+        const popupScope = page.locator(".gwt-DecoratedPopupPanel, .gwt-PopupPanel").last();
+        const saveLeaf = popupScope.locator("span.gwt-InlineLabel, .gwt-InlineLabel, span")
+          .filter({ hasText: /^check$/ }).first();
+        if (await saveLeaf.count().catch(() => 0)) {
+          await saveLeaf.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
+          await saveLeaf.click({ timeout: 2500 }).catch(() => {});
+          locatorClicked = true;
+        }
+      } catch (_e) { /* fallback sotto */ }
+      // FALLBACK: coordinate del candidate (page.mouse.click è OS-level).
       // Prima move per simulare hover (alcuni GWT button attivano solo su hover+click).
-      await page.mouse.move(candidate.x, candidate.y);
-      await page.waitForTimeout(60).catch(() => {});
-      await page.mouse.click(candidate.x, candidate.y, { button: "left", clickCount: 1 });
+      if (!locatorClicked) {
+        await page.mouse.move(candidate.x, candidate.y);
+        await page.waitForTimeout(60).catch(() => {});
+        await page.mouse.click(candidate.x, candidate.y, { button: "left", clickCount: 1 });
+      }
       // Secondo tentativo: cerca la foglia SPAN e clicca anche lì (per sicurezza)
       const domClicked = await safeEvaluate(page, () => {
         const isVisible = (el) => {
@@ -3103,9 +3133,9 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 3 } = {}) {
       }
       logPhase("save_click", "clicked", { buttonText: candidate.rawText || candidate.text || "check", candidateIndex, domClicked });
 
-      // Aspetta fino a 3s che il popup si chiuda: GWT processa il click in modo asincrono
+      // Aspetta fino a 4.5s che il popup si chiuda: GWT processa il click in modo asincrono
       let popupAfterClick = null;
-      for (let w = 0; w < 6; w += 1) {
+      for (let w = 0; w < 9; w += 1) {
         await page.waitForTimeout(500).catch(() => {});
         popupAfterClick = await readPopupState();
         if (!popupAfterClick?.open) break;
@@ -3464,7 +3494,7 @@ async function runYapAutomation(job, args) {
       let putResponseSummary = null;
       try {
         await fillAppointmentPopup(page, job);
-        const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 3 });
+        const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 4 });
         putResponse = popupSave.putResponse;
         saveAttemptsUsed = popupSave.saveAttemptsUsed;
         putResponseSummary = args.debug ? await summarizeResponseBody(putResponse) : null;
@@ -3532,7 +3562,7 @@ async function runYapAutomation(job, args) {
 
     logPhase("popup", "filled");
     logPhase("save", "starting");
-    const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 3 });
+    const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 4 });
     logPhase("save", "done", { detected: Boolean(putResponse) });
     const putResponseSummary = args.debug ? await summarizeResponseBody(putResponse) : null;
     await page.waitForTimeout(240);
