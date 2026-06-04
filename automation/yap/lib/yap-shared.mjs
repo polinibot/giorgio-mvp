@@ -1518,6 +1518,22 @@ export async function openAgendaInApp(page) {
 
 async function _openAgendaInAppInner(page) {
   const _t0 = Date.now();
+  // Fast-path: se la griglia agenda è GIÀ visibile (tipico delle chiamate di
+  // retry da clickAgendaEventRobust quando siamo già sull'agenda), NON ri-navighiamo
+  // a #!agenda. La ri-navigazione ri-bootstrappa il GWT e, se la griglia non si
+  // ri-renderizza subito (memory pressure / renderer lento su Railway), manda
+  // openAgenda in loop "app_shell_retry" fino al deadline di 75s — esattamente il
+  // bug "openAgenda:final_waitForAgendaReady / deadline_exceeded" osservato.
+  // Se siamo già pronti, usciamo subito senza toccare lo stato della pagina.
+  const alreadyVisible = await page
+    .locator(".fc-time-grid, .fc-view-container, .view-switch, .fc-agenda-view")
+    .first()
+    .isVisible()
+    .catch(() => false);
+  if (alreadyVisible) {
+    _logShared("openAgenda", "already_visible_fastpath", { ms: Date.now() - _t0 });
+    return;
+  }
   await navigateWithRetry(page, `${YAP_BASE_URL}/#!agenda`, { waitUntil: "domcontentloaded" });
   _logShared("openAgenda", "nav_done", { ms: Date.now() - _t0, url: page.url().slice(0, 80) });
   // Early-exit: se l'URL post-navigazione non è sull'origine YAP (redirect IAP/auth), è già login.

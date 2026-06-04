@@ -964,7 +964,90 @@ async function openFirstOdlEntryFromList(page) {
   return result;
 }
 
+// Verifica se la sub-tab `label` risulta SELEZIONATA nel TabLayoutPanel GWT.
+async function isBottomSectionTabSelected(page, needle) {
+  return safeEvaluate(page, (target) => {
+    const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    return [...document.querySelectorAll(".gwt-TabLayoutPanelTab-selected, [class*='TabLayoutPanelTab-selected']")]
+      .some((el) => norm(el.textContent).includes(target));
+  }, needle).catch(() => false);
+}
+
 async function clickBottomSectionTab(page, label) {
+  const needle = normalizeLoose(label);
+  if (!needle) return false;
+  // Se è GIÀ selezionata non facciamo nulla (evita di "deselezionare" o ri-animare).
+  if (await isBottomSectionTabSelected(page, needle)) return true;
+  // Le tab GWT TabLayoutPanel hanno spesso un glifo-icona in coda alla label
+  // (es. "Note interne ư") quindi il match è per INCLUSIONE. CRITICO: il click
+  // deve colpire il WRAPPER esterno .gwt-TabLayoutPanelTab (non l'inner .gwt-HTML),
+  // altrimenti GWT non commuta la tab — era il bug per cui le note non venivano
+  // mai scritte. Proviamo: dispatch DOM completo sul wrapper + click reale del mouse,
+  // poi confermiamo la selezione e ritentiamo.
+  let lastCoords = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const candidate = await safeEvaluate(page, (target) => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      const norm = (s) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, .gwt-TabLayoutPanelTab, .gwt-TabLayoutPanelTabInner, span, div, td")]
+        .filter(isVisible)
+        .map((el) => ({
+          el,
+          rawText: (el.textContent || "").replace(/\s+/g, " ").trim(),
+          cls: String(el.className || ""),
+          title: String(el.getAttribute("title") || ""),
+          tag: el.tagName,
+          text: norm(el.textContent),
+          rect: el.getBoundingClientRect(),
+        }))
+        .filter((item) => item.text === target || item.text.includes(target))
+        .filter((item) => item.rect.y > 50)
+        .map((item) => {
+          let score = 0;
+          if (item.text === target) score += 20;
+          if (item.title.toLowerCase() === target) score += 8;
+          // Preferenza FORTE per il wrapper esterno della tab GWT (non l'inner).
+          if (/gwt-TabLayoutPanelTab(?:\s|$)/.test(item.cls) || /\bgwt-TabLayoutPanelTab\b/.test(item.cls)) {
+            if (!/TabLayoutPanelTabInner/.test(item.cls)) score += 14;
+          }
+          if (/td|span|a|button/i.test(item.tag)) score += 2;
+          if (/tab|item|label/i.test(item.cls)) score += 3;
+          if (item.rect.width >= 40 && item.rect.width <= 220) score += 4;
+          if (item.rect.height >= 14 && item.rect.height <= 44) score += 3;
+          if (item.rect.y > window.innerHeight * 0.4) score += 2;
+          return { ...item, score };
+        });
+      const best = candidates.sort((a, b) => b.score - a.score || b.rect.y - a.rect.y || a.rect.x - b.rect.x)[0];
+      if (!best) return null;
+      const r = best.rect;
+      const cx = r.x + (r.width / 2);
+      const cy = r.y + (r.height / 2);
+      // Click in-page: sequenza eventi completa che GWT intercetta via delegation.
+      const fire = (type) => best.el.dispatchEvent(new MouseEvent(type, {
+        bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0,
+      }));
+      try { fire("mousedown"); fire("mouseup"); fire("click"); } catch (e) {}
+      try { if (typeof best.el.click === "function") best.el.click(); } catch (e) {}
+      return { x: cx, y: cy, text: best.rawText, score: best.score };
+    }, needle).catch(() => null);
+    if (!candidate) return false;
+    lastCoords = candidate;
+    // Backup: click reale del mouse sulle stesse coordinate (copre i casi in cui
+    // GWT richiede il vero evento nativo).
+    await page.mouse.click(candidate.x, candidate.y).catch(() => {});
+    await page.waitForTimeout(220).catch(() => {});
+    if (await isBottomSectionTabSelected(page, needle)) return true;
+  }
+  // Non confermata come selezionata, ma un click è stato emesso: lasciamo decidere
+  // al chiamante (che verifica la presenza della textarea).
+  return Boolean(lastCoords);
+}
+
+async function _legacyClickBottomSectionTab(page, label) {
   const needle = normalizeLoose(label);
   if (!needle) return false;
   const candidate = await safeEvaluate(page, (target) => {
@@ -973,9 +1056,6 @@ async function clickBottomSectionTab(page, label) {
       const style = window.getComputedStyle(el);
       return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
     };
-    // FIX: rimosso filtro y > innerHeight-140 — le tab ODL sono visibili
-    // ovunque nel viewport (y ~300-900) quando l'ODL è embedded nella pratica.
-    // Il ranking per punteggio + posizione garantisce ancora la scelta corretta.
     const candidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")]
       .filter(isVisible)
       .map((el) => ({
@@ -996,7 +1076,6 @@ async function clickBottomSectionTab(page, label) {
         if (/tab|item|label/i.test(item.cls)) score += 4;
         if (item.rect.width >= 40 && item.rect.width <= 180) score += 4;
         if (item.rect.height >= 16 && item.rect.height <= 40) score += 3;
-        // Bonus per elementi nella metà inferiore dello schermo (più probabili tab ODL)
         if (item.rect.y > window.innerHeight * 0.4) score += 2;
         return {
           ...item,
@@ -1053,6 +1132,54 @@ async function snapshotBottomSectionTabs(page) {
     const otherTabs = allItems.filter((item) => !odlTabRe.test(item.text)).slice(0, 30);
     return [...odlTabs, ...otherTabs].slice(0, 60);
   }).catch(() => []);
+}
+
+// Legge il testo breve visibile nel DOM corrente (valori input/textarea + label/celle).
+async function readVisibleShortText(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (node) => {
+      const rect = node.getBoundingClientRect();
+      const style = window.getComputedStyle(node);
+      return rect.width > 2 && rect.height > 2 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const values = [];
+    for (const el of document.querySelectorAll("textarea,input[type='text'],input[type='number'],[contenteditable='true'],td,th,label,span,div")) {
+      if (!isVisible(el)) continue;
+      const text = (el.value || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!text || text.length > 300) continue;
+      values.push(text);
+    }
+    return values.join(" | ").slice(0, 30000);
+  }).catch(() => "");
+}
+
+// Verifica robusta: i dati ODL sono distribuiti su più sub-tab (Descrizione danni,
+// Tempi, Materiali di consumo, Smaltimento rifiuti, Ricambi/Articoli, Note interne).
+// Un singolo snapshot del DOM vede solo la tab attiva → falsi negativi nel verify
+// ("da ricontrollare" anche su campi scritti). Qui clicchiamo ogni sub-tab e
+// accumuliamo il testo visibile, così ogni needle può essere confrontato col tab giusto.
+async function collectOdlTabsText(page) {
+  const parts = [];
+  parts.push(await readVisibleShortText(page));
+  const tabs = [
+    "Descrizione danni",
+    "Tempi",
+    "Materiali di consumo",
+    "Smaltimento rifiuti",
+    "Ricambi",
+    "Articoli",
+    "Note interne",
+    "Totali",
+  ];
+  for (const tab of tabs) {
+    try {
+      const clicked = await clickBottomSectionTab(page, tab).catch(() => false);
+      if (!clicked) continue;
+      await page.waitForTimeout(180).catch(() => {});
+      parts.push(await readVisibleShortText(page));
+    } catch (_e) { /* tab assente: ignora */ }
+  }
+  return parts.filter(Boolean).join(" | ").slice(0, 60000);
 }
 
 async function clickRepartoSection(page, reparto) {
@@ -2454,21 +2581,11 @@ async function writePracticeAndOdl(page, job, args) {
   await page.waitForTimeout(120);
 
   const needles = buildOdlNeedles(job);
-  const scopedText = await safeEvaluate(page, () => {
-    const isVisible = (node) => {
-      const rect = node.getBoundingClientRect();
-      const style = window.getComputedStyle(node);
-      return rect.width > 2 && rect.height > 2 && style.visibility !== "hidden" && style.display !== "none";
-    };
-    const values = [];
-    for (const el of document.querySelectorAll("textarea,input[type='text'],input[type='number'],[contenteditable='true'],td,th,label,span,div")) {
-      if (!isVisible(el)) continue;
-      const text = (el.value || el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-      if (!text || text.length > 300) continue;
-      values.push(text);
-    }
-    return values.join(" | ").slice(0, 30000);
-  }).catch(() => "");
+  // Verify multi-tab: accumula il testo di TUTTE le sub-tab ODL (vedi commento su
+  // collectOdlTabsText) per eliminare i falsi negativi del verify a snapshot singolo.
+  const scopedText = writeReport.openedOdl
+    ? await collectOdlTabsText(page).catch(() => "")
+    : await readVisibleShortText(page).catch(() => "");
   const normalizedScoped = normalizeLoose(scopedText);
   const hasNeedle = (value) => normalizedScoped.includes(normalizeLoose(value));
   if (writeReport.fallbackSummaryWritten) {
