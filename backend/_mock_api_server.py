@@ -5,6 +5,15 @@ from copy import deepcopy
 import os
 import json
 
+# Tutte le date di test sono ancorate a novembre 2026 per coerenza
+# con il resto del progetto (App.js usa randomDateInNovember2026,
+# i Jest test usano 2026-11-xx, il dataset YAP copre novembre 2026).
+NOV_2026 = {
+    'day10': '2026-11-10T09:00:00.000Z',
+    'day11': '2026-11-11T10:00:00.000Z',
+    'day20': '2026-11-20T09:00:00.000Z',
+}
+
 INITIAL_STATE = {
     'practices': [
         {
@@ -13,8 +22,8 @@ INITIAL_STATE = {
             'customer_name': 'Mario Rossi',
             'contexts': ['officina'],
             'synced': False,
-            'appointment_date': '2026-06-10T09:00:00.000Z',
-            'created_at': '2026-06-10T09:00:00.000Z',
+            'appointment_date': NOV_2026['day10'],
+            'created_at': NOV_2026['day10'],
         },
         {
             'id': 2,
@@ -22,8 +31,8 @@ INITIAL_STATE = {
             'customer_name': 'Luca Bianchi',
             'contexts': ['carrozzeria'],
             'synced': True,
-            'appointment_date': '2026-06-11T10:00:00.000Z',
-            'created_at': '2026-06-11T10:00:00.000Z',
+            'appointment_date': NOV_2026['day11'],
+            'created_at': NOV_2026['day11'],
         },
     ],
     'details': {
@@ -36,7 +45,7 @@ INITIAL_STATE = {
                 'customer_name': 'Mario Rossi',
                 'customer_type': 'privato',
                 'billing_to_complete': False,
-                'appointment_date': '2026-06-10T09:00:00.000Z',
+                'appointment_date': NOV_2026['day10'],
                 'appointment_time': '09:00',
                 'practice_type': 'preventivo',
                 'contexts': 'officina',
@@ -62,7 +71,7 @@ INITIAL_STATE = {
                 'customer_name': 'Luca Bianchi',
                 'customer_type': 'azienda',
                 'billing_to_complete': True,
-                'appointment_date': '2026-06-11T10:00:00.000Z',
+                'appointment_date': NOV_2026['day11'],
                 'appointment_time': '10:00',
                 'practice_type': 'ordine_di_lavoro',
                 'contexts': 'carrozzeria',
@@ -198,13 +207,17 @@ def _save_practice(payload, practice_id=None):
         practice_id = STATE['next_id']
         STATE['next_id'] += 1
 
+    # appointment_date: usa il valore dal payload (il form invia già novembre 2026),
+    # fallback a una data fissa novembre 2026. created_at è il timestamp reale.
+    appt_date = practice_payload.get('appointment_date') or NOV_2026['day20']
+
     practice = {
         'id': practice_id,
         'plate': plate,
         'customer_name': customer_name,
         'contexts': contexts,
         'synced': False,
-        'appointment_date': _utc_iso(),
+        'appointment_date': appt_date,
         'created_at': _utc_iso(),
     }
     STATE['practices'] = [p for p in STATE['practices'] if p['id'] != practice_id] + [practice]
@@ -218,7 +231,7 @@ def _save_practice(payload, practice_id=None):
             'customer_name': customer_name,
             'customer_type': practice_payload.get('customer_type', 'privato'),
             'billing_to_complete': practice_payload.get('billing_to_complete', False),
-            'appointment_date': _utc_iso(),
+            'appointment_date': appt_date,
             'appointment_time': practice_payload.get('appointment_time', '09:00'),
             'practice_type': practice_payload.get('practice_type', 'preventivo'),
             'contexts': ','.join(contexts),
