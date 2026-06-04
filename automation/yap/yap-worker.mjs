@@ -48,8 +48,14 @@ const WORKSPACE_STATES = Object.freeze({
   UNKNOWN: "unknown",
 });
 
+// MARKER DI BUILD: serve a sapere con CERTEZZA quale versione del worker gira in
+// produzione. Compare nei log (stderr) di ogni esecuzione e nel risultato/telemetria.
+// Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
+// andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
+// rilevante per il flusso YAP.
+const WORKER_BUILD = "2026-06-05c-inline-audit-writereport+gwt-tab-locator";
 const _workerStart = Date.now();
-process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", ts: new Date().toISOString(), pid: process.pid }) + "\n");
+process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
   process.stderr.write(JSON.stringify({
     event: "yap:phase",
@@ -3698,6 +3704,7 @@ async function main() {
   const result = await runYapAutomation(job, args);
   console.log(JSON.stringify({
     ok: true,
+    worker_build: WORKER_BUILD,
     dryRun: args.dryRun,
     practiceId: job.practiceId,
     appointment: job.appointment,
