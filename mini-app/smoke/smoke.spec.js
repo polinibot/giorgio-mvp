@@ -74,7 +74,13 @@ test('demo mode can be submitted end-to-end on the production build output', asy
   await expect(page.locator('#plate_confirmed')).toHaveValue('AB123CD');
   await page.getByRole('button', { name: 'Salva' }).click();
 
+  // Dopo il salvataggio l'app naviga alla vista dettaglio YAP (non alla dashboard).
+  // Verifichiamo che la pratica sia stata creata e che il banner YAP sia corretto.
   await expect(page.locator('body')).toContainText('Pratica creata.');
   await expect(page.locator('body')).not.toContainText('sync YAP fallita');
+  await expect(page.locator('body')).toContainText('YAP agenda scritta');
+
+  // Torniamo alla dashboard e verifichiamo che la nuova pratica sia presente.
+  await page.getByRole('button', { name: /Indietro/i }).first().click();
   await expect(page.locator('.practice-card')).toHaveCount(3);
 });
