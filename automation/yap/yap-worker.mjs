@@ -2636,7 +2636,22 @@ async function runYapAutomation(job, args) {
   }
   let { browser, context, page } = runtime;
   let _pageCrashError = null;
-  page.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); });
+  const _attachCrashHandler = (p) => { p.on("crash", () => { _pageCrashError = new Error("page.evaluate: Target crashed"); }); };
+  _attachCrashHandler(page);
+
+  // Il renderer di Chromium può crashare sotto pressione di memoria (container
+  // Railway limitato + app GWT pesante). Una pagina con renderer crashato NON è
+  // riutilizzabile: ogni page.goto/evaluate successivo rilancia "Page crashed".
+  // Qui chiudiamo la pagina morta e ne creiamo una nuova nello stesso context
+  // (il profilo persistente/sessione restano), liberando la memoria del renderer.
+  const _isCrash = (msg) => /Target crashed|Page crashed/i.test(String(msg || "")) || !!_pageCrashError;
+  async function recreatePageAfterCrash(attempt) {
+    logPhase("browser", "recreating_page_after_crash", { attempt });
+    _pageCrashError = null;
+    try { await page.close({ runBeforeUnload: false }); } catch {}
+    page = await context.newPage();
+    _attachCrashHandler(page);
+  }
 
   async function openAgendaWithRecovery(dateIso) {
     for (let attempt = 1; attempt <= 3; attempt += 1) {
@@ -2645,6 +2660,13 @@ async function runYapAutomation(job, args) {
         return;
       } catch (error) {
         const message = String(error?.message || "");
+        // Recupero da crash del renderer: la pagina è morta, ricreala e riprova.
+        if (_isCrash(message)) {
+          if (attempt === 3) throw error;
+          await recreatePageAfterCrash(attempt);
+          await page.waitForTimeout(800 * attempt).catch(() => {});
+          continue;
+        }
         const needsRelogin = /agenda_redirected_to_login/i.test(message);
         const wrongDate = /agenda_date_not_reached:/i.test(message);
         if (!needsRelogin && !wrongDate) throw error;
@@ -2668,6 +2690,11 @@ async function runYapAutomation(job, args) {
           await loginYap(page, username, password);
         } catch (retryError) {
           if (attempt === 3) throw retryError;
+          // Se il crash è avvenuto durante loginYap, ricrea la pagina prima del retry
+          // (altrimenti il prossimo openAgenda riuserebbe la pagina morta → fatale).
+          if (_isCrash(retryError?.message)) {
+            await recreatePageAfterCrash(attempt);
+          }
           logPhase("agenda", "relogin_retry", { attempt, error: String(retryError?.message || retryError).slice(0, 180) });
           await page.waitForTimeout(500 * attempt).catch(() => {});
           continue;
