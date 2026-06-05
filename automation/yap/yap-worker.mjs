@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05k-force-odl-activation";
+const WORKER_BUILD = "2026-06-05l-odl-full-reload";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -1550,6 +1550,45 @@ async function openOdlByRoute(page, currentUrl) {
   }
 }
 
+async function openOdlByFullReload(page, currentUrl) {
+  try {
+    const parsed = parsePraticaHashPayload(currentUrl || page.url());
+    if (!parsed.ok) {
+      return {
+        attempted: false,
+        navigated: false,
+        reason: parsed.reason,
+        preview: parsed.preview,
+        idCompanyFolder: parsed.idCompanyFolder,
+        pageEnum: parsed.pageEnum,
+      };
+    }
+
+    const nextPayload = {
+      ...(parsed.payload && typeof parsed.payload === "object" ? parsed.payload : {}),
+      IdCompanyFolder: parsed.idCompanyFolder,
+      Page: "ODL",
+      PageEnum: "ODL",
+      ShowOdlMarcatempo: true,
+    };
+    const baseUrl = new URL(currentUrl || page.url());
+    baseUrl.hash = `!pratica|${JSON.stringify(nextPayload)}`;
+    await page.goto(baseUrl.href, { waitUntil: "domcontentloaded", timeout: 22000 });
+    await page.waitForTimeout(800).catch(() => {});
+    return {
+      attempted: true,
+      navigated: true,
+      reason: null,
+      idCompanyFolder: parsed.idCompanyFolder,
+      pageEnum: "ODL",
+      url: page.url().slice(0, 160),
+      payloadKeys: Object.keys(nextPayload || {}),
+    };
+  } catch (error) {
+    return { attempted: true, navigated: false, reason: String(error?.message || "error") };
+  }
+}
+
 // F2: seleziona il widget Veicolo nel popup appuntamento e collega la targa
 async function selectVehicleByPlate(page, plate) {
   if (!plate) return { found: false, reason: "no_plate" };
@@ -2592,6 +2631,65 @@ async function writePracticeAndOdl(page, job, args) {
   // quindi tra 150s e 230s c'erano 80s di budget INUTILIZZATO: con un avvio lento
   // (es. doppio re-login) la recovery veniva saltata ("skipped_no_time_budget")
   // pur essendoci ancora tempo utile. 195s lascia comunque ~35s di margine di chiusura.
+  if (!odlNavigated && /#!pratica/i.test(page.url())) {
+    writeReport.odlFullReloadAttempted = true;
+    writeReport.debug.odl.fullReloadAttempted = true;
+    const fullReloadRpcMs = Number(process.env.YAP_ODL_FULL_RELOAD_RPC_WAIT_MS) || 12000;
+    const fullReloadRpcReadyPromise = page.waitForResponse(
+      (r) => /\/yap\/action\/[^/]*Odl[^/]*Action/i.test(r.url()) && r.status() === 200,
+      { timeout: fullReloadRpcMs },
+    ).then(() => true).catch(() => false);
+    logPhase("odl_full_reload", "attempting", { state: workspaceState, url: page.url().slice(0, 120) });
+    const fullReloadResult = await openOdlByFullReload(page, page.url()).catch((error) => ({
+      attempted: true,
+      navigated: false,
+      reason: String(error?.message || error || "error"),
+    }));
+    writeReport.debug.odl.fullReloadResult = fullReloadResult;
+    logPhase("odl_full_reload", fullReloadResult?.navigated ? "navigated" : "failed", { reason: fullReloadResult?.reason, idCompanyFolder: fullReloadResult?.idCompanyFolder });
+    const fullReloadRpcReady = await fullReloadRpcReadyPromise;
+    writeReport.debug.odl.fullReloadRpcReady = fullReloadRpcReady;
+    if (args.debug) writeReport.odlFullReloadRpcReady = fullReloadRpcReady;
+    await waitForOdlWorkspaceReady(page, Number(process.env.YAP_ODL_FULL_RELOAD_DOM_WAIT_MS) || 10000).catch(() => {});
+    workspaceState = await getPracticeWorkspaceState(page);
+    writeReport.workspaceState = workspaceState;
+    writeReport.debug.odl.workspaceStateAfterFullReload = workspaceState;
+    if (!isEffectiveOdlState(workspaceState)) {
+      const fullReloadTab = await activateOdlTopTab(page).catch(() => ({ clicked: false }));
+      writeReport.debug.odl.fullReloadGwtTabAttempt = fullReloadTab;
+      if (fullReloadTab?.clicked) {
+        logPhase("odl_full_reload", "gwt_clicked", { label: fullReloadTab.label, score: fullReloadTab.score });
+        await waitForOdlWorkspaceReady(page, Number(process.env.YAP_ODL_FULL_RELOAD_DOM_WAIT_MS) || 10000).catch(() => {});
+        workspaceState = await getPracticeWorkspaceState(page);
+        writeReport.workspaceState = workspaceState;
+        writeReport.debug.odl.workspaceStateAfterFullReloadClick = workspaceState;
+      }
+    }
+    if (!isEffectiveOdlState(workspaceState)) {
+      const fullReloadEntry = await openFirstOdlEntryFromList(page).catch(() => ({ clicked: false, strategy: "error" }));
+      writeReport.debug.odl.fullReloadListEntryAttempt = fullReloadEntry;
+      if (fullReloadEntry?.clicked) {
+        logPhase("odl_full_reload", "list_entry_clicked", { strategy: fullReloadEntry.strategy, text: fullReloadEntry.text?.slice(0, 60) });
+        await waitForOdlWorkspaceReady(page, 8000).catch(() => {});
+        workspaceState = await getPracticeWorkspaceState(page);
+        writeReport.workspaceState = workspaceState;
+        writeReport.debug.odl.workspaceStateAfterFullReloadEntry = workspaceState;
+      }
+    }
+    if (isEffectiveOdlState(workspaceState)) {
+      odlNavigated = true;
+      writeReport.openedOdl = true;
+      writeReport.odl.error = null;
+      writeReport.odlFullReloadEffective = true;
+      writeReport.debug.odl.fullReloadEffective = true;
+      logPhase("odl_full_reload", "recovered", { rpcReady: fullReloadRpcReady });
+    } else {
+      writeReport.odl.error = writeReport.odl.error || "odl_full_reload_ineffective";
+      writeReport.debug.odl.fullReloadEffective = false;
+      logPhase("odl_full_reload", "ineffective", { state: workspaceState, rpcReady: fullReloadRpcReady });
+    }
+  }
+
   const ODL_RECOVERY_DEADLINE_MS = Number(process.env.YAP_ODL_RECOVERY_DEADLINE_MS) || 205000;
   const recoveryHasBudget = () => (Date.now() - _workerStart) < ODL_RECOVERY_DEADLINE_MS;
   if (
@@ -2601,7 +2699,7 @@ async function writePracticeAndOdl(page, job, args) {
       || workspaceState === WORKSPACE_STATES.UNKNOWN
       || workspaceState === WORKSPACE_STATES.ODL_LOADING)
   ) {
-    const maxOdlRecovery = Number(process.env.YAP_ODL_RECOVERY_RETRIES) || 2;
+    const maxOdlRecovery = Number(process.env.YAP_ODL_RECOVERY_RETRIES) || (writeReport.odlFullReloadAttempted ? 0 : 2);
     if (!recoveryHasBudget()) {
       logPhase("odl_recovery", "skipped_no_time_budget", { elapsed_ms: Date.now() - _workerStart, deadline_ms: ODL_RECOVERY_DEADLINE_MS });
     }
