@@ -17,10 +17,6 @@ from security import SecurityService
 
 class TestE2EPracticeLifecycle:
     """Test E2E: ciclo completo vita pratica."""
-    
-    # TODO: Richiedono setup database con migrations
-    # def test_e2e_create_practice(self, client): ...
-    # def test_e2e_practice_full_with_sections_and_parts(self, client): ...
     pass
 
 
@@ -84,9 +80,6 @@ class TestE2ESecurity:
 
 class TestE2EErrorHandling:
     """Test E2E: gestione errori."""
-    
-    # TODO: Richiede setup database
-    # def test_e2e_error_response_format(self, client): ...
 
     def test_e2e_invalid_json_handling(self, client):
         """E2E: JSON invalido gestito correttamente."""

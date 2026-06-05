@@ -54,6 +54,7 @@ yarn-error.log*
 build/
 playwright-report/
 test-results/
+mini-app/build-prod/
 
 # Automation artifacts
 automation/artifacts/
@@ -67,6 +68,7 @@ automation/yap/archive/
 automation/yap/analysis/rpc-trace-*.json
 automation/yap/analysis/pratica-odl-probe-*.json
 automation/yap/analysis/yap-network-traffic.json
+automation/yap/analysis/readonly-scan-*.json
 automation/yap/yap-cache.js
 !automation/yap/lib/
 !automation/yap/lib/**

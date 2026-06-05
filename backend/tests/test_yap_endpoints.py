@@ -780,11 +780,6 @@ class TestAutomationService:
         assert hasattr(AutomationService, 'prepare_automation_payload')
         assert hasattr(AutomationService, 'map_payload_to_management')
 
-    # TODO: Richiedono validazione con database
-    # def test_validate_automation_readiness(self): ...
-    # def test_validate_automation_readiness_incomplete(self): ...
-
-
 class TestYapPreviewFromForm:
     def test_yap_preview_from_form_returns_preview(self, client):
         payload = {

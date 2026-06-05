@@ -13,8 +13,8 @@ import path from "path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const YAP_URL = "https://yap.mmbsoftware.it";
-const USERNAME = process.env.YAP_USERNAME || "anasilsupremo@offcarchiuduno";
-const PASSWORD = process.env.YAP_PASSWORD || "Qweasdzxc@123";
+const USERNAME = process.env.YAP_USERNAME || "";
+const PASSWORD = process.env.YAP_PASSWORD || "";
 
 // Date di novembre 2026 da pulire
 const DATES_TO_CLEAN = [
@@ -74,6 +74,9 @@ async function login(page) {
   const passwordField = await page.locator("input[type='password'], input[name='password'], input[placeholder*='password' i]").first();
   
   if (await emailField.isVisible().catch(() => false)) {
+    if (!USERNAME || !PASSWORD) {
+      throw new Error("Imposta YAP_USERNAME e YAP_PASSWORD per eseguire la pulizia YAP.");
+    }
     await emailField.fill(USERNAME);
     await passwordField.fill(PASSWORD);
     
