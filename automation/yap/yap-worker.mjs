@@ -1571,8 +1571,8 @@ async function confirmUnsavedChangesIfPresent(page) {
   return true;
 }
 
-// F3: naviga all'ODL cambiando hash in-place (niente page.goto → GWT non fa full-reload)
-async function openOdlByRoute(page, currentUrl) {
+// F3: naviga alla pagina lavorazioni cambiando hash in-place (niente page.goto → GWT non fa full-reload)
+async function openOdlByRoute(page, currentUrl, pageEnum = "ODL") {
   try {
     const parsed = parsePraticaHashPayload(currentUrl || page.url());
     if (!parsed.ok) {
@@ -1589,8 +1589,8 @@ async function openOdlByRoute(page, currentUrl) {
     const nextPayload = {
       ...(parsed.payload && typeof parsed.payload === "object" ? parsed.payload : {}),
       IdCompanyFolder: parsed.idCompanyFolder,
-      Page: "ODL",
-      PageEnum: "ODL",
+      Page: pageEnum,
+      PageEnum: pageEnum,
       ShowOdlMarcatempo: true,
     };
     const token = JSON.stringify(nextPayload);
@@ -1604,7 +1604,7 @@ async function openOdlByRoute(page, currentUrl) {
       navigated: true,
       reason: null,
       idCompanyFolder: parsed.idCompanyFolder,
-      pageEnum: "ODL",
+      pageEnum,
       payloadKeys: Object.keys(nextPayload || {}),
     };
   } catch (error) {
@@ -1612,7 +1612,7 @@ async function openOdlByRoute(page, currentUrl) {
   }
 }
 
-async function openOdlByFullReload(page, currentUrl) {
+async function openOdlByFullReload(page, currentUrl, pageEnum = "ODL") {
   try {
     const parsed = parsePraticaHashPayload(currentUrl || page.url());
     if (!parsed.ok) {
@@ -1629,8 +1629,8 @@ async function openOdlByFullReload(page, currentUrl) {
     const nextPayload = {
       ...(parsed.payload && typeof parsed.payload === "object" ? parsed.payload : {}),
       IdCompanyFolder: parsed.idCompanyFolder,
-      Page: "ODL",
-      PageEnum: "ODL",
+      Page: pageEnum,
+      PageEnum: pageEnum,
       ShowOdlMarcatempo: true,
     };
     const baseUrl = new URL(currentUrl || page.url());
@@ -1642,7 +1642,7 @@ async function openOdlByFullReload(page, currentUrl) {
       navigated: true,
       reason: null,
       idCompanyFolder: parsed.idCompanyFolder,
-      pageEnum: "ODL",
+      pageEnum,
       url: page.url().slice(0, 160),
       payloadKeys: Object.keys(nextPayload || {}),
     };
@@ -2742,6 +2742,10 @@ async function writePracticeAndOdl(page, job, args) {
   // F3+F4: naviga all'ODL via hash in-place + gating su RPC
   let odlNavigated = false;
   const practiceUrl = page.url();
+  const workPageEnum = hasWriteableOdlWork(job)
+    && String(job.appointment?.type || job.appointment_type || job.practice_type || "").trim().toLowerCase() === "preventivo"
+    ? "PREVENTIVI"
+    : "ODL";
   writeReport.debug.odl = {
     routeAttempted: false,
     routeResult: null,
@@ -2761,7 +2765,7 @@ async function writePracticeAndOdl(page, job, args) {
       (r) => /\/yap\/action\/[^/]*Odl[^/]*Action/i.test(r.url()) && r.status() === 200,
       { timeout: odlRpcWaitMs },
     ).then(() => true).catch(() => false);
-    const routeResult = await openOdlByRoute(page, practiceUrl);
+    const routeResult = await openOdlByRoute(page, practiceUrl, workPageEnum);
     if (args.debug) writeReport.odlRouteResult = routeResult;
     writeReport.debug.odl.routeResult = routeResult;
     logPhase("odl_route", routeResult.navigated ? "navigated" : "failed", { reason: routeResult.reason, idCompanyFolder: routeResult.idCompanyFolder });
@@ -2927,7 +2931,7 @@ async function writePracticeAndOdl(page, job, args) {
       { timeout: fullReloadRpcMs },
     ).then(() => true).catch(() => false);
     logPhase("odl_full_reload", "attempting", { state: workspaceState, url: page.url().slice(0, 120) });
-    const fullReloadResult = await openOdlByFullReload(page, page.url()).catch((error) => ({
+    const fullReloadResult = await openOdlByFullReload(page, page.url(), workPageEnum).catch((error) => ({
       attempted: true,
       navigated: false,
       reason: String(error?.message || error || "error"),
@@ -3017,7 +3021,7 @@ async function writePracticeAndOdl(page, job, args) {
           .some((el) => /ordini di lavoro/i.test((el.textContent || "").replace(/\s+/g, " ").trim()));
       }, null, { timeout: 10000 }).catch(() => {});
       // Ritenta apertura: prima la route diretta, poi il click sul tab + primo ODL.
-      const recRoute = await openOdlByRoute(page, page.url()).catch(() => ({ navigated: false }));
+      const recRoute = await openOdlByRoute(page, page.url(), workPageEnum).catch(() => ({ navigated: false }));
       if (recRoute?.navigated) {
         await waitForOdlWorkspaceReady(page, 12000).catch(() => {});
       } else {

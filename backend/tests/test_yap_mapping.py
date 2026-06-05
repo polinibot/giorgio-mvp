@@ -47,7 +47,28 @@ def test_build_preview_has_odl_block():
     preview = build_yap_preview(m)
     assert preview["proposedYap"]["popup"]["cosa"] == "AB123CD - CONTROLLO"
     assert preview["proposedYap"]["odl"]["action"] == "mapping_complete_worker_planned"
+    assert preview["proposedYap"]["odl"]["pageLabel"] == "Ordini di lavoro"
     assert preview["proposedYap"]["odl"]["yapMenu"]
+
+
+def test_preview_skips_odl_for_revisione_pura():
+    m = _mapping(["revisione"], "EL733YJ", [{"reparto": "revisione", "descrizioni": ["Revisione periodica"]}])
+    preview = build_yap_preview(m)
+    assert preview["proposedYap"]["delegatedToYap"] == ["gestione_pratica"]
+    assert preview["proposedYap"]["odl"] is None
+
+
+def test_preview_uses_preventivi_page_for_work_preview():
+    m = _mapping(
+        ["carrozzeria"],
+        "GA019BC",
+        [{"reparto": "carrozzeria", "descrizioni": ["Verniciatura cerchi"]}],
+        tipo="preventivo",
+    )
+    preview = build_yap_preview(m)
+    assert preview["proposedYap"]["delegatedToYap"] == ["gestione_pratica", "odl_base"]
+    assert preview["proposedYap"]["odl"]["page"] == "preventivi"
+    assert preview["proposedYap"]["odl"]["pageLabel"] == "Preventivi"
 
 
 def test_preview_normalizes_time_to_yap_slot():

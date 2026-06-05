@@ -10,6 +10,7 @@ from appointment_time import get_yap_slot_minutes, normalize_appointment_time
 
 GENERIC_REVISIONE = re.compile(r"^(revisione(\s+periodica)?|rev\.?)$", re.I)
 REPARTO_ORDER = ["officina", "carrozzeria", "revisione"]
+WORK_CONTEXTS = {"officina", "carrozzeria"}
 
 
 def _safe_int(value: Any, default: int) -> int:
@@ -41,6 +42,18 @@ def _sort_lavorazioni(lavorazioni: List[Dict[str, Any]]) -> List[Dict[str, Any]]
 def is_revisione_pura(contexts: List[str], lavorazioni: Optional[List[Dict[str, Any]]] = None) -> bool:
     del lavorazioni
     return len(contexts) == 1 and contexts[0] == "revisione"
+
+
+def has_work_contexts(mapping: Dict[str, Any]) -> bool:
+    contexts = {str(ctx or "").strip().lower() for ctx in _contexts_from_mapping(mapping)}
+    return any(context in contexts for context in WORK_CONTEXTS)
+
+
+def pick_work_page(mapping: Dict[str, Any]) -> Optional[str]:
+    if not has_work_contexts(mapping):
+        return None
+    tipo = str((mapping.get("agenda") or {}).get("tipo_pratica") or "").strip().lower()
+    return "preventivi" if tipo == "preventivo" else "ordini di lavoro"
 
 
 def _collect_description_lines(mapping: Dict[str, Any]) -> List[str]:
@@ -152,6 +165,9 @@ def build_yap_preview(mapping: Dict[str, Any], pre_sync: Optional[Dict[str, Any]
     tags = pick_yap_tags(mapping)
     cosa = pick_cosa(mapping)
     cosa_breve = pick_work_brief(mapping) or None
+    has_work = has_work_contexts(mapping)
+    work_page = pick_work_page(mapping)
+    work_page_label = "Preventivi" if work_page == "preventivi" else "Ordini di lavoro"
 
     pure_revisione = is_revisione_pura(contexts, mapping.get("lavorazioni") or [])
     return {
@@ -177,10 +193,13 @@ def build_yap_preview(mapping: Dict[str, Any], pre_sync: Optional[Dict[str, Any]
                 "tag": tags,
                 "note1_proposed": None,
             },
-            "delegatedToYap": ["gestione_pratica", "odl_base"],
+            "delegatedToYap": ["gestione_pratica", "odl_base"] if has_work else ["gestione_pratica"],
             "odl": {
                 "action": "mapping_complete_worker_planned",
-                "yapMenu": ["Ordini di lavoro", "Materiali di consumo", "Smaltimento rifiuti", "Revisione"],
+                "page": work_page,
+                "pageLabel": work_page_label,
+                "reason": f"Base {work_page_label} da AutomatismoOdlDaPrenotazione; MAN/MAC/materiali/ricambi → {work_page_label}",
+                "yapMenu": [work_page_label, "Materiali di consumo", "Smaltimento rifiuti", "Revisione"],
                 "lavorazioniGiorgio": [
                     {
                         "reparto": lav.get("reparto"),
@@ -198,7 +217,7 @@ def build_yap_preview(mapping: Dict[str, Any], pre_sync: Optional[Dict[str, Any]
                     for lav in _sort_lavorazioni(mapping.get("lavorazioni") or [])
                     if not contexts or lav.get("reparto") in contexts
                 ],
-            },
+            } if has_work else None,
         },
         "preSync": pre_sync,
         "confidence": {

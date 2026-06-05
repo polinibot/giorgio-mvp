@@ -91,6 +91,22 @@ test("revisione pura skips work planning", () => {
   assert.deepEqual(preview.proposedYap.delegatedToYap, ["pratica"]);
 });
 
+test("preventivo work contexts use preventivi page", () => {
+  const mapping = {
+    contexts: ["carrozzeria"],
+    anagrafica: { targa: "GA019BC" },
+    agenda: { data: "2026-11-24", ora: "10:20", durata_minuti: 20, tipo_pratica: "preventivo" },
+    lavorazioni: [{ reparto: "carrozzeria", descrizioni: ["Verniciatura cerchi"] }],
+  };
+
+  const plan = buildManagementPlan({ mapping });
+
+  assert.equal(plan.odl.page, "preventivi");
+  assert.equal(plan.odl.pageLabel, "Preventivi");
+  assert.equal(plan.odl.yapMenu[0], "Preventivi");
+  assert.deepEqual(plan.agenda.delegatedToYap, ["pratica", "odl_base"]);
+});
+
 test("parsePraticaHashPayload handles encoded pratica hashes", () => {
   const parsed = parsePraticaHashPayload("https://yap.mmbsoftware.it/#!pratica%7C%7B%22IdCompanyFolder%22:12684370315,%20%22Page%22:%22VEICOLO%22,%20%22ShowOdlMarcatempo%22:false%7D");
   assert.equal(parsed.ok, true);
