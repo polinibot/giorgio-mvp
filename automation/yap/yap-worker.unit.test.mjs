@@ -36,7 +36,6 @@ test("buildOdlNeedles includes canonical MAN/MAC needles", () => {
     }],
   });
 
-  assert.ok(needles.includes("nota test"));
   assert.ok(needles.includes("officina"));
   assert.ok(needles.includes("tagliando completo"));
   assert.ok(needles.includes("MAN: 1"));

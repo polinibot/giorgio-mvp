@@ -400,7 +400,6 @@ function parsePraticaHashPayload(rawUrl) {
 function buildOdlNeedles(job) {
   const needles = [];
   const hasWork = hasWriteableOdlWork(job);
-  if (hasWork && job.internalNotes) needles.push(job.internalNotes);
   for (const section of hasWork ? (job.sections || []) : []) {
     const reparto = String(section.reparto || "").trim();
     if (reparto) needles.push(reparto);
@@ -2742,10 +2741,7 @@ async function writePracticeAndOdl(page, job, args) {
   // F3+F4: naviga all'ODL via hash in-place + gating su RPC
   let odlNavigated = false;
   const practiceUrl = page.url();
-  const workPageEnum = hasWriteableOdlWork(job)
-    && String(job.appointment?.type || job.appointment_type || job.practice_type || "").trim().toLowerCase() === "preventivo"
-    ? "PREVENTIVI"
-    : "ODL";
+  const workPageEnum = "ODL";
   writeReport.debug.odl = {
     routeAttempted: false,
     routeResult: null,
