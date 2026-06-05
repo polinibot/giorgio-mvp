@@ -305,11 +305,30 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   await page.mouse.click(300, 128);
   await page.waitForTimeout(150);
 
-  trace?.mark("opening_appointment_details", { x: Math.round(match.x), y: Math.round(match.y) });
-  await page.mouse.click(match.x, match.y);
+  const titleNeedle = String(match.title || "").trim();
+  const timeNeedle = String(match.time || "").trim();
+  const eventLocator = page.locator(".fc-time-grid-event, .fc-event")
+    .filter({ hasText: titleNeedle });
+  const exactLocator = timeNeedle
+    ? eventLocator.filter({ hasText: timeNeedle }).first()
+    : eventLocator.first();
+
+  trace?.mark("opening_appointment_details", {
+    x: Math.round(match.x),
+    y: Math.round(match.y),
+    locator_target: titleNeedle,
+  });
+  let clickedViaLocator = false;
+  try {
+    await exactLocator.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+    await exactLocator.click({ timeout: 8000 });
+    clickedViaLocator = true;
+  } catch {
+    await page.mouse.click(match.x, match.y);
+  }
   await page.getByText("Dettagli appuntamento").first().waitFor({ state: "visible", timeout: 15000 });
   await page.waitForTimeout(150);
-  trace?.mark("appointment_details_opened");
+  trace?.mark("appointment_details_opened", { via_locator: clickedViaLocator });
 
   // Usa page.locator per cliccare su "Elimina appuntamento" — GWT richiede click reale Playwright
   const elimLocator = page.locator(".gwt-DecoratedPopupPanel a.gwt-Anchor").filter({ hasText: /Elimina/i });
