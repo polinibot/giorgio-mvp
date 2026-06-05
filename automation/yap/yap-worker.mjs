@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05f-recovery-time-budget";
+const WORKER_BUILD = "2026-06-05g-odl-wait-budget";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -2279,8 +2279,13 @@ async function writePracticeAndOdl(page, job, args) {
       await waitForOdlWorkspaceReady(page, 15000);
       await page.waitForTimeout(400);
       workspaceState = await getPracticeWorkspaceState(page);
+      // Attesa che "Recupero dettagli pratica in corso..." finisca dopo la route ODL.
+      // Alzato da 10 a 25 tentativi (8s -> 20s): su link lento la RPC dei dettagli
+      // pratica di YAP può metterci di più; con EU+RAM esce comunque presto (early-exit
+      // appena lo stato diventa effettivo). Tunabile via YAP_ODL_WAIT_ATTEMPTS.
       let odlWaitAttempts = 0;
-      while ((workspaceState === WORKSPACE_STATES.LOADING || workspaceState === WORKSPACE_STATES.UNKNOWN || workspaceState === WORKSPACE_STATES.ODL_LOADING) && odlWaitAttempts < 10) {
+      const maxOdlWaitAttempts = Number(process.env.YAP_ODL_WAIT_ATTEMPTS) || 25;
+      while ((workspaceState === WORKSPACE_STATES.LOADING || workspaceState === WORKSPACE_STATES.UNKNOWN || workspaceState === WORKSPACE_STATES.ODL_LOADING) && odlWaitAttempts < maxOdlWaitAttempts) {
         await page.waitForTimeout(800);
         workspaceState = await getPracticeWorkspaceState(page);
         odlWaitAttempts++;
@@ -2401,7 +2406,11 @@ async function writePracticeAndOdl(page, job, args) {
   // ucciso DENTRO il recovery, perdendo la diagnostica (era il caso "phases si fermano
   // a odl_route:failed"). Qui ci fermiamo se manca il tempo, così la diagnostica
   // odl_open_failed parte sempre e il worker ritorna pulito prima del kill.
-  const ODL_RECOVERY_DEADLINE_MS = Number(process.env.YAP_ODL_RECOVERY_DEADLINE_MS) || 150000;
+  // Budget per la recovery ODL: alzato da 150s a 195s. Il worker ha 230s di timeout,
+  // quindi tra 150s e 230s c'erano 80s di budget INUTILIZZATO: con un avvio lento
+  // (es. doppio re-login) la recovery veniva saltata ("skipped_no_time_budget")
+  // pur essendoci ancora tempo utile. 195s lascia comunque ~35s di margine di chiusura.
+  const ODL_RECOVERY_DEADLINE_MS = Number(process.env.YAP_ODL_RECOVERY_DEADLINE_MS) || 195000;
   const recoveryHasBudget = () => (Date.now() - _workerStart) < ODL_RECOVERY_DEADLINE_MS;
   if (
     writeReport.odl.attempted
