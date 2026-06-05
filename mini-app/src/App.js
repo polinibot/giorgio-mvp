@@ -2980,6 +2980,30 @@ function App() {
                 ))}
               </div>
             )}
+            {(() => {
+              const workerLog = (Array.isArray(safeResult.phase_timeline) && safeResult.phase_timeline.length)
+                ? safeResult.phase_timeline
+                : (Array.isArray(safeResult.worker_phases) ? safeResult.worker_phases : []);
+              if (!workerLog.length) return null;
+              const HIDDEN = ['phase', 'status', 'elapsed_ms', 'delta_ms', 'ts', 'seq', 'run', 'event'];
+              const lines = workerLog.map((p) => {
+                const t = typeof p.elapsed_ms === 'number' ? `${(p.elapsed_ms / 1000).toFixed(1)}s` : '';
+                const d = typeof p.delta_ms === 'number' ? `+${p.delta_ms}ms` : '';
+                const extra = Object.entries(p)
+                  .filter(([k, v]) => !HIDDEN.includes(k) && v != null && v !== '')
+                  .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+                  .join(' ');
+                return `${t.padStart(6)} ${d.padStart(8)}  ${p.phase || '?'}:${p.status || '?'}${extra ? '  ' + extra : ''}`;
+              }).join('\n');
+              return (
+                <details className="yap-result-tech">
+                  <summary>🪵 Log worker ({workerLog.length} azioni)</summary>
+                  <div className="yap-result-tech-body">
+                    <pre className="yap-worker-log">{lines}</pre>
+                  </div>
+                </details>
+              );
+            })()}
             {technicalDiagnostics && (status === 'sync_failed' || status === 'delete_failed' || status === 'partial_synced' || status === 'agenda_synced' || showTechnicalAuditState) && (
               <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || status === 'partial_synced' || showTechnicalAuditState}>
                 <summary>Crash log YAP</summary>

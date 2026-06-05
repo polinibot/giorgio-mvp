@@ -1692,6 +1692,15 @@ h2 {
   font-size: 12px;
 }
 
+.yap-worker-log {
+  max-height: 320px;
+  overflow: auto;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
 .yap-preview-issue-head {
   display: flex;
   justify-content: space-between;
