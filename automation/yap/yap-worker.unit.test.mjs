@@ -9,6 +9,12 @@ import {
   formatManNeedle,
   parsePraticaHashPayload,
 } from "./yap-worker.mjs";
+import {
+  buildManagementPlan,
+  buildYapPreview,
+  hasWorkContexts,
+  isRevisionePura,
+} from "./lib/yap-mapping.mjs";
 
 test("formatters use canonical MAN/MAC syntax", () => {
   assert.equal(formatManNeedle(1), "MAN: 1");
@@ -62,6 +68,27 @@ test("buildFieldWriteReport uses canonical field expectations", () => {
   assert.ok(fields.some((field) => field.field_id === "odl.officina.man" && field.expected === "MAN: 1"));
   assert.ok(fields.some((field) => field.field_id === "odl.officina.mac" && field.expected === "MAC: 0.5"));
   assert.ok(fields.some((field) => field.field_id === "odl.officina.ricambio.Filtro olio" && field.expected === "Filtro olio x 1"));
+});
+
+test("revisione pura skips work planning", () => {
+  const mapping = {
+    contexts: ["revisione"],
+    anagrafica: { targa: "TEST123" },
+    agenda: { data: "2026-11-24", ora: "10:20", durata_minuti: 20, tipo_pratica: "preventivo" },
+    lavorazioni: [{ reparto: "revisione", descrizioni: ["Controllo revisione"] }],
+    note_interne: "Nota revisione",
+  };
+
+  assert.equal(isRevisionePura(mapping), true);
+  assert.equal(hasWorkContexts(mapping), false);
+
+  const plan = buildManagementPlan({ mapping });
+  const preview = buildYapPreview(mapping);
+
+  assert.equal(plan.odl, null);
+  assert.deepEqual(plan.agenda.delegatedToYap, ["pratica"]);
+  assert.equal(preview.proposedYap.odl, null);
+  assert.deepEqual(preview.proposedYap.delegatedToYap, ["pratica"]);
 });
 
 test("parsePraticaHashPayload handles encoded pratica hashes", () => {

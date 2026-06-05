@@ -7,6 +7,7 @@ import { buildFullFieldMapping } from "./yap-field-map.mjs";
 import { getYapSlotMinutes, normalizeAppointmentTime } from "./yap-shared.mjs";
 
 const GENERIC_REVISIONE = /^(revisione(\s+periodica)?|rev\.?)$/i;
+const WORK_CONTEXTS = new Set(["officina", "carrozzeria"]);
 
 /** Priorità titolo breve agenda (Cosa) quando più reparti sono attivi. */
 export const REPARTO_ORDER = ["officina", "carrozzeria", "revisione"];
@@ -107,6 +108,20 @@ export function isRevisionePura(mapping) {
   if (!contexts.length) return false;
   if (contexts.length === 1 && contexts[0] === "revisione") return true;
   return false;
+}
+
+export function hasWorkContexts(mapping) {
+  const contexts = new Set((mapping.contexts || []).map((ctx) => String(ctx || "").trim().toLowerCase()));
+  for (const context of WORK_CONTEXTS) {
+    if (contexts.has(context)) return true;
+  }
+  return false;
+}
+
+export function pickWorkPage(mapping) {
+  if (!hasWorkContexts(mapping)) return null;
+  const tipo = String(mapping.agenda?.tipo_pratica || "").trim().toLowerCase();
+  return tipo === "preventivo" ? "preventivi" : "ordini di lavoro";
 }
 
 export function collectDescriptionLines(mapping) {
@@ -219,6 +234,9 @@ export function buildManagementPlan(raw) {
   const durata = yapSlotDuration(mapping);
   const rawTime = mapping.agenda.ora || mapping.agenda.time || "";
   const ora = rawTime ? normalizeAppointmentTime(rawTime) : "";
+  const hasWork = hasWorkContexts(mapping);
+  const workPage = pickWorkPage(mapping);
+  const workPageLabel = workPage === "preventivi" ? "Preventivi" : "Ordini di lavoro";
 
   const agenda = {
     cosa: pickCosa(mapping),
@@ -228,11 +246,11 @@ export function buildManagementPlan(raw) {
     tag: pickYapTags(mapping),
     note: buildNotesForPopup(mapping) || null,
     action: "create_appointment",
-    delegatedToYap: ["pratica", "odl_base"],
+    delegatedToYap: hasWork ? ["pratica", "odl_base"] : ["pratica"],
   };
 
   const contexts = new Set(mapping.contexts || []);
-  const lavorazioni = sortLavorazioniByReparto(mapping.lavorazioni)
+  const lavorazioni = hasWork ? sortLavorazioniByReparto(mapping.lavorazioni)
     .filter((l) => !contexts.size || contexts.has(l.reparto))
     .map((l) => {
       const noteReparto = String(l.note || l.notes || "").trim();
@@ -261,7 +279,7 @@ export function buildManagementPlan(raw) {
         giorgioWorkerPhase: "odl_v2_planned",
         note: noteReparto || "Destinazioni ODL definite; worker Giorgio da estendere dopo agenda",
       };
-    });
+    }) : [];
 
   return {
     mode: "shadow_plan_no_yap_write",
@@ -274,20 +292,24 @@ export function buildManagementPlan(raw) {
     agenda,
     gestione_pratica: {
       action: "skip_automation",
-      reason: "Gestione pratica nativa YAP dopo save appuntamento",
+      reason: hasWork
+        ? "Gestione pratica nativa YAP dopo save appuntamento"
+        : "Solo revisione: nessun passaggio su Preventivi/ODL",
       fieldsFromGiorgio: ["cliente", "telefono", "targa"],
     },
-    odl: {
+    odl: hasWork ? {
       action: "mapping_complete_worker_planned",
+      page: workPage,
+      pageLabel: workPageLabel,
       reason: "Base ODL da AutomatismoOdlDaPrenotazione; MAN/MAC/materiali/ricambi → Ordini di lavoro",
       yapMenu: ["Ordini di lavoro", "Materiali di consumo", "Smaltimento rifiuti", "Revisione"],
       lavorazioniGiorgio: lavorazioni,
       yapPopulates: ["revisione_righe", "manodopera_catalog", "materiali_consumo"],
-    },
+    } : null,
     confidence: {
       agenda: "high",
       gestione_pratica: "medium",
-      odl: "medium",
+      odl: hasWork ? "medium" : "n/a",
     },
     dedupKey: [String(mapping.anagrafica.targa || "").toUpperCase(), String(mapping.agenda.data || "").slice(0, 10), String(ora).replace(".", ":").slice(0, 5)]
       .filter(Boolean)

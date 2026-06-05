@@ -25,6 +25,7 @@ import {
   pickYapTagsFromJob,
   buildNotesForPopup,
   jobToMapping,
+  hasWorkContexts,
   yapRepartoForOdl,
 } from "./lib/yap-mapping.mjs";
 import {
@@ -53,7 +54,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05n-note-editor-best-editable";
+const WORKER_BUILD = "2026-06-05o-revision-skip-odl";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -294,8 +295,16 @@ async function openAgenda(page, isoDate) {
   }
 }
 
-function shouldWriteOdlFromWorker() {
-  return String(process.env.YAP_WRITE_ODL || "1").trim() !== "0";
+function hasWriteableOdlWork(job) {
+  if (hasWorkContexts(jobToMapping(job))) return true;
+  return Array.isArray(job?.sections) && job.sections.some((section) => {
+    const reparto = String(section?.reparto || "").trim().toLowerCase();
+    return reparto === "officina" || reparto === "carrozzeria";
+  });
+}
+
+function shouldWriteOdlFromWorker(job) {
+  return String(process.env.YAP_WRITE_ODL || "1").trim() !== "0" && hasWriteableOdlWork(job);
 }
 
 function normalizeLoose(value) {
@@ -390,8 +399,9 @@ function parsePraticaHashPayload(rawUrl) {
 
 function buildOdlNeedles(job) {
   const needles = [];
-  if (job.internalNotes) needles.push(job.internalNotes);
-  for (const section of job.sections || []) {
+  const hasWork = hasWriteableOdlWork(job);
+  if (hasWork && job.internalNotes) needles.push(job.internalNotes);
+  for (const section of hasWork ? (job.sections || []) : []) {
     const reparto = String(section.reparto || "").trim();
     if (reparto) needles.push(reparto);
     for (const row of section.descrizioni || []) {
@@ -435,10 +445,10 @@ function buildSectionSummary(section) {
 
 function buildOdlSummaryText(job) {
   const blocks = [];
-  if (job.internalNotes) {
+  if (hasWriteableOdlWork(job) && job.internalNotes) {
     blocks.push(`Note interne: ${String(job.internalNotes).trim()}`);
   }
-  for (const section of job.sections || []) {
+  for (const section of hasWriteableOdlWork(job) ? (job.sections || []) : []) {
     blocks.push(buildSectionSummary(section));
   }
   return blocks.join("\n\n").slice(0, 12000);
@@ -2349,6 +2359,7 @@ async function clickGenericSaveInPractice(page) {
 
 function buildFieldWriteReport(job, writeReport) {
   const fields = [];
+  const hasWork = hasWriteableOdlWork(job);
   const pushField = (fieldId, expected, ok, hint) => {
     fields.push({
       field_id: fieldId,
@@ -2359,11 +2370,11 @@ function buildFieldWriteReport(job, writeReport) {
     });
   };
 
-  if (job.internalNotes) {
+  if (hasWork && job.internalNotes) {
     pushField("note.interne", String(job.internalNotes).trim(), Boolean(writeReport?.notes?.success), "Apri Gestione pratica e verifica note interne.");
   }
 
-  for (const section of job.sections || []) {
+  for (const section of hasWork ? (job.sections || []) : []) {
     const reparto = String(section.reparto || "").trim().toLowerCase() || "reparto";
     const labels = writeReport?.odl?.sections || [];
     const sectionHit = labels.some((item) => String(item?.reparto || "").trim().toLowerCase() === reparto && item.written);
@@ -2501,8 +2512,8 @@ async function writePracticeAndOdl(page, job, args) {
     odlFallbackClickUsed: false,
     agenda: { attempted: false, success: false, error: null },
     tags: { attempted: false, success: false, error: null },
-    notes: { attempted: Boolean(job.internalNotes), success: false, error: null },
-    odl: { attempted: Boolean((job.sections || []).length), success: false, error: null, sections: [] },
+    notes: { attempted: hasWriteableOdlWork(job) && Boolean(job.internalNotes), success: false, error: null },
+    odl: { attempted: hasWriteableOdlWork(job), success: false, error: null, sections: [] },
     materials: { attempted: false, success: false, error: null },
     parts: { attempted: false, success: false, error: null },
     waste: { attempted: false, success: false, error: null },
@@ -2645,7 +2656,7 @@ async function writePracticeAndOdl(page, job, args) {
   // Scrivi note interne nella view pratica (sub-tab "Note interne") PRIMA di navigare all'ODL.
   // FIX: su detail_form non ci sono textarea visibili direttamente — bisogna prima navigare
   // alla sub-tab "Note interne" della pratica, oppure rimandare la scrittura all'ODL.
-  if (job.internalNotes) {
+  if (job.internalNotes && hasWriteableOdlWork(job)) {
     try {
       // Step 1: prova a navigare al sub-tab "Note interne" nella vista pratica
       const practiceNoteTabClicked = await clickBottomSectionTab(page, "Note interne").catch(() => false);
@@ -3437,10 +3448,10 @@ async function writePracticeAndOdl(page, job, args) {
     || writeReport.hours.man.success
     || writeReport.hours.mac.success
   );
-  const odlRequested = shouldWriteOdlFromWorker() && Boolean((job.sections || []).length);
+  const odlRequested = shouldWriteOdlFromWorker(job);
   writeReport.ok = Boolean(
     writeReport.openedPractice
-    && (job.internalNotes ? writeReport.notes.success || anyOdlFieldSuccess : true)
+    && (hasWriteableOdlWork(job) && job.internalNotes ? writeReport.notes.success || anyOdlFieldSuccess : true)
     && (!odlRequested || (writeReport.openedOdl && anyOdlFieldSuccess))
   );
   if (args.debug) {
@@ -3581,7 +3592,7 @@ async function runInlineAudit(page, job, managementWrite) {
   present.push({ field: "agenda", expected: "appuntamento salvato in agenda" });
 
   // Se l'ODL non era richiesto, la verifica automatica si limita all'agenda.
-  const odlRequested = shouldWriteOdlFromWorker() && Boolean((job.sections || []).length);
+  const odlRequested = shouldWriteOdlFromWorker(job);
   if (!odlRequested) {
     return {
       verified: true,
@@ -4242,7 +4253,7 @@ async function runYapAutomation(job, args) {
         await page.waitForTimeout(140);
       }
       let managementWrite = null;
-      if (shouldWriteOdlFromWorker()) {
+      if (shouldWriteOdlFromWorker(job)) {
         managementWrite = await writePracticeAndOdl(page, job, args).catch((error) => ({
           attempted: true,
           ok: false,
@@ -4309,7 +4320,7 @@ async function runYapAutomation(job, args) {
       await page.screenshot({ path: afterSavePath, fullPage: true });
     }
     let managementWrite = null;
-    if (shouldWriteOdlFromWorker()) {
+    if (shouldWriteOdlFromWorker(job)) {
       logPhase("odl", "starting");
       managementWrite = await writePracticeAndOdl(page, job, args).catch((error) => ({
         attempted: true,

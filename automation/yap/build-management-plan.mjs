@@ -75,7 +75,7 @@ async function main() {
   for (const p of plans) {
     console.log(`\n--- ${p.sourceFile} ---`);
     console.log(`  agenda: cosa=${p.agenda.cosa} tag=${p.agenda.tag.join(",")}`);
-    console.log(`  pratica/ODL: ${p.gestione_pratica.action} / ${p.odl.action}`);
+    console.log(`  pratica/ODL: ${p.gestione_pratica.action} / ${p.odl?.action || "skip"}`);
   }
   console.log(`\n📄 ${outPath}`);
 }

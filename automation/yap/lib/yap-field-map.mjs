@@ -10,6 +10,7 @@ import {
   yapSlotDuration,
   sortLavorazioniByReparto,
   collectDescriptionLines,
+  hasWorkContexts,
 } from "./yap-mapping.mjs";
 import { normalizeAppointmentTime } from "./yap-shared.mjs";
 import { AUTOMATISMI, WRITERS, YAP_NAV, writerLabel } from "./yap-targets.mjs";
@@ -170,9 +171,12 @@ function mapAltro(mapping) {
 
 export function buildFullFieldMapping(mapping) {
   const contexts = new Set(mapping.contexts || []);
-  const lavorazioni = sortLavorazioniByReparto(mapping.lavorazioni || []).filter(
-    (l) => !contexts.size || contexts.has(l.reparto),
-  );
+  const hasWork = hasWorkContexts(mapping);
+  const lavorazioni = hasWork
+    ? sortLavorazioniByReparto(mapping.lavorazioni || []).filter(
+        (l) => !contexts.size || contexts.has(l.reparto),
+      )
+    : [];
 
   const lavMaps = lavorazioni.map((l) => mapLavorazione(normalizeLav(l), mapping));
 

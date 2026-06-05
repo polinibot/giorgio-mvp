@@ -3816,6 +3816,9 @@ function App() {
             <div className="yap-odl-preview">
               <h3 className="yap-odl-title">Gestione pratica / ODL</h3>
               <p className="yap-odl-reason">{preview.proposedYap.odl.reason}</p>
+              {preview.proposedYap.odl.pageLabel && (
+                <p className="yap-odl-reason">Pagina scelta: {preview.proposedYap.odl.pageLabel}</p>
+              )}
               {(preview.proposedYap.odl.lavorazioniGiorgio || []).map((lav, idx) => (
                 <div key={`${lav.reparto}-${idx}`} className="yap-odl-reparto">
                   <span className="context-badge yap-odl-badge">{lav.reparto}</span>
