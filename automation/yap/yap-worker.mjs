@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05c-inline-audit-writereport+gwt-tab-locator";
+const WORKER_BUILD = "2026-06-05e-odl-recovery+diagnostic";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -2082,7 +2082,9 @@ async function writePracticeAndOdl(page, job, args) {
   let workspaceState = await getPracticeWorkspaceState(page);
   let autoAttempts = 0;
   const autoPollMs = Number(process.env.YAP_AUTOMATISMI_POLL_MS) || 1000;
-  const autoMaxMs = Math.max(4000, Number(process.env.YAP_AUTOMATISMI_MAX_MS) || 20000);
+  // Budget aumentato a 30s (era 20s): su Railway headless/memoria limitata gli
+  // automatismi YAP che creano l'ODL in background sono più lenti.
+  const autoMaxMs = Math.max(4000, Number(process.env.YAP_AUTOMATISMI_MAX_MS) || 30000);
   const maxAutoAttempts = Math.ceil(autoMaxMs / autoPollMs);
   while ((workspaceState === "loading_shell" || workspaceState === "unknown") && autoAttempts < maxAutoAttempts) {
     await page.waitForTimeout(autoPollMs);
@@ -2100,7 +2102,7 @@ async function writePracticeAndOdl(page, job, args) {
   // Se la pratica è su detail_form, aspetta che compaia il tab "Ordini di lavoro"
   // (segnale che gli automatismi hanno creato l'ODL).
   if (workspaceState === "detail_form" || workspaceState === "practice_shell") {
-    const odlBadgeWaitMs = Number(process.env.YAP_ODL_BADGE_WAIT_MS) || 8000;
+    const odlBadgeWaitMs = Number(process.env.YAP_ODL_BADGE_WAIT_MS) || 15000;
     logPhase("automatismi_odl_badge", "waiting", { state: workspaceState, waitMs: odlBadgeWaitMs });
     const odlTabVisible = await page.waitForFunction(() => {
       const isVisible = (el) => {
@@ -2117,14 +2119,40 @@ async function writePracticeAndOdl(page, job, args) {
       workspaceState = await getPracticeWorkspaceState(page);
     }
   }
-  // Se ancora loading, prova refresh e riprova
-  if (workspaceState === "loading_shell" || workspaceState === "unknown") {
-    logPhase("automatismi_refresh", "attempting");
-    await page.reload({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(5000);
+  // Se ancora in loading/unknown, prova PIÙ reload (non uno solo). Su Railway il
+  // renderer è lento o può crashare ("Target crashed"): la pratica resta bloccata
+  // in loading_shell e un singolo reload spesso non basta. Ne facciamo fino a 3,
+  // con attese generose e ri-attesa del tab "Ordini di lavoro". È la causa del
+  // openedOdl=false / "Da ricontrollare: ODL" visto in produzione.
+  let refreshAttempts = 0;
+  const maxRefresh = Number(process.env.YAP_PRACTICE_REFRESH_RETRIES) || 3;
+  while ((workspaceState === "loading_shell" || workspaceState === "unknown") && refreshAttempts < maxRefresh) {
+    refreshAttempts += 1;
+    logPhase("automatismi_refresh", "attempting", { attempt: refreshAttempts, maxRefresh });
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(3000).catch(() => {});
+    await waitForPracticeLoadingToFinish(page, Number(process.env.YAP_PRACTICE_LOADING_MS) || 12000).catch(() => {});
+    await dismissVehicleSearchOverlay(page).catch(() => {});
     workspaceState = await getPracticeWorkspaceState(page);
+    // Se è uscita dal loading verso la pratica, dai tempo agli automatismi ODL
+    // (tab "Ordini di lavoro") e poi esci dal loop di reload.
+    if (workspaceState === "detail_form" || workspaceState === "practice_shell") {
+      await page.waitForFunction(() => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        return [...document.querySelectorAll("button, a, span, div, td")]
+          .filter(isVisible)
+          .some((el) => /ordini di lavoro/i.test((el.textContent || "").replace(/\s+/g, " ").trim()));
+      }, null, { timeout: 8000 }).catch(() => {});
+      workspaceState = await getPracticeWorkspaceState(page);
+      break;
+    }
+    if (workspaceState === "odl_full") break;
   }
-  logPhase("automatismi_wait", "done", { attempts: autoAttempts, finalState: workspaceState });
+  logPhase("automatismi_wait", "done", { attempts: autoAttempts, refreshAttempts, finalState: workspaceState });
   writeReport.workspaceState = workspaceState;
   if (args.debug) {
     const practiceShot = path.join(args.artifactDir, `practice-open-${job.practiceId || "payload"}-${Date.now()}.png`);
@@ -2360,6 +2388,118 @@ async function writePracticeAndOdl(page, job, args) {
       writeReport.odl.error = writeReport.odl.error || "odl_tab_not_found";
       logPhase("odl_tab", "not_found");
     }
+  }
+
+  // RECOVERY FINALE apertura ODL: se l'ODL non si è aperto e la pratica è ancora in
+  // loading/unknown (tipico su Railway: renderer lento o "Target crashed"), RICARICA
+  // la pratica e ritenta l'intera apertura ODL (route -> tab -> primo ODL della lista).
+  // È l'ultima rete di sicurezza che evita "openedOdl=false / Da ricontrollare: ODL"
+  // quando in locale la stessa scrittura riesce. Abbiamo budget: un sync sta ~63s su
+  // ~210s disponibili, quindi possiamo permetterci 1-2 reload extra.
+  if (
+    writeReport.odl.attempted
+    && !writeReport.openedOdl
+    && (workspaceState === WORKSPACE_STATES.LOADING
+      || workspaceState === WORKSPACE_STATES.UNKNOWN
+      || workspaceState === WORKSPACE_STATES.ODL_LOADING)
+  ) {
+    const maxOdlRecovery = Number(process.env.YAP_ODL_RECOVERY_RETRIES) || 2;
+    for (let rec = 1; rec <= maxOdlRecovery && !writeReport.openedOdl; rec += 1) {
+      logPhase("odl_recovery", "attempting", { attempt: rec, maxOdlRecovery, state: workspaceState });
+      // Torna alla pratica (ricarica l'URL #!pratica catturato prima).
+      if (practiceUrl && /#!pratica/i.test(practiceUrl)) {
+        await page.goto(practiceUrl, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+      } else {
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+      }
+      await page.waitForTimeout(2500).catch(() => {});
+      await waitForPracticeLoadingToFinish(page, Number(process.env.YAP_PRACTICE_LOADING_MS) || 12000).catch(() => {});
+      await dismissVehicleSearchOverlay(page).catch(() => {});
+      // Dai tempo agli automatismi di (ri)creare l'ODL.
+      await page.waitForFunction(() => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        return [...document.querySelectorAll("button, a, span, div, td")]
+          .filter(isVisible)
+          .some((el) => /ordini di lavoro/i.test((el.textContent || "").replace(/\s+/g, " ").trim()));
+      }, null, { timeout: 10000 }).catch(() => {});
+      // Ritenta apertura: prima la route diretta, poi il click sul tab + primo ODL.
+      const recRoute = await openOdlByRoute(page, page.url()).catch(() => ({ navigated: false }));
+      if (recRoute?.navigated) {
+        await waitForOdlWorkspaceReady(page, 12000).catch(() => {});
+      } else {
+        const recTab = await clickOdlSection(page, { candidateIndex: 0, maxY: 240 }).catch(() => null);
+        if (recTab?.clicked) {
+          await waitForOdlWorkspaceReady(page, 10000).catch(() => {});
+          if (!isEffectiveOdlState(await getPracticeWorkspaceState(page))) {
+            await openFirstOdlEntryFromList(page).catch(() => {});
+            await waitForOdlWorkspaceReady(page, 8000).catch(() => {});
+          }
+        }
+      }
+      workspaceState = await getPracticeWorkspaceState(page);
+      writeReport.workspaceState = workspaceState;
+      if (isEffectiveOdlState(workspaceState)) {
+        odlNavigated = true;
+        writeReport.openedOdl = true;
+        writeReport.odl.error = null;
+        writeReport.odlRecovered = true;
+        logPhase("odl_recovery", "recovered", { attempt: rec });
+      } else {
+        logPhase("odl_recovery", "still_ineffective", { attempt: rec, state: workspaceState });
+      }
+    }
+  }
+
+  // DIAGNOSTICA ODL FALLITO: se l'ODL non si è aperto, cattura uno snapshot dello
+  // stato REALE della pagina (gira SEMPRE, anche senza --debug, perché in produzione
+  // serve a capire la causa). Finisce nei worker_phases (stderr) e nel write_report,
+  // così il "Crash log YAP" mostra perché è andato storto invece di restare vuoto.
+  if (writeReport.odl.attempted && !writeReport.openedOdl) {
+    const diag = await safeEvaluate(page, () => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 2 && r.height > 2 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
+      const all = [...document.querySelectorAll("button, a, span, div, td")].filter(isVisible);
+      const loadingTexts = [...new Set(all
+        .map((el) => norm(el.textContent))
+        .filter((t) => t && t.length < 60 && /caricamento|loading|attendere|in corso|recupero/i.test(t)))].slice(0, 6);
+      const topTabs = [...new Set(all
+        .filter((el) => /gwt-TabLayoutPanelTab/.test(String(el.className || "")))
+        .map((el) => norm(el.textContent))
+        .filter(Boolean))].slice(0, 14);
+      const hasOrdiniLavoro = all.some((el) => /ordini di lavoro/i.test(norm(el.textContent)));
+      const hasOdlSubTabs = all.some((el) => /descrizione danni|materiali di consumo|smaltimento rifiuti/i.test(norm(el.textContent)));
+      const bodyExcerpt = norm(document.body?.innerText || "").slice(0, 400);
+      return { ok: true, loadingTexts, topTabs, hasOrdiniLavoro, hasOdlSubTabs, bodyExcerpt };
+    }).catch((e) => ({ ok: false, evalError: String(e && e.message || e) }));
+    const urlNow = page.url();
+    const parsedNow = parsePraticaHashPayload(urlNow);
+    const odlDiagnostic = {
+      odlError: writeReport.odl.error || null,
+      workspaceState,
+      // pageResponsive=false => l'evaluate è fallito = renderer probabilmente crashato
+      // ("Target crashed") o pagina morta: è il segnale chiave per Railway.
+      pageResponsive: Boolean(diag && diag.ok),
+      evalError: diag && diag.ok ? null : (diag && diag.evalError) || "unknown",
+      loadingTexts: (diag && diag.loadingTexts) || [],
+      hasOrdiniLavoroTab: Boolean(diag && diag.hasOrdiniLavoro),
+      hasOdlSubTabs: Boolean(diag && diag.hasOdlSubTabs),
+      topTabs: (diag && diag.topTabs) || [],
+      refreshAttempts: typeof refreshAttempts === "number" ? refreshAttempts : null,
+      odlFallbackClickUsed: Boolean(writeReport.odlFallbackClickUsed),
+      url: urlNow.slice(0, 120),
+      pageEnum: parsedNow.pageEnum ?? (parsedNow.ok ? "no_page_field" : parsedNow.reason),
+      bodyExcerpt: (diag && diag.bodyExcerpt) || "",
+    };
+    writeReport.odlDiagnostic = odlDiagnostic;
+    logPhase("odl_open_failed", "diagnostic", odlDiagnostic);
   }
 
   if (args.debug) {

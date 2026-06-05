@@ -2969,10 +2969,34 @@ function App() {
                 ))}
               </div>
             )}
-            {technicalDiagnostics && (status === 'sync_failed' || status === 'delete_failed' || showTechnicalAuditState) && (
-              <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || showTechnicalAuditState}>
+            {technicalDiagnostics && (status === 'sync_failed' || status === 'delete_failed' || status === 'partial_synced' || status === 'agenda_synced' || showTechnicalAuditState) && (
+              <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || status === 'partial_synced' || showTechnicalAuditState}>
                 <summary>Crash log YAP</summary>
                 <div className="yap-result-tech-body">
+                  {(() => {
+                    // Diagnostica ODL non aperto: mostra perche' l'ODL non si e' aperto
+                    // (renderer crashato vs loading infinito vs tab assente). Popolata dal
+                    // worker quando openedOdl=false. E' la chiave per capire i fallimenti su Railway.
+                    const od = safeResult?.write_report?.odlDiagnostic || safeResult?.result?.write_report?.odlDiagnostic;
+                    if (!od) return null;
+                    return (
+                      <div className="yap-result-tech-block" style={{ marginBottom: 8 }}>
+                        <strong>ODL non aperto:</strong>
+                        <div>errore: {od.odlError || '?'} | stato: {od.workspaceState || '?'}</div>
+                        <div>pagina_responsiva: {String(od.pageResponsive)}{od.evalError ? ` (evalError: ${od.evalError})` : ''}</div>
+                        <div>tab_ordini_lavoro: {String(od.hasOrdiniLavoroTab)} | sub_tab_odl: {String(od.hasOdlSubTabs)}</div>
+                        <div>reload_pratica: {od.refreshAttempts != null ? od.refreshAttempts : '?'} | fallback_click: {String(od.odlFallbackClickUsed)}</div>
+                        {Array.isArray(od.loadingTexts) && od.loadingTexts.length > 0 && (
+                          <div>loading_visibili: {od.loadingTexts.join(' | ')}</div>
+                        )}
+                        {Array.isArray(od.topTabs) && od.topTabs.length > 0 && (
+                          <div>tab_presenti: {od.topTabs.join(', ')}</div>
+                        )}
+                        <div>pageEnum: {od.pageEnum || '?'}</div>
+                        {od.bodyExcerpt && (<div style={{ opacity: 0.8 }}>testo: {String(od.bodyExcerpt).slice(0, 200)}</div>)}
+                      </div>
+                    );
+                  })()}
                   {technicalDiagnostics.runner?.finished_at && (
                     <div><strong>ts:</strong> {technicalDiagnostics.runner.finished_at}</div>
                   )}
