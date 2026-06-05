@@ -392,6 +392,13 @@ def validate_telegram_init_data(
     # Smoke-test bypass: attivo solo se SMOKE_TEST_SECRET è impostato nel backend
     # e la richiesta porta l'header X-Smoke-Secret con il valore corretto.
     # Usato dai test Playwright/e2e su produzione senza sessione Telegram reale.
+    if not isinstance(x_telegram_init_data, str):
+        x_telegram_init_data = request.headers.get("X-Telegram-Init-Data")
+    if not isinstance(x_telegram_user_id, str):
+        x_telegram_user_id = request.headers.get("X-Telegram-User-Id")
+    if not isinstance(x_smoke_secret, str):
+        x_smoke_secret = request.headers.get("X-Smoke-Secret")
+
     _smoke_secret = settings.smoke_test_secret
     if _smoke_secret and x_smoke_secret and hmac.compare_digest(x_smoke_secret, _smoke_secret):
         uid = settings.smoke_test_user_id or 761118078
