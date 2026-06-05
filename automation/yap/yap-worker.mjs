@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05m-confirm-unsaved-modal";
+const WORKER_BUILD = "2026-06-05n-note-editor-best-editable";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -2109,6 +2109,224 @@ async function appendStructuredBlockToAnyTextarea(page, text, options = {}) {
   }, { blockText: payload, keywordsRaw: options.keywords || [], wantDebugInner: wantDebug }).catch(() => wantDebug ? { ok: false, debug: { error: "evaluate_failed" } } : false);
 }
 
+async function writeStructuredBlockToBestEditable(page, text, options = {}) {
+  const payload = String(text || "").trim();
+  if (!payload) return options.returnDebug ? { ok: false, debug: { reason: "empty_value" } } : false;
+
+  const wantDebug = Boolean(options.returnDebug);
+  const keywords = Array.isArray(options.keywords)
+    ? options.keywords.map((item) => String(item || "").toLowerCase().trim()).filter(Boolean)
+    : [];
+  const preferBottomHalf = Boolean(options.preferBottomHalf);
+  const normalize = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  const frameCandidates = [];
+  const frames = page.frames().filter((frame) => frame && !frame.isDetached());
+  for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
+    const frame = frames[frameIndex];
+    const candidate = await frame.evaluate(({ keywordsRaw, preferBottomHalfInner }) => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+      };
+      const normalize = (value) => String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+      const buildXPath = (el) => {
+        const segments = [];
+        let node = el;
+        while (node && node.nodeType === Node.ELEMENT_NODE) {
+          const tag = node.tagName.toLowerCase();
+          let index = 1;
+          let sibling = node.previousElementSibling;
+          while (sibling) {
+            if (sibling.tagName === node.tagName) index += 1;
+            sibling = sibling.previousElementSibling;
+          }
+          segments.unshift(`${tag}[${index}]`);
+          if (tag === "html") break;
+          node = node.parentElement;
+        }
+        return `/${segments.join("/")}`;
+      };
+      const selectors = [
+        "textarea",
+        "[contenteditable='true']",
+        "[role='textbox']",
+      ];
+      const collect = [];
+      for (const selector of selectors) {
+        for (const el of document.querySelectorAll(selector)) {
+          if (!isVisible(el)) continue;
+          const ce = el.getAttribute("contenteditable");
+          if (ce === "false") continue;
+          const rect = el.getBoundingClientRect();
+          const ownText = normalize([
+            el.getAttribute("name"),
+            el.getAttribute("id"),
+            el.getAttribute("placeholder"),
+            el.getAttribute("aria-label"),
+            el.getAttribute("title"),
+            el.className,
+          ].join(" "));
+          let ctxNode = el;
+          let ctxText = ownText;
+          for (let i = 0; i < 5 && ctxNode?.parentElement; i += 1) {
+            ctxNode = ctxNode.parentElement;
+            ctxText += ` ${normalize((ctxNode.textContent || "").slice(0, 500))}`;
+          }
+          let score = Math.min(40, Math.round(rect.height / 8));
+          for (const rawKeyword of keywordsRaw || []) {
+            const keyword = String(rawKeyword || "").toLowerCase().trim();
+            if (!keyword) continue;
+            if (ownText.includes(keyword)) score += 12;
+            if (ctxText.includes(keyword)) score += 6;
+          }
+          if (el.tagName === "TEXTAREA") score += 8;
+          if (el.getAttribute("role") === "textbox") score += 4;
+          if (el.getAttribute("contenteditable") === "true") score += 6;
+          if (preferBottomHalfInner && rect.y > window.innerHeight * 0.4) score += 5;
+          if (rect.height >= 80) score += 3;
+          if (rect.height >= 160) score += 4;
+          if ((el.value || el.innerText || el.textContent || "").trim()) score += 1;
+          collect.push({
+            selector,
+            xpath: buildXPath(el),
+            score,
+            tag: el.tagName,
+            role: el.getAttribute("role") || null,
+            placeholder: el.getAttribute("placeholder") || null,
+            ariaLabel: el.getAttribute("aria-label") || null,
+            contenteditable: el.getAttribute("contenteditable") || null,
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height),
+            textPreview: String((el.value || el.innerText || el.textContent || "")).slice(0, 120),
+            isInput: el.tagName === "TEXTAREA" || el.tagName === "INPUT",
+          });
+        }
+      }
+      collect.sort((a, b) => b.score - a.score || b.height - a.height || a.y - b.y || a.x - b.x);
+      return {
+        selected: collect[0] || null,
+        candidateCount: collect.length,
+        candidates: collect.slice(0, 8),
+      };
+    }, { keywordsRaw: keywords, preferBottomHalfInner: preferBottomHalf }).catch(() => null);
+
+    if (!candidate?.selected) continue;
+    frameCandidates.push({
+      frameIndex,
+      frameUrl: frame.url(),
+      ...candidate,
+    });
+  }
+
+  const bestFrame = frameCandidates.sort((a, b) => b.selected.score - a.selected.score || b.selected.height - a.selected.height || a.selected.y - b.selected.y)[0];
+  if (!bestFrame?.selected) {
+    return wantDebug
+      ? { ok: false, debug: { reason: "no_editable_found", keywords, preferBottomHalf, frameCandidates } }
+      : false;
+  }
+
+  const frame = frames[bestFrame.frameIndex];
+  const locator = frame.locator(`xpath=${bestFrame.selected.xpath}`);
+  let writeMode = "fill";
+  let readback = "";
+  let success = false;
+  try {
+    await locator.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+    await locator.click({ timeout: 2000 }).catch(() => {});
+    await locator.fill(payload, { timeout: 3000 });
+    await page.waitForTimeout(120).catch(() => {});
+    readback = bestFrame.selected.isInput
+      ? await locator.inputValue().catch(() => "")
+      : await locator.evaluate((el) => String(el.value || el.innerText || el.textContent || "")).catch(() => "");
+    success = normalize(readback).includes(normalize(payload));
+  } catch (_fillError) {
+    writeMode = "type";
+  }
+
+  if (!success) {
+    try {
+      await locator.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+      await locator.click({ timeout: 2000 }).catch(() => {});
+      await locator.press("Control+A").catch(() => {});
+      await locator.type(payload, { delay: 18 });
+      await page.waitForTimeout(120).catch(() => {});
+      readback = bestFrame.selected.isInput
+        ? await locator.inputValue().catch(() => "")
+        : await locator.evaluate((el) => String(el.value || el.innerText || el.textContent || "")).catch(() => "");
+      success = normalize(readback).includes(normalize(payload));
+    } catch (_typeError) {}
+  }
+
+  if (!success) {
+    try {
+      await locator.evaluate((el, value) => {
+        const isInput = el.tagName === "TEXTAREA" || el.tagName === "INPUT";
+        if (isInput) {
+          const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set
+            || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+          if (valueSetter) valueSetter.call(el, value);
+          else el.value = value;
+        } else {
+          el.textContent = value;
+        }
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Enter" }));
+      }, payload);
+      await page.waitForTimeout(120).catch(() => {});
+      readback = bestFrame.selected.isInput
+        ? await locator.inputValue().catch(() => "")
+        : await locator.evaluate((el) => String(el.value || el.innerText || el.textContent || "")).catch(() => "");
+      success = normalize(readback).includes(normalize(payload));
+      if (success) writeMode = "dom";
+    } catch (_domError) {}
+  }
+
+  if (!success) {
+    return wantDebug
+      ? {
+          ok: false,
+          debug: {
+            reason: "write_not_verified",
+            writeMode,
+            frameIndex: bestFrame.frameIndex,
+            frameUrl: bestFrame.frameUrl,
+            selected: bestFrame.selected,
+            readbackPreview: String(readback || "").slice(0, 160),
+            frameCandidates: frameCandidates.map(({ frameIndex: idx, frameUrl, selected }) => ({
+              frameIndex: idx,
+              frameUrl: String(frameUrl || "").slice(0, 120),
+              selected,
+            })),
+          },
+        }
+      : false;
+  }
+
+  await page.mouse.click(8, 8).catch(() => {});
+  return wantDebug
+    ? {
+        ok: true,
+        debug: {
+          frameIndex: bestFrame.frameIndex,
+          frameUrl: bestFrame.frameUrl,
+          writeMode,
+          selected: bestFrame.selected,
+          readbackPreview: String(readback || "").slice(0, 160),
+          frameCandidates: frameCandidates.map(({ frameIndex: idx, frameUrl, selected }) => ({
+            frameIndex: idx,
+            frameUrl: String(frameUrl || "").slice(0, 120),
+            selected,
+          })),
+        },
+      }
+    : true;
+}
+
 async function clickGenericSaveInPractice(page) {
   return safeEvaluate(page, () => {
     const isVisible = (el) => {
@@ -2899,7 +3117,16 @@ async function writePracticeAndOdl(page, job, args) {
     logPhase("odl_notes_tab", "opening");
     const noteTabOpened = await clickBottomSectionTab(page, "Note interne");
     if (noteTabOpened) {
-      await page.waitForTimeout(120);
+      await page.waitForTimeout(250);
+      await page.waitForFunction(() => {
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
+        };
+        return [...document.querySelectorAll("textarea, [contenteditable='true'], [role='textbox']")]
+          .some((el) => isVisible(el) && el.getAttribute("contenteditable") !== "false");
+      }, null, { timeout: 2500 }).catch(() => {});
       if (args.debug) {
         writeReport.bottomTabsAfterNote = await snapshotBottomSectionTabs(page);
       }
@@ -2908,18 +3135,31 @@ async function writePracticeAndOdl(page, job, args) {
         await page.screenshot({ path: noteTabShot, fullPage: true }).catch(() => {});
         writeReport.noteTabScreenshot = noteTabShot;
       }
-      const noteSummaryOk = await appendStructuredBlockToAnyTextarea(
+      const noteSummaryOk = await writeStructuredBlockToBestEditable(
+        page,
+        noteSummaryBlock,
+        { keywords: ["note interne", "note", "annotazioni", "odl", "prospetti"], preferBottomHalf: true, returnDebug: true },
+      );
+      const noteSummaryFallback = !noteSummaryOk?.ok ? await appendStructuredBlockToAnyTextarea(
         page,
         noteSummaryBlock,
         { keywords: ["note interne", "odl", "descrizione danni", "prospetti"], returnDebug: true },
-      );
-      if (noteSummaryOk?.ok) {
+      ) : null;
+      const noteWriteResult = noteSummaryOk?.ok ? noteSummaryOk : noteSummaryFallback;
+      if (noteWriteResult?.ok) {
         writeReport.notes.success = true;
         writeReport.notes.error = null;
         writeReport.fallbackSummaryWritten = true;
-        writeReport.debug.notes.noteSummaryBlock = noteSummaryOk.debug || null;
+        writeReport.debug.notes.noteSummaryBlock = noteWriteResult.debug || null;
+        await clickGenericSaveInPractice(page).catch(() => false);
+        await page.waitForTimeout(180).catch(() => {});
+        if (args.debug) {
+          const noteWriteShot = path.join(args.artifactDir, `note-tab-written-${job.practiceId || "payload"}-${Date.now()}.png`);
+          await page.screenshot({ path: noteWriteShot, fullPage: true }).catch(() => {});
+          writeReport.noteTabWrittenScreenshot = noteWriteShot;
+        }
       } else if (args.debug) {
-        writeReport.debug.notes.noteSummaryBlock = noteSummaryOk?.debug || null;
+        writeReport.debug.notes.noteSummaryBlock = noteWriteResult?.debug || noteSummaryOk?.debug || null;
       }
     }
   }
