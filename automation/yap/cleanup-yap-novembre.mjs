@@ -6,6 +6,7 @@
  */
 
 import { chromium } from "playwright";
+import fs from "node:fs/promises";
 import { fileURLToPath } from "url";
 import path from "path";
 
@@ -25,15 +26,38 @@ const DATES_TO_CLEAN = [
   "2026-11-26", "2026-11-27", "2026-11-28", "2026-11-29", "2026-11-30"
 ];
 
-// Pattern di ricerca per appuntamenti test
-const SEARCH_PATTERNS = [
-  "TEST AUTOMAZIONE",
-  "ZZ555ZZ",
-  "GIORGIO TEST",
-  "TEST GIORGIO",
-  "PROVA",
-  "DEMO"
-];
+const INVENTORY_PATH = path.join(__dirname, "analysis", "november-2026-inventory.json");
+
+async function loadTargetsByDate() {
+  try {
+    const raw = await fs.readFile(INVENTORY_PATH, "utf8");
+    const inventory = JSON.parse(raw);
+    const targetsByDate = new Map();
+
+    for (const day of inventory.days_with_events || []) {
+      const searches = [];
+      for (const event of day.events || []) {
+        searches.push(event.title);
+      }
+      if (searches.length) targetsByDate.set(day.date, searches);
+    }
+
+    return { source: "inventory", targetsByDate };
+  } catch {
+    const fallback = new Map();
+    for (const date of DATES_TO_CLEAN) {
+      fallback.set(date, [
+        "TEST AUTOMAZIONE",
+        "ZZ555ZZ",
+        "GIORGIO TEST",
+        "TEST GIORGIO",
+        "PROVA",
+        "DEMO",
+      ]);
+    }
+    return { source: "fallback_patterns", targetsByDate: fallback };
+  }
+}
 
 async function login(page) {
   console.log("[LOGIN] Accesso YAP...");
@@ -129,7 +153,11 @@ async function main() {
   console.log("=".repeat(60));
   console.log(`Modalità: ${dryRun ? "DRY-RUN (usa --confirm per eliminare davvero)" : "ELIMINAZIONE REALE"}`);
   console.log(`Date da pulire: ${DATES_TO_CLEAN.length}`);
-  console.log(`Pattern di ricerca: ${SEARCH_PATTERNS.join(", ")}`);
+  const { source, targetsByDate } = await loadTargetsByDate();
+  const totalTargets = [...targetsByDate.values()].reduce((sum, items) => sum + items.length, 0);
+  console.log("=".repeat(60));
+  console.log(`Sorgente target: ${source}`);
+  console.log(`Target totali: ${totalTargets}`);
   console.log("=".repeat(60));
   
   if (dryRun) {
@@ -152,7 +180,13 @@ async function main() {
     for (const date of DATES_TO_CLEAN) {
       console.log(`\n[DATA] ${date}`);
       
-      for (const search of SEARCH_PATTERNS) {
+      const searches = targetsByDate.get(date) || [];
+      if (!searches.length) {
+        console.log("  [SKIP] Nessun target per questa data");
+        continue;
+      }
+
+      for (const search of searches) {
         if (dryRun) {
           console.log(`  [DRY-RUN] Cercherei ed eliminerei: ${date} + "${search}"`);
           totalDeleted++;

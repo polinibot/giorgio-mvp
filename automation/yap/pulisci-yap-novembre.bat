@@ -4,9 +4,9 @@ echo   PULIZIA YAP NOVEMBRE 2026
 echo ==========================================
 echo.
 echo Questo script elimina TUTTI gli appuntamenti
-echo di test di novembre 2026 da YAP.
+echo di test di novembre 2026 da YAP leggendo l'inventario reale.
 echo.
-echo Pattern: TEST AUTOMAZIONE, ZZ555ZZ, TEST GIORGIO
+echo Target: inventario novembre 2026
 echo.
 
 if "%1"=="--confirm" goto ELIMINA
