@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
+import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -56,17 +57,70 @@ const WORKSPACE_STATES = Object.freeze({
 // rilevante per il flusso YAP.
 const WORKER_BUILD = "2026-06-05p-inline-audit-odl-state";
 const _workerStart = Date.now();
-process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
+// --- Timeline super-dettagliata (orari + azioni) ----------------------------
+// Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
+// dall'azione precedente, n. progressivo, fase/stato e dettagli. Oltre allo stderr
+// (catturato dal backend) viene scritta riga-per-riga su un file .jsonl persistente
+// che sopravvive a crash/timeout, cosi' e' usabile per il debug post-mortem.
+const ACTION_TIMELINE = [];
+let _lastActionMs = _workerStart;
+let _actionSeq = 0;
+let _timelineFile = null;        // impostato dopo parseArgs (sappiamo artifactDir)
+const _timelineBuffer = [];      // entry emesse prima che il file sia noto
+let _runCorrelationId = `run-${_workerStart}-${process.pid}`;
+
+function _writeTimelineLine(entry) {
+  if (!_timelineFile) {
+    _timelineBuffer.push(entry);
+    return;
+  }
+  try {
+    appendFileSync(_timelineFile, JSON.stringify(entry) + "\n");
+  } catch (_) { /* il log non deve mai abbattere il worker */ }
+}
+
+function setTimelineFile(artifactDir, suffix) {
+  try {
+    const dir = path.join(artifactDir, "timelines");
+    mkdirSync(dir, { recursive: true });
+    _timelineFile = path.join(dir, `timeline-${suffix}.jsonl`);
+    _runCorrelationId = `run-${suffix}`;
+    // Flush di tutto quello bufferizzato prima di conoscere il path.
+    for (const entry of _timelineBuffer) _writeTimelineLine(entry);
+    _timelineBuffer.length = 0;
+    logPhase("timeline", "file_ready", { file: _timelineFile });
+  } catch (error) {
+    logPhase("timeline", "file_error", { error: String(error?.message || error) });
+  }
+}
+
 function logPhase(phase, status, extra = {}) {
-  process.stderr.write(JSON.stringify({
+  const nowMs = Date.now();
+  const entry = {
     event: "yap:phase",
+    seq: (_actionSeq += 1),
+    run: _runCorrelationId,
     phase,
     status,
-    elapsed_ms: Date.now() - _workerStart,
-    ts: new Date().toISOString(),
+    elapsed_ms: nowMs - _workerStart,
+    delta_ms: nowMs - _lastActionMs,
+    ts: new Date(nowMs).toISOString(),
     ...extra,
-  }) + "\n");
+  };
+  _lastActionMs = nowMs;
+  ACTION_TIMELINE.push(entry);
+  if (ACTION_TIMELINE.length > 2000) ACTION_TIMELINE.shift(); // safety cap memoria
+  process.stderr.write(JSON.stringify(entry) + "\n");
+  _writeTimelineLine(entry);
 }
+
+// Helper esplicito per loggare una singola AZIONE atomica (click, fill, navigazione)
+// con i dettagli completi: target, valore, esito, durata.
+function logAction(action, details = {}) {
+  logPhase("action", action, details);
+}
+
+process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 
 function parseArgs(argv) {
   const args = {
@@ -150,6 +204,24 @@ function toIsoDate(value) {
   return parsed.toISOString().slice(0, 10);
 }
 
+// Default "oggi" e "ora attuale" nel fuso Europe/Rome, usati quando la mini-app
+// NON imposta data/ora nel payload (deve essere il worker a metterle).
+function todayIsoRome(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Rome", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function nowTimeRome(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("it-IT", {
+    timeZone: "Europe/Rome", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(now);
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  return `${get("hour")}:${get("minute")}`;
+}
+
 function normalizeJob(rawInput, overrides = {}) {
   const input = rawInput?.data?.mapping || rawInput?.mapping || rawInput?.data?.payload || rawInput?.payload || rawInput;
 
@@ -171,16 +243,21 @@ function normalizeJob(rawInput, overrides = {}) {
         plate: input.anagrafica.targa || "",
         type: input.anagrafica.cliente_tipo || "",
       },
-      appointment: {
-        date: toIsoDate(overrides.date || input.agenda.data),
-        rawTime: overrides.time || input.agenda.ora || "",
-        time: (() => {
-          const rawTime = overrides.time || input.agenda.ora || "";
-          return rawTime ? normalizeAppointmentTime(rawTime) : "";
-        })(),
-        duration: Number(overrides.duration || input.agenda.durata_minuti || getYapSlotMinutes()),
-        type: input.agenda.tipo_pratica || "",
-      },
+      appointment: (() => {
+        const rawDate = toIsoDate(overrides.date || input.agenda.data);
+        const rawTime = overrides.time || input.agenda.ora || "";
+        const dateDefaulted = !rawDate;
+        const timeDefaulted = !rawTime;
+        return {
+          date: rawDate || todayIsoRome(),
+          rawTime: rawTime || (timeDefaulted ? nowTimeRome() : ""),
+          time: normalizeAppointmentTime(rawTime || nowTimeRome()),
+          dateDefaulted,
+          timeDefaulted,
+          duration: Number(overrides.duration || input.agenda.durata_minuti || getYapSlotMinutes()),
+          type: input.agenda.tipo_pratica || "",
+        };
+      })(),
       contexts,
       sections: (input.lavorazioni || []).map((l) => ({
         ...l,
@@ -215,16 +292,21 @@ function normalizeJob(rawInput, overrides = {}) {
       plate: customer.plate || "",
       type: customer.type || "",
     },
-    appointment: {
-      date: toIsoDate(overrides.date || appointment.date),
-      rawTime: overrides.time || appointment.time || "",
-      time: (() => {
-        const rawTime = overrides.time || appointment.time || "";
-        return rawTime ? normalizeAppointmentTime(rawTime) : "";
-      })(),
-      duration: Number(overrides.duration || appointment.slot_duration || getYapSlotMinutes()),
-      type: appointment.practice_type || "",
-    },
+    appointment: (() => {
+      const rawDate = toIsoDate(overrides.date || appointment.date);
+      const rawTime = overrides.time || appointment.time || "";
+      const dateDefaulted = !rawDate;
+      const timeDefaulted = !rawTime;
+      return {
+        date: rawDate || todayIsoRome(),
+        rawTime: rawTime || (timeDefaulted ? nowTimeRome() : ""),
+        time: normalizeAppointmentTime(rawTime || nowTimeRome()),
+        dateDefaulted,
+        timeDefaulted,
+        duration: Number(overrides.duration || appointment.slot_duration || getYapSlotMinutes()),
+        type: appointment.practice_type || "",
+      };
+    })(),
     contexts: input.contexts || sections.map((section) => section.reparto).filter(Boolean),
     sections,
     internalNotes: input.internal_notes || "",
@@ -616,6 +698,70 @@ async function clickApproximateSlot(page, targetTime) {
   }
 
   throw new Error("Popup YAP non aperto dopo il click sullo slot");
+}
+
+// Rileva se lo slot dell'orario richiesto è già occupato da un appuntamento esistente.
+// "Si vede visivamente": cerca un evento (.fc-event) che si sovrappone — sia in
+// verticale (fascia oraria dello slot) sia in orizzontale (colonna del giorno, così
+// non dà falsi positivi in vista settimanale) — al centro dello slot target.
+async function isSlotOccupied(page, time) {
+  const target = normalizeAppointmentTime(time);
+  return safeEvaluate(page, (requested) => {
+    const toMinutes = (t) => {
+      const m = String(t || "").replace(".", ":").match(/^(\d{1,2}):(\d{2})$/);
+      return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+    };
+    const targetMin = toMinutes(requested);
+    if (targetMin == null) return false;
+    const rows = [...document.querySelectorAll(".fc-slats tr[data-time]")];
+    let band = null;
+    let column = null;
+    for (let i = 0; i < rows.length; i += 1) {
+      const rowTime = String(rows[i].getAttribute("data-time") || "").slice(0, 5);
+      if (toMinutes(rowTime) !== targetMin) continue;
+      const rowRect = rows[i].getBoundingClientRect();
+      const nextRect = rows[i + 1]?.getBoundingClientRect();
+      const top = rowRect.top;
+      const bottom = nextRect && nextRect.top > top ? nextRect.top : rowRect.bottom;
+      band = { mid: (top + bottom) / 2 };
+      const cell = rows[i].querySelector("td:not(.fc-axis)");
+      if (cell) {
+        const cr = cell.getBoundingClientRect();
+        if (cr.width > 4) column = { left: cr.left, right: cr.right };
+      }
+      break;
+    }
+    if (!band) return false;
+    const events = [...document.querySelectorAll(".fc-event, .fc-time-grid-event, a.fc-event")];
+    return events.some((ev) => {
+      const er = ev.getBoundingClientRect();
+      if (er.width < 4 || er.height < 4) return false;
+      const overlapsY = er.top <= band.mid && er.bottom >= band.mid;
+      if (!overlapsY) return false;
+      if (!column) return true;
+      return er.left < column.right && er.right > column.left;
+    });
+  }, target).catch(() => false);
+}
+
+// Logica ricorsiva richiesta: se lo slot è occupato, avanza di +slotMinutes (default 20)
+// e riprova, fino a trovarne uno libero (entro fine giornata). Restituisce l'orario libero.
+async function resolveFreeSlotTime(page, desiredTime, slotMinutes = getYapSlotMinutes()) {
+  const step = Number(slotMinutes) > 0 ? Number(slotMinutes) : getYapSlotMinutes();
+  const base = normalizeAppointmentTime(desiredTime);
+  const lastSlotMin = 23 * 60; // non oltre le 23:00
+  const tried = [];
+  const maxSteps = Math.max(0, Math.ceil((lastSlotMin - minutesOf(base)) / step));
+  for (let i = 0; i <= maxSteps; i += 1) {
+    const candidate = i === 0 ? base : normalizeAppointmentTime(addMinutes(base, i * step));
+    const occupied = await isSlotOccupied(page, candidate);
+    tried.push({ time: candidate, occupied });
+    if (!occupied) {
+      return { time: candidate, shifted: i > 0, steps: i, exhausted: false, tried };
+    }
+  }
+  // Tutti gli slot fino a fine giornata risultano occupati: usa il richiesto.
+  return { time: base, shifted: false, steps: 0, exhausted: true, tried };
 }
 
 async function inputSnapshot(page) {
@@ -4300,6 +4446,29 @@ async function runYapAutomation(job, args) {
     }
 
     logPhase("popup", "opening", { time: job.appointment.time });
+    // Slot occupato -> avanza di +slotMinutes finché libero (disattivabile con YAP_SLOT_AUTO_SHIFT=0)
+    if (String(process.env.YAP_SLOT_AUTO_SHIFT || "1").trim() !== "0") {
+      const _slotScanStart = Date.now();
+      const freeSlot = await resolveFreeSlotTime(page, job.appointment.time, getYapSlotMinutes());
+      logAction("slot_scan", {
+        requested: job.appointment.time,
+        resolved: freeSlot.time,
+        shifted: freeSlot.shifted,
+        steps: freeSlot.steps,
+        exhausted: freeSlot.exhausted || false,
+        tried: freeSlot.tried, // [{time, occupied}] per ogni slot controllato
+        scan_ms: Date.now() - _slotScanStart,
+      });
+      if (freeSlot.shifted) {
+        logPhase("popup", "slot_shifted", {
+          from: job.appointment.time, to: freeSlot.time, steps: freeSlot.steps,
+        });
+        job.appointment.time = freeSlot.time;
+        job.appointment.slotShifted = { steps: freeSlot.steps, original: freeSlot.tried[0]?.time };
+      } else if (freeSlot.exhausted) {
+        logPhase("popup", "slot_no_free", { time: job.appointment.time });
+      }
+    }
     const _slotClickStart = Date.now();
     await clickApproximateSlot(page, job.appointment.time);
     logPhase("popup", "slot_clicked", { elapsed_ms: Date.now() - _slotClickStart });
@@ -4477,8 +4646,27 @@ async function main() {
     throw new Error("Serve --payload-file oppure --practice-id");
   }
 
+  const _bootSuffix = `${args.practiceId || "payload"}-${_workerStart}`;
+  setTimelineFile(args.artifactDir, _bootSuffix);
+  logPhase("worker", "start", {
+    build: WORKER_BUILD,
+    dryRun: args.dryRun,
+    practiceId: args.practiceId || null,
+    payloadFile: args.payloadFile || null,
+  });
   logPhase("worker", "reading_payload");
   const job = args.payloadFile ? await readPayloadFile(args.payloadFile, args) : await readPracticeFromApi(args);
+  logAction("job_loaded", {
+    plate: job.customer?.plate || null,
+    contexts: job.contexts,
+    date: job.appointment?.date,
+    time: job.appointment?.time,
+    dateDefaulted: job.appointment?.dateDefaulted || false,
+    timeDefaulted: job.appointment?.timeDefaulted || false,
+    duration: job.appointment?.duration,
+    practiceType: job.appointment?.type || null,
+    sections: (job.sections || []).map((s) => s.reparto),
+  });
   logPhase("worker", "validating_job");
   validateJob(job);
   logPhase("worker", "cleanup_start");
@@ -4486,6 +4674,7 @@ async function main() {
   await cleanupOldArtifacts(args.artifactDir, 7);
   logPhase("worker", "automation_start");
   const result = await runYapAutomation(job, args);
+  logPhase("worker", "finished", { saved: result?.saved ?? null, mode: result?.mode ?? null });
   console.log(JSON.stringify({
     ok: true,
     worker_build: WORKER_BUILD,
@@ -4496,6 +4685,8 @@ async function main() {
       name: job.customer.name,
       plate: job.customer.plate,
     },
+    timelineFile: _timelineFile,
+    actionCount: _actionSeq,
     result,
   }, null, 2));
 }
@@ -4504,6 +4695,10 @@ const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === fileUR
 
 if (isMainModule) {
   main().catch(async (error) => {
+    logPhase("worker", "fatal_error", {
+      error: String(error?.message || error),
+      stack: String(error?.stack || "").slice(0, 1200),
+    });
     // Prova a notificare l'errore al backend (se possibile)
     try {
       const args = parseArgs(process.argv.slice(2));

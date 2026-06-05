@@ -95,10 +95,61 @@ YAP_PRECHECK_CACHE: Dict[str, Dict[str, Any]] = {}
 YAP_PREVIEW_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
+async def _yap_keepalive_loop():
+    """Tiene viva la sessione YAP: ogni N minuti lancia yap-keepalive.mjs (via
+    _run_yap_script, cosi' restaura/ripersiste la sessione cifrata nel DB) cosi' la
+    sessione lato server non scade mai e i job non pagano il re-login.
+
+    Config:
+      YAP_KEEPALIVE_ENABLED  default "1"  (metti "0" per disattivare)
+      YAP_KEEPALIVE_MINUTES  default "10" (intervallo; deve stare sotto il TTL sessione YAP)
+    """
+    if str(os.getenv("YAP_KEEPALIVE_ENABLED", "1")).strip() == "0":
+        logger.info("YAP keep-alive disabilitato (YAP_KEEPALIVE_ENABLED=0)")
+        return
+    try:
+        interval_min = float(os.getenv("YAP_KEEPALIVE_MINUTES", "10"))
+    except (TypeError, ValueError):
+        interval_min = 10.0
+    if interval_min <= 0:
+        logger.info("YAP keep-alive disabilitato (intervallo <= 0)")
+        return
+    interval_s = interval_min * 60
+    # Primo refresh dopo un breve ritardo per non rallentare lo startup.
+    await asyncio.sleep(min(60, interval_s))
+    while True:
+        state_db = SessionLocal()
+        try:
+            await _run_yap_script("yap-keepalive.mjs", [], timeout_seconds=120, db=state_db)
+            logger.info("YAP keep-alive: sessione rinfrescata")
+        except HTTPException as exc:
+            # 429 = un job reale e' gia' in corso: la sessione e' comunque viva, skip.
+            logger.info("YAP keep-alive saltato: %s", getattr(exc, "detail", exc))
+        except asyncio.CancelledError:
+            state_db.close()
+            raise
+        except Exception as exc:  # noqa: BLE001 - non deve mai abbattere il loop
+            logger.warning("YAP keep-alive fallito: %s", exc)
+        finally:
+            try:
+                state_db.close()
+            except Exception:
+                pass
+        await asyncio.sleep(interval_s)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await asyncio.to_thread(_initialize_database)
-    yield
+    keepalive_task = asyncio.create_task(_yap_keepalive_loop())
+    try:
+        yield
+    finally:
+        keepalive_task.cancel()
+        try:
+            await keepalive_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 app = FastAPI(
     title="Giorgio API",
