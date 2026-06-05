@@ -1100,6 +1100,13 @@ def _safe_search_arg(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _safe_practice_yap_time_arg(practice: Practice) -> str:
+    try:
+        return _normalize_slot_time(practice.appointment_time)
+    except Exception:
+        return ""
+
+
 def _yap_session_fernet() -> Fernet:
     secret = settings.secret_key or settings.telegram_bot_token or "dev-yap-session-state-key"
     digest = hashlib.sha256(f"giorgio:yap-session-state:{secret}".encode("utf-8")).digest()
@@ -2508,11 +2515,15 @@ async def delete_practice(
     try:
         _ensure_yap_credentials("eliminare l'appuntamento su YAP")
         date_iso = _practice_date_iso(practice)
-        search = _safe_search_arg(practice.plate_confirmed or practice.customer_name)
+        search = _safe_search_arg(practice.plate_confirmed or practice.plate_detected or practice.customer_name)
         if date_iso and search:
+            time_arg = _safe_practice_yap_time_arg(practice)
+            yap_args = ["--date", date_iso, f"--search={search}"]
+            if time_arg:
+                yap_args.extend(["--time", time_arg])
             result = await _run_yap_script(
                 "yap-delete-appointment.mjs",
-                ["--date", date_iso, f"--search={search}"],
+                yap_args,
                 db=db,
             )
             if not result.get("deleted"):
@@ -3189,14 +3200,15 @@ async def delete_practice_yap_appointment(
         phase_started_wall = wall_now
 
     date_iso = body.date or _practice_date_iso(practice)
-    search = _safe_search_arg(body.search or practice.plate_confirmed or practice.customer_name)
+    search = _safe_search_arg(body.search or practice.plate_confirmed or practice.plate_detected or practice.customer_name)
     if not date_iso or not search:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Data o testo ricerca YAP mancante")
     close_phase("precheck", "completed", "Parametri eliminazione validati.")
 
     args = ["--date", str(date_iso), f"--search={search}"]
-    if body.time:
-        args.extend(["--time", _normalize_slot_time(body.time)])
+    time_source = body.time or practice.appointment_time
+    if time_source:
+        args.extend(["--time", _normalize_slot_time(time_source)])
     if body.dry_run:
         args.append("--dry-run")
     if body.debug:

@@ -4431,8 +4431,12 @@ function App() {
             } else {
               // 1. Prima elimina appuntamento YAP (se esiste)
               try {
+                const listPractice = Array.isArray(practices)
+                  ? practices.find(practiceItem => String(practiceItem.id) === String(id))
+                  : null;
+                const inferredTime = listPractice?.appointment_time || '';
                 await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, {
-                  data: { skip_audit: true },
+                  data: inferredTime ? { skip_audit: true, time: inferredTime } : { skip_audit: true },
                   params: getAuthParams(),
                   headers: getHeaders(),
                   timeout: 60000,

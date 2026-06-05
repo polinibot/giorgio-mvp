@@ -583,8 +583,11 @@ class TestYapSyncEndpoints:
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
         import main
+        captured = {}
 
         async def fake_run_yap_script(*args, **kwargs):
+            captured["script_name"] = args[0] if args else None
+            captured["args"] = list(args[1]) if len(args) > 1 else []
             return {
                 "found": False,
                 "deleted": False,
@@ -592,6 +595,12 @@ class TestYapSyncEndpoints:
             }
 
         monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        practice = db_session.query(Practice).filter(Practice.id == sample_practice["id"]).first()
+        assert practice is not None
+        practice.plate_confirmed = None
+        practice.plate_detected = "YAPTEST01"
+        db_session.commit()
 
         mark_practice_yap_touched(db_session, sample_practice["id"])
 
@@ -607,6 +616,10 @@ class TestYapSyncEndpoints:
         assert listed.status_code == 200
         ids = [item["id"] for item in listed.json().get("data", [])]
         assert sample_practice["id"] not in ids
+        assert captured["script_name"] == "yap-delete-appointment.mjs"
+        assert "--search=YAPTEST01" in captured["args"]
+        assert "--time" in captured["args"]
+        assert "10:00" in captured["args"]
 
     def test_yap_delete_endpoint_soft_deletes_when_not_found(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
