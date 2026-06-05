@@ -504,6 +504,13 @@ function buildAppointmentTimeOptions() {
 
 const APPOINTMENT_TIME_OPTIONS = buildAppointmentTimeOptions();
 
+/** Ora attuale arrotondata allo slot da 5 minuti (HH:MM). */
+function nowRoundedToSlot() {
+  const d = new Date();
+  const m = Math.floor(d.getMinutes() / 5) * 5;
+  return `${String(d.getHours()).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
 function addMinutesToTime(time, minutes) {
   const [h, m] = String(time || '00:00').split(':').map(Number);
   const total = h * 60 + m + minutes;
@@ -1641,6 +1648,9 @@ function App() {
   const [slowRequest, setSlowRequest] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [selectedContexts, setSelectedContexts] = useState([]);
+  // Toggle "imposta data/ora manualmente": se OFF (default) non chiediamo data/ora
+  // e usiamo oggi + ora attuale (il worker fa comunque da rete di sicurezza).
+  const [scheduleManually, setScheduleManually] = useState(false);
   const [sections, setSections] = useState({});
   const [parts, setParts] = useState({});
   const [formPhotos, setFormPhotos] = useState([]);
@@ -1895,6 +1905,7 @@ function App() {
         return false;
       }
       if (draft.formData) {
+        if (draft.formData.appointment_date) setScheduleManually(true);
         Object.keys(draft.formData).forEach(key => {
           if (key === 'appointment_date' && draft.formData[key]) {
             setValue(key, new Date(draft.formData[key]));
@@ -3450,7 +3461,11 @@ function App() {
         setValue('billing_address', p.billing_address || '');
         setValue('billing_city', p.billing_city || '');
         setValue('billing_zip', p.billing_zip || '');
-        if (p.appointment_date) setValue('appointment_date', new Date(p.appointment_date));
+        if (p.appointment_date) {
+          setValue('appointment_date', new Date(p.appointment_date));
+          // Pratica esistente con data: mostra i campi manuali per non sovrascriverla con "oggi".
+          setScheduleManually(true);
+        }
         setSelectedContexts(normalizeContexts(p.contexts));
         if (p.sections) {
           setSections(normalizeSections(Array.isArray(p.sections) ? p.sections : []));
@@ -3644,12 +3659,16 @@ function App() {
     const plate = (data.plate_confirmed || '').trim();
     const phone = (data.phone || '').trim();
     const name = (data.customer_name || '').trim();
-    if (!plate || !phone || !name || !data.appointment_date || !data.appointment_time || selectedContexts.length === 0) {
+    if (!plate || !phone || !name || selectedContexts.length === 0) {
       return null;
     }
-    const hasRows = selectedContexts.every((ctx) =>
-      (sections[ctx]?.description_rows || []).some((row) => (row || '').trim())
-    );
+    if (scheduleManually && (!data.appointment_date || !data.appointment_time)) {
+      return null;
+    }
+    // La revisione non richiede righe descrittive.
+    const hasRows = selectedContexts
+      .filter((ctx) => ctx !== 'revisione')
+      .every((ctx) => (sections[ctx]?.description_rows || []).some((row) => (row || '').trim()));
     if (!hasRows) return null;
 
     const sectionPayloads = selectedContexts.map((context) => {
@@ -3690,8 +3709,8 @@ function App() {
         billing_address: data.billing_address?.trim() || null,
         billing_city: data.billing_city?.trim() || null,
         billing_zip: data.billing_zip?.trim() || null,
-        appointment_date: formatDateForBackend(data.appointment_date),
-        appointment_time: data.appointment_time,
+        appointment_date: scheduleManually ? formatDateForBackend(data.appointment_date) : formatDateForBackend(new Date()),
+        appointment_time: scheduleManually ? data.appointment_time : nowRoundedToSlot(),
         practice_type: data.practice_type || 'ordine_di_lavoro',
         contexts: selectedContexts,
         internal_notes: data.internal_notes || null,
@@ -3699,7 +3718,7 @@ function App() {
       sections: sectionPayloads,
       parts: partPayloads,
     };
-  }, [getValues, selectedContexts, sections, parts]);
+  }, [getValues, selectedContexts, sections, parts, scheduleManually]);
 
   const renderFieldMappingTable = (rows, title) => {
     if (!rows?.length) return null;
@@ -3887,6 +3906,9 @@ function App() {
   const watchedTime = watch('appointment_time');
   const watchedPracticeType = watch('practice_type');
   const watchedCustomerType = watch('customer_type');
+  // Revisione "pura": unico contesto selezionato = revisione. In questo caso
+  // niente righe descrittive, niente tipo pratica (non servono su YAP).
+  const isRevisioneOnly = selectedContexts.length > 0 && selectedContexts.every((c) => c === 'revisione');
 
   useEffect(() => {
     if (browserPreviewMode || currentView !== 'form') return undefined;
@@ -4002,10 +4024,15 @@ function App() {
     if (!phone) errs.phone = 'Telefono obbligatorio';
     else if (!isValidItalianPhone(phone)) errs.phone = 'Numero di telefono italiano non valido';
 
-    if (!data.appointment_date) errs.appointment_date = 'Data obbligatoria';
-    if (!data.appointment_time) errs.appointment_time = 'Ora obbligatoria';
+    // Data/ora obbligatorie solo se l'utente ha scelto di impostarle manualmente.
+    if (scheduleManually) {
+      if (!data.appointment_date) errs.appointment_date = 'Data obbligatoria';
+      if (!data.appointment_time) errs.appointment_time = 'Ora obbligatoria';
+    }
     if (selectedContexts.length === 0) errs.contexts = 'Seleziona almeno un contesto';
     selectedContexts.forEach(context => {
+      // La revisione non ha righe descrittive (non vanno da nessuna parte su YAP).
+      if (context === 'revisione') return;
       const rows = sections[context]?.description_rows || [];
       if (!rows.some(row => (row || '').trim())) {
         errs.contexts = `Inserisci almeno una riga descrittiva per ${context}`;
@@ -4049,8 +4076,8 @@ function App() {
         customer_name: data.customer_name,
         customer_type: data.customer_type,
         billing_to_complete: data.billing_to_complete || false,
-        appointment_date: formatDateForBackend(data.appointment_date),
-        appointment_time: data.appointment_time,
+        appointment_date: scheduleManually ? formatDateForBackend(data.appointment_date) : formatDateForBackend(new Date()),
+        appointment_time: scheduleManually ? data.appointment_time : nowRoundedToSlot(),
         practice_type: data.practice_type,
         contexts: selectedContexts,
         internal_notes: data.internal_notes || null,
@@ -4254,6 +4281,7 @@ function App() {
     setError('');
     setFieldErrors({});
     setSubmitInProgress(false);
+    setScheduleManually(false);
     setValue('contexts', []);
     setValue('plate_confirmed', '');
     setValue('phone', '');
@@ -5354,12 +5382,29 @@ function App() {
             {/* Appuntamento */}
             <div className="section">
               <h2>📅 Appuntamento</h2>
+
+              <div className="form-group">
+                <label className="inline-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={scheduleManually}
+                    onChange={(e) => setScheduleManually(e.target.checked)}
+                  />
+                  Imposta data e ora manualmente
+                </label>
+                {!scheduleManually && (
+                  <div className="field-hint">
+                    Senza spunta: appuntamento creato per <strong>oggi all'ora attuale</strong>.
+                  </div>
+                )}
+              </div>
+
+              {scheduleManually && (
               <div className="form-group">
                 <label htmlFor="appointment_date">Data*</label>
                 <Controller
                   control={control}
                   name="appointment_date"
-                  rules={{ required: 'Data obbligatoria' }}
                   render={({ field }) => (
                     <DatePicker
                       id="appointment_date"
@@ -5374,12 +5419,14 @@ function App() {
                 />
                 {renderFieldError('appointment_date')}
               </div>
+              )}
 
+              {scheduleManually && (
               <div className="form-group">
                 <label htmlFor="appointment_time">Ora inizio appuntamento*</label>
                 <select
                   id="appointment_time"
-                  {...register('appointment_time', { required: 'Ora obbligatoria' })}
+                  {...register('appointment_time')}
                   className={`select ${fieldErrors.appointment_time ? 'input-error' : ''}`}
                 >
                   <option value="">-- Seleziona --</option>
@@ -5394,7 +5441,9 @@ function App() {
                 )}
                 {renderFieldError('appointment_time')}
               </div>
+              )}
 
+              {!isRevisioneOnly && (
               <div className="form-group">
                 <label htmlFor="practice_type">Tipo Pratica*</label>
                 <select id="practice_type" {...register('practice_type')} className="select">
@@ -5402,11 +5451,12 @@ function App() {
                   <option value="ordine_di_lavoro">Ordine di Lavoro</option>
                 </select>
               </div>
+              )}
 
             </div>
 
-            {/* Sezioni dinamiche */}
-            {selectedContexts.map(context => (
+            {/* Sezioni dinamiche (la revisione non ha card: niente righe/note) */}
+            {selectedContexts.filter((context) => context !== 'revisione').map(context => (
               <div key={context} className="section">
                 <h2>📋 {context.charAt(0).toUpperCase() + context.slice(1)}</h2>
 
