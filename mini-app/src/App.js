@@ -2989,6 +2989,9 @@ function App() {
                         {Array.isArray(od.loadingTexts) && od.loadingTexts.length > 0 && (
                           <div>loading_visibili: {od.loadingTexts.join(' | ')}</div>
                         )}
+                        {Array.isArray(od.dialogTexts) && od.dialogTexts.length > 0 && (
+                          <div>modali_visibili: {od.dialogTexts.join(' | ')}</div>
+                        )}
                         {Array.isArray(od.topTabs) && od.topTabs.length > 0 && (
                           <div>tab_presenti: {od.topTabs.join(', ')}</div>
                         )}

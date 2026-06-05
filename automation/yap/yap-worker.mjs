@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05l-odl-full-reload";
+const WORKER_BUILD = "2026-06-05m-confirm-unsaved-modal";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -1509,6 +1509,58 @@ async function isCourtesyCommunicationPopup(page) {
   }).catch(() => false);
 }
 
+async function confirmUnsavedChangesIfPresent(page) {
+  const target = await safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8
+        && style.display !== "none" && style.visibility !== "hidden";
+    };
+    const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
+    const dialogs = [...document.querySelectorAll(".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel")]
+      .filter(isVisible)
+      .filter((el) => /modifiche non salvate|andranno perse|confermi/i.test(norm(el.textContent || "")));
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) return null;
+    const buttons = [...dialog.querySelectorAll("button, .gwt-Button, a, [role='button'], td, div, span")]
+      .filter(isVisible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const text = norm(el.textContent || el.getAttribute("aria-label") || el.getAttribute("title") || "");
+        let score = 0;
+        if (/^ok$/i.test(text)) score += 30;
+        if (/conferma|si|sì/i.test(text)) score += 20;
+        if (/annulla|cancel/i.test(text)) score -= 50;
+        if (rect.width >= 40 && rect.width <= 180 && rect.height >= 18 && rect.height <= 50) score += 6;
+        return { el, text, rect, score };
+      })
+      .filter((it) => it.score > 0)
+      .sort((a, b) => b.score - a.score || a.rect.x - b.rect.x);
+    const selected = buttons[0];
+    if (!selected) return null;
+    const x = selected.rect.x + selected.rect.width / 2;
+    const y = selected.rect.y + selected.rect.height / 2;
+    for (const type of ["mouseover", "mousedown", "mouseup", "click"]) {
+      selected.el.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        button: 0,
+      }));
+    }
+    if (typeof selected.el.click === "function") selected.el.click();
+    return { clicked: true, label: selected.text, x, y };
+  }).catch(() => null);
+  if (!target?.clicked) return false;
+  await page.mouse.click(target.x, target.y, { button: "left", clickCount: 1 }).catch(() => {});
+  await page.waitForTimeout(700).catch(() => {});
+  logPhase("modal", "confirmed_unsaved_changes", { label: target.label });
+  return true;
+}
+
 // F3: naviga all'ODL cambiando hash in-place (niente page.goto → GWT non fa full-reload)
 async function openOdlByRoute(page, currentUrl) {
   try {
@@ -2486,6 +2538,8 @@ async function writePracticeAndOdl(page, job, args) {
     logPhase("odl_route", routeResult.navigated ? "navigated" : "failed", { reason: routeResult.reason, idCompanyFolder: routeResult.idCompanyFolder });
     if (routeResult.navigated) {
       logPhase("odl_tab", "route_navigated", { idCompanyFolder: routeResult.idCompanyFolder });
+      const routeUnsavedConfirmed = await confirmUnsavedChangesIfPresent(page);
+      writeReport.debug.odl.routeUnsavedConfirmed = routeUnsavedConfirmed;
       const odlRpcReady = await odlReadyPromise;
       if (args.debug) writeReport.odlRpcReady = odlRpcReady;
       writeReport.debug.odl.odlRpcReady = odlRpcReady;
@@ -2544,6 +2598,8 @@ async function writePracticeAndOdl(page, job, args) {
       odlTab = { clicked: true, label: gwtTabAttempt.label || "gwt:ordini_di_lavoro" };
       fallbackAttempts.push(odlTab.label);
       logPhase("odl_tab", "gwt_clicked", { label: odlTab.label, score: gwtTabAttempt.score });
+      const gwtUnsavedConfirmed = await confirmUnsavedChangesIfPresent(page);
+      writeReport.debug.odl.gwtUnsavedConfirmed = gwtUnsavedConfirmed;
     }
     for (let candidateIndex = 0; candidateIndex < 3 && !odlTab?.clicked; candidateIndex += 1) {
       let currentAttempt = await clickOdlSection(page, { candidateIndex, maxY: 220 });
@@ -2595,6 +2651,8 @@ async function writePracticeAndOdl(page, job, args) {
         const secondOdl = await clickOdlSection(page, { candidateIndex: 1, maxY: 240, returnDebug: true });
         if (secondOdl?.clicked) {
           logPhase("odl_tab", "click_hop2", { label: secondOdl.label });
+          const hopUnsavedConfirmed = await confirmUnsavedChangesIfPresent(page);
+          writeReport.debug.odl.hopUnsavedConfirmed = hopUnsavedConfirmed;
           await waitForOdlWorkspaceReady(page, 10000);
           workspaceState = await getPracticeWorkspaceState(page);
           writeReport.debug.odl.workspaceStateAfter = workspaceState;
@@ -2647,6 +2705,8 @@ async function writePracticeAndOdl(page, job, args) {
     }));
     writeReport.debug.odl.fullReloadResult = fullReloadResult;
     logPhase("odl_full_reload", fullReloadResult?.navigated ? "navigated" : "failed", { reason: fullReloadResult?.reason, idCompanyFolder: fullReloadResult?.idCompanyFolder });
+    const fullReloadUnsavedConfirmed = await confirmUnsavedChangesIfPresent(page);
+    writeReport.debug.odl.fullReloadUnsavedConfirmed = fullReloadUnsavedConfirmed;
     const fullReloadRpcReady = await fullReloadRpcReadyPromise;
     writeReport.debug.odl.fullReloadRpcReady = fullReloadRpcReady;
     if (args.debug) writeReport.odlFullReloadRpcReady = fullReloadRpcReady;
@@ -2659,6 +2719,8 @@ async function writePracticeAndOdl(page, job, args) {
       writeReport.debug.odl.fullReloadGwtTabAttempt = fullReloadTab;
       if (fullReloadTab?.clicked) {
         logPhase("odl_full_reload", "gwt_clicked", { label: fullReloadTab.label, score: fullReloadTab.score });
+        const fullReloadClickUnsavedConfirmed = await confirmUnsavedChangesIfPresent(page);
+        writeReport.debug.odl.fullReloadClickUnsavedConfirmed = fullReloadClickUnsavedConfirmed;
         await waitForOdlWorkspaceReady(page, Number(process.env.YAP_ODL_FULL_RELOAD_DOM_WAIT_MS) || 10000).catch(() => {});
         workspaceState = await getPracticeWorkspaceState(page);
         writeReport.workspaceState = workspaceState;
@@ -2773,10 +2835,14 @@ async function writePracticeAndOdl(page, job, args) {
         .filter((el) => /gwt-TabLayoutPanelTab/.test(String(el.className || "")))
         .map((el) => norm(el.textContent))
         .filter(Boolean))].slice(0, 14);
+      const dialogTexts = [...new Set([...document.querySelectorAll(".gwt-DialogBox, .gwt-PopupPanel, .gwt-DecoratedPopupPanel")]
+        .filter(isVisible)
+        .map((el) => norm(el.textContent))
+        .filter((t) => t && t.length < 220))].slice(0, 5);
       const hasOrdiniLavoro = all.some((el) => /ordini di lavoro/i.test(norm(el.textContent)));
       const hasOdlSubTabs = all.some((el) => /descrizione danni|materiali di consumo|smaltimento rifiuti/i.test(norm(el.textContent)));
       const bodyExcerpt = norm(document.body?.innerText || "").slice(0, 400);
-      return { ok: true, loadingTexts, topTabs, hasOrdiniLavoro, hasOdlSubTabs, bodyExcerpt };
+      return { ok: true, loadingTexts, topTabs, dialogTexts, hasOrdiniLavoro, hasOdlSubTabs, bodyExcerpt };
     }).catch((e) => ({ ok: false, evalError: String(e && e.message || e) }));
     const urlNow = page.url();
     const parsedNow = parsePraticaHashPayload(urlNow);
@@ -2788,6 +2854,7 @@ async function writePracticeAndOdl(page, job, args) {
       pageResponsive: Boolean(diag && diag.ok),
       evalError: diag && diag.ok ? null : (diag && diag.evalError) || "unknown",
       loadingTexts: (diag && diag.loadingTexts) || [],
+      dialogTexts: (diag && diag.dialogTexts) || [],
       hasOrdiniLavoroTab: Boolean(diag && diag.hasOrdiniLavoro),
       hasOdlSubTabs: Boolean(diag && diag.hasOdlSubTabs),
       topTabs: (diag && diag.topTabs) || [],
