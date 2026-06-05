@@ -7,6 +7,7 @@ import {
   extractTrailingJsonBlock,
   formatMacNeedle,
   formatManNeedle,
+  hasVerifiedOdlWorkspace,
   parsePraticaHashPayload,
 } from "./yap-worker.mjs";
 import {
@@ -111,6 +112,24 @@ test("parsePraticaHashPayload handles encoded pratica hashes", () => {
   assert.equal(parsed.ok, true);
   assert.equal(parsed.idCompanyFolder, 12684370315);
   assert.equal(parsed.pageEnum, "VEICOLO");
+});
+
+test("verified ODL workspace accepts effective ODL states even when openedOdl is not explicit", () => {
+  assert.equal(hasVerifiedOdlWorkspace({
+    openedOdl: false,
+    workspaceState: "odl_full",
+  }), true);
+
+  assert.equal(hasVerifiedOdlWorkspace({
+    openedOdl: false,
+    debug: { odl: { workspaceStateAfterFullReload: "odl_full" } },
+  }), true);
+
+  assert.equal(hasVerifiedOdlWorkspace({
+    openedOdl: false,
+    workspaceState: "loading_shell",
+    debug: { odl: {} },
+  }), false);
 });
 
 test("extractTrailingJsonBlock finds the final JSON object in mixed output", () => {

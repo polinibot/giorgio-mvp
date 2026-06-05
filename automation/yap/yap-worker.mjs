@@ -54,7 +54,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05o-revision-skip-odl";
+const WORKER_BUILD = "2026-06-05p-inline-audit-odl-state";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -2403,6 +2403,21 @@ function buildFieldWriteReport(job, writeReport) {
   return fields;
 }
 
+function hasVerifiedOdlWorkspace(writeReport) {
+  if (!writeReport || typeof writeReport !== "object") return false;
+  if (writeReport.openedOdl || writeReport.odlRouteEffective || writeReport.odlFullReloadEffective) {
+    return true;
+  }
+  const debug = writeReport.debug?.odl || {};
+  return [
+    writeReport.workspaceState,
+    debug.workspaceStateAfter,
+    debug.workspaceStateAfterFullReload,
+    debug.workspaceStateAfterFullReloadClick,
+    debug.workspaceStateAfterFullReloadEntry,
+  ].some((state) => state === WORKSPACE_STATES.ODL_FULL || state === "odl_full");
+}
+
 async function writePracticeAndOdl(page, job, args) {
   const summary = buildOdlSummaryText(job);
   // CATTURA RPC: registra il traffico GWT /yap/action/* durante apertura pratica+ODL.
@@ -3632,7 +3647,7 @@ async function runInlineAudit(page, job, managementWrite) {
     : (missing.length === 0 ? 1 : 0);
 
   // Verificato SOLO se: ODL aperto, nessun campo mancante e rilettura completa (ratio 1).
-  const verified = Boolean(wr.openedOdl) && missing.length === 0 && ratio >= 1;
+  const verified = hasVerifiedOdlWorkspace(wr) && missing.length === 0 && ratio >= 1;
 
   return {
     verified,
@@ -4520,6 +4535,7 @@ export {
   formatMacNeedle,
   formatManNeedle,
   isEffectiveOdlState,
+  hasVerifiedOdlWorkspace,
   normalizeLoose,
   parsePraticaHashPayload,
 };
