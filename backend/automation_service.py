@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 class AutomationService:
     """Servizio per preparare dati per automation futura del gestionale"""
 
+    # Pesi dello score pre-sync (su base 100). Gli "infos" non penalizzano.
+    SCORE_PENALTY_ERROR = 25
+    SCORE_PENALTY_WARNING = 8
+
     @staticmethod
     def _ensure_str(value: Any) -> str:
         return str(value).strip() if value is not None else ""
@@ -379,7 +383,8 @@ class AutomationService:
         validation = {
             "ready": True,
             "errors": [],
-            "warnings": []
+            "warnings": [],
+            "infos": []
         }
         
         # Controlli obbligatori
@@ -429,7 +434,7 @@ class AutomationService:
             validation["warnings"].append("Dati fatturazione incompleti")
         
         if payload.get("internal_notes"):
-            validation["warnings"].append("Presenti note interne da verificare")
+            validation["infos"].append("Presenti note interne da verificare")
 
         return validation
 
@@ -453,8 +458,18 @@ class AutomationService:
                 "blocking": False,
                 "message": msg,
             })
+        for msg in readiness.get("infos", []):
+            issues.append({
+                "type": "info",
+                "priority": 3,
+                "blocking": False,
+                "message": msg,
+            })
 
-        total_penalty = len(readiness["errors"]) * 25 + len(readiness["warnings"]) * 8
+        total_penalty = (
+            len(readiness["errors"]) * AutomationService.SCORE_PENALTY_ERROR
+            + len(readiness["warnings"]) * AutomationService.SCORE_PENALTY_WARNING
+        )
         score = max(0, 100 - total_penalty)
 
         return {

@@ -3051,8 +3051,8 @@ function App() {
                 </div>
               </details>
             )}
-            {writeReportDebug && (
-              <details className="yap-result-tech" open={status !== 'complete_synced' && status !== 'deleted' && status !== 'not_found'}>
+            {writeReportDebug && isDebugUiEnabled() && (
+              <details className="yap-result-tech">
                 <summary>Debug YAP</summary>
                 <div className="yap-result-tech-body">
                   {writeReportDebug.notes?.editableCount != null && (
@@ -3096,7 +3096,10 @@ function App() {
                     <div><strong>odl attempts:</strong> {writeReportDebug.odl.fallbackAttempts.join(' -> ')}</div>
                   )}
                   {writeReportDebug.odl?.routeResult && (
-                    <div><strong>odl route:</strong> {JSON.stringify(writeReportDebug.odl.routeResult)}</div>
+                    <div className="yap-result-tech-block">
+                      <strong>odl route:</strong>
+                      <pre>{JSON.stringify(writeReportDebug.odl.routeResult, null, 2)}</pre>
+                    </div>
                   )}
                   {Array.isArray(writeReportDebug.odl?.topCandidatesBeforeRetry) && writeReportDebug.odl.topCandidatesBeforeRetry.length > 0 && (
                     <div>
@@ -3125,10 +3128,6 @@ function App() {
                       })), null, 2)}</pre>
                     </div>
                   )}
-                  <div className="yap-result-tech-block">
-                    <strong>debug raw:</strong>
-                    <pre>{JSON.stringify(writeReportDebug, null, 2)}</pre>
-                  </div>
                 </div>
               </details>
             )}
@@ -3798,18 +3797,26 @@ function App() {
           )}
           {preview.preSync?.issues?.length > 0 && (
             <div className="yap-preview-issues">
-              {preview.preSync.issues.map((issue, index) => (
-                <div
-                  key={`${issue.type}-${index}`}
-                  className={`yap-preview-issue ${issue.blocking ? 'blocking' : 'warning'}`}
-                >
-                  <div className="yap-preview-issue-head">
-                    <span>{issue.blocking ? 'Bloccante' : 'Attenzione'}</span>
-                    <span>{issue.type}</span>
+              {preview.preSync.issues.map((issue, index) => {
+                const level = issue.blocking
+                  ? 'blocking'
+                  : (issue.type === 'info' ? 'info' : 'warning');
+                const levelLabel = level === 'blocking'
+                  ? 'Bloccante'
+                  : (level === 'info' ? 'Info' : 'Attenzione');
+                return (
+                  <div
+                    key={`${issue.type}-${index}`}
+                    className={`yap-preview-issue ${level}`}
+                  >
+                    <div className="yap-preview-issue-head">
+                      <span>{levelLabel}</span>
+                      <span>{issue.type}</span>
+                    </div>
+                    <div className="yap-preview-issue-body">{issue.message}</div>
                   </div>
-                  <div className="yap-preview-issue-body">{issue.message}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           {showOdl && preview.proposedYap?.odl && (

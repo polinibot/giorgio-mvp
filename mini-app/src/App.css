@@ -1664,6 +1664,11 @@ h2 {
   background: rgba(251, 191, 36, 0.08);
 }
 
+.yap-preview-issue.info {
+  border-color: rgba(96, 165, 250, 0.22);
+  background: rgba(96, 165, 250, 0.07);
+}
+
 .yap-preview-issue-head {
   display: flex;
   justify-content: space-between;
