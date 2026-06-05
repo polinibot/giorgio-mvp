@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05h-no-double-login";
+const WORKER_BUILD = "2026-06-05j-rpc-summary";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -2012,6 +2012,103 @@ function buildFieldWriteReport(job, writeReport) {
 
 async function writePracticeAndOdl(page, job, args) {
   const summary = buildOdlSummaryText(job);
+  // CATTURA RPC: registra il traffico GWT /yap/action/* durante apertura pratica+ODL.
+  // È il dato che manca per capire perché su Railway "Recupero dettagli pratica in
+  // corso" non finisce mai: l'RPC dei dettagli non parte? va in errore (4xx/5xx)?
+  // risponde vuota? non risponde affatto (hang)? Confronteremo Railway vs locale.
+  const rpcLog = [];
+  const rpcStats = new Map();
+  const rpcMaxLog = 200;
+  const _rpcT0 = Date.now();
+  const _rpcAction = (u) => { const m = /\/yap\/action\/([A-Za-z0-9_]+)/.exec(u || ""); return m ? m[1] : null; };
+  const _rpcStat = (a) => {
+    if (!rpcStats.has(a)) {
+      rpcStats.set(a, { req: 0, res: 0, fail: 0, firstMs: null, lastMs: null, lastStatus: null, lastLen: null, lastError: null, method: null });
+    }
+    return rpcStats.get(a);
+  };
+  const _recordRpc = (entry) => {
+    if (!entry?.a) return;
+    const t = Date.now() - _rpcT0;
+    const item = { t, ...entry };
+    rpcLog.push(item);
+    if (rpcLog.length > rpcMaxLog) rpcLog.splice(0, rpcLog.length - rpcMaxLog);
+    const stat = _rpcStat(entry.a);
+    if (stat.firstMs == null) stat.firstMs = t;
+    stat.lastMs = t;
+    if (entry.ev === "req") {
+      stat.req += 1;
+      stat.method = entry.m || stat.method;
+    } else if (entry.ev === "res") {
+      stat.res += 1;
+      stat.lastStatus = entry.s;
+      stat.lastLen = entry.len;
+    } else if (entry.ev === "fail") {
+      stat.fail += 1;
+      stat.lastError = entry.err || "failed";
+    }
+  };
+  const _onRpcReq = (req) => {
+    const a = _rpcAction(req.url());
+    if (a) _recordRpc({ ev: "req", a, m: typeof req.method === "function" ? req.method() : null });
+  };
+  const _onRpcRes = (res) => {
+    const a = _rpcAction(res.url());
+    if (a) _recordRpc({ ev: "res", a, s: res.status(), len: Number(res.headers()["content-length"] || 0) });
+  };
+  const _onRpcFail = (req) => {
+    const a = _rpcAction(req.url());
+    if (a) _recordRpc({ ev: "fail", a, err: ((req.failure && req.failure()) || {}).errorText || "failed" });
+  };
+  const _rpcSnapshot = () => {
+    const allSummaryRows = [...rpcStats.entries()].map(([action, stat]) => ({
+      action,
+      req: stat.req,
+      res: stat.res,
+      fail: stat.fail,
+      pending: Math.max(0, stat.req - stat.res - stat.fail),
+      lastStatus: stat.lastStatus,
+      lastLen: stat.lastLen,
+      lastError: stat.lastError,
+      lastAt: Number(((stat.lastMs || 0) / 1000).toFixed(1)),
+    })).sort((a, b) =>
+      (b.pending - a.pending)
+      || (b.fail - a.fail)
+      || (b.lastAt - a.lastAt)
+      || a.action.localeCompare(b.action)
+    );
+    const summaryRows = allSummaryRows.slice(0, 12);
+    return {
+      rpc: rpcLog.slice(-40).map((e) => {
+        const ts = (e.t / 1000).toFixed(1);
+        if (e.ev === "res") return `${ts}s ${e.a}=${e.s}/${e.len}b`;
+        if (e.ev === "fail") return `${ts}s ${e.a}=FAIL:${e.err}`;
+        return `${ts}s ${e.a}=req`;
+      }),
+      rpcSummary: summaryRows,
+      rpcReqCount: allSummaryRows.reduce((sum, row) => sum + row.req, 0),
+      rpcResCount: allSummaryRows.reduce((sum, row) => sum + row.res, 0),
+      rpcFailCount: allSummaryRows.reduce((sum, row) => sum + row.fail, 0),
+      rpcPendingCount: allSummaryRows.reduce((sum, row) => sum + row.pending, 0),
+      rpcCapturedCount: rpcLog.length,
+    };
+  };
+  let _rpcAttached = false;
+  const _detachRpcTrace = () => {
+    if (!_rpcAttached) return;
+    try {
+      page.off("request", _onRpcReq);
+      page.off("response", _onRpcRes);
+      page.off("requestfailed", _onRpcFail);
+    } catch (_e) {}
+    _rpcAttached = false;
+  };
+  try {
+    page.on("request", _onRpcReq);
+    page.on("response", _onRpcRes);
+    page.on("requestfailed", _onRpcFail);
+    _rpcAttached = true;
+  } catch (_e) {}
   const writeReport = {
     attempted: true,
     openedPractice: false,
@@ -2050,6 +2147,7 @@ async function writePracticeAndOdl(page, job, args) {
       writeReport.attempted = false;
       writeReport.odl.error = "refused_non_test_customer";
       writeReport.reason = `G1_guard: cliente "${job.customer?.name}" non corrisponde al marker "${testMarker}"`;
+      _detachRpcTrace();
       return writeReport;
     }
   }
@@ -2061,6 +2159,7 @@ async function writePracticeAndOdl(page, job, args) {
     writeReport.reason = "practice_link_not_found";
     writeReport.practiceOpenState = practiceLink?.state || "agenda_shell";
     if (args.debug) writeReport.practiceOpenAttempts = practiceLink?.attempts || [];
+    _detachRpcTrace();
     return writeReport;
   }
   writeReport.openedPractice = true;
@@ -2243,6 +2342,7 @@ async function writePracticeAndOdl(page, job, args) {
       writeReport.noVehicleScreenshot = noVehicleShot;
     }
     writeReport.fields = buildFieldWriteReport(job, writeReport);
+    _detachRpcTrace();
     return writeReport; // early return — niente da scrivere senza veicolo
   }
   // F3+F4: naviga all'ODL via hash in-place + gating su RPC
@@ -2516,6 +2616,7 @@ async function writePracticeAndOdl(page, job, args) {
       url: urlNow.slice(0, 120),
       pageEnum: parsedNow.pageEnum ?? (parsedNow.ok ? "no_page_field" : parsedNow.reason),
       bodyExcerpt: (diag && diag.bodyExcerpt) || "",
+      ..._rpcSnapshot(),
     };
     writeReport.odlDiagnostic = odlDiagnostic;
     logPhase("odl_open_failed", "diagnostic", odlDiagnostic);
@@ -2875,6 +2976,7 @@ async function writePracticeAndOdl(page, job, args) {
     verify: `${writeReport.verify?.matched}/${writeReport.verify?.total}`,
     odlRoute: writeReport.odlRouteEffective ? "route" : (writeReport.odlFallbackClickUsed ? "click" : "none"),
   });
+  _detachRpcTrace();
   return writeReport;
 }
 

@@ -2993,6 +2993,21 @@ function App() {
                           <div>tab_presenti: {od.topTabs.join(', ')}</div>
                         )}
                         <div>pageEnum: {od.pageEnum || '?'}</div>
+                        <div>RPC: {od.rpcResCount != null ? `${od.rpcResCount} risposte / ${od.rpcReqCount} richieste` : '?'}{od.rpcPendingCount != null ? ` | pendenti: ${od.rpcPendingCount}` : ''}{od.rpcFailCount ? ` | fail: ${od.rpcFailCount}` : ''}</div>
+                        {Array.isArray(od.rpcSummary) && od.rpcSummary.length > 0 && (
+                          <div style={{ opacity: 0.9, whiteSpace: 'pre-wrap', fontSize: '0.85em' }}>
+                            azioni: {od.rpcSummary.map((row) => {
+                              const bits = [`${row.action}: ${row.pending || 0} pendenti`, `${row.res || 0}/${row.req || 0} risposte`];
+                              if (row.fail) bits.push(`${row.fail} fail`);
+                              if (row.lastStatus) bits.push(`HTTP ${row.lastStatus}`);
+                              if (row.lastError) bits.push(String(row.lastError).slice(0, 48));
+                              return bits.join(', ');
+                            }).join(' | ')}
+                          </div>
+                        )}
+                        {Array.isArray(od.rpc) && od.rpc.length > 0 && (
+                          <div style={{ opacity: 0.85, whiteSpace: 'pre-wrap', fontSize: '0.85em' }}>traffico: {od.rpc.join(' | ')}</div>
+                        )}
                         {od.bodyExcerpt && (<div style={{ opacity: 0.8 }}>testo: {String(od.bodyExcerpt).slice(0, 200)}</div>)}
                       </div>
                     );
