@@ -5379,26 +5379,19 @@ function App() {
               {fieldErrors.contexts && <div className="field-error">{fieldErrors.contexts}</div>}
             </div>
 
-            {/* Appuntamento */}
+            {/* Data/ora: toggle compatto (no card ingombrante) */}
+            <label className="schedule-toggle">
+              <input
+                type="checkbox"
+                checked={scheduleManually}
+                onChange={(e) => setScheduleManually(e.target.checked)}
+              />
+              <span>📅 Imposta data e ora manualmente</span>
+              {!scheduleManually && <em>— altrimenti oggi all'ora attuale</em>}
+            </label>
+
+            {(scheduleManually || !isRevisioneOnly) && (
             <div className="section">
-              <h2>📅 Appuntamento</h2>
-
-              <div className="form-group">
-                <label className="inline-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={scheduleManually}
-                    onChange={(e) => setScheduleManually(e.target.checked)}
-                  />
-                  Imposta data e ora manualmente
-                </label>
-                {!scheduleManually && (
-                  <div className="field-hint">
-                    Senza spunta: appuntamento creato per <strong>oggi all'ora attuale</strong>.
-                  </div>
-                )}
-              </div>
-
               {scheduleManually && (
               <div className="form-group">
                 <label htmlFor="appointment_date">Data*</label>
@@ -5454,6 +5447,7 @@ function App() {
               )}
 
             </div>
+            )}
 
             {/* Sezioni dinamiche (la revisione non ha card: niente righe/note) */}
             {selectedContexts.filter((context) => context !== 'revisione').map(context => (

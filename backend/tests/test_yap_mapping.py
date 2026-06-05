@@ -14,7 +14,8 @@ def _mapping(contexts, targa, lavorazioni, tipo="ordine_di_lavoro"):
 
 def test_revisione_pura():
     m = _mapping(["revisione"], "EL733YJ", [{"reparto": "revisione", "descrizioni": ["Revisione periodica"]}])
-    assert pick_cosa(m) == "REVISIONE"
+    # Il Cosa per revisione pura deve essere la TARGA (per agganciare il veicolo).
+    assert pick_cosa(m) == "EL733YJ"
     assert pick_yap_tags(m) == ["revisione"]
 
 

@@ -89,10 +89,12 @@ def pick_cosa(mapping: Dict[str, Any]) -> str:
         return str(override).strip().upper()[:40]
 
     contexts = _contexts_from_mapping(mapping)
-    if is_revisione_pura(contexts, mapping.get("lavorazioni") or []):
-        return "REVISIONE"
-
     plate = str(anag.get("targa") or "").strip().upper()
+    # Anche per la revisione pura il "Cosa" deve essere la TARGA (serve ad agganciare
+    # il veicolo). Prima era hardcoded a "REVISIONE" — regola storica rimossa.
+    if is_revisione_pura(contexts, mapping.get("lavorazioni") or []):
+        return plate[:40]
+
     brief = pick_work_brief(mapping)
     if plate and brief:
         return f"{plate} - {brief}"[:40]

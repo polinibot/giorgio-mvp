@@ -828,79 +828,101 @@ async function fillVisibleInput(page, index, value) {
   }, { index, value });
 }
 
-async function addYapTagChips(page, tags) {
-  if (!tags.length) return;
-
-  await safeEvaluate(page, (desiredTags) => {
-    const popups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")];
-    const popup = popups.find((p) => (p.textContent || "").includes("Dettagli"));
-    if (!popup) return;
-
-    const normalize = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
+// Individua il campo "Tag" nel popup e restituisce le coordinate (per il focus reale).
+async function locateTagInput(page) {
+  return safeEvaluate(page, () => {
     const isVisible = (node) => {
-      const rect = node.getBoundingClientRect();
-      const style = window.getComputedStyle(node);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+      const r = node.getBoundingClientRect();
+      const s = window.getComputedStyle(node);
+      return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
     };
-    const isPressedNode = (node) => {
-      if (!node) return false;
-      const pressed = node.getAttribute("aria-pressed");
-      if (pressed === "true") return true;
-      const cls = normalize(node.className || "");
-      return /\b(active|selected|checked|on)\b/.test(cls);
-    };
-    const findTagHost = (tag) => {
-      const tagNorm = normalize(tag);
-      const candidates = [...popup.querySelectorAll("button, a, [role='button'], .gwt-ToggleButton, .gwt-Button, div, span")]
-        .filter(isVisible)
-        .map((el) => {
-          const text = normalize(el.textContent || el.getAttribute("title") || el.getAttribute("aria-label") || "");
-          return { el, text };
-        })
-        .filter((item) => item.text === tagNorm || item.text.includes(tagNorm));
-      return candidates[0]?.el || null;
-    };
-
-    const findToggleHost = (el) => (
-      el?.closest?.("[aria-pressed], .gwt-ToggleButton, [role='button'], button, a") || el
-    );
-
-    for (const tag of desiredTags) {
-      const host = findToggleHost(findTagHost(tag));
-      if (host) {
-        if (isPressedNode(host)) continue;
-        host.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-        continue;
-      }
-
-      const tagInputs = [...popup.querySelectorAll("input")].filter((inp) => {
-        const section = inp.closest("div");
-        return section && (section.textContent || "").includes("Tag");
-      });
-      const tagInput = tagInputs[tagInputs.length - 1];
-      if (tagInput) {
-        tagInput.focus();
-        tagInput.value = tag;
-        tagInput.dispatchEvent(new Event("input", { bubbles: true }));
-        tagInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      }
-    }
-
-    // Fallback robusto: prova sempre ad inserire i tag desiderati nell'input Tag.
+    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+      .find((p) => (p.textContent || "").includes("Dettagli"));
+    if (!popup) return null;
     const tagInputs = [...popup.querySelectorAll("input")].filter((inp) => {
       const section = inp.closest("div");
-      return section && /tag/i.test(section.textContent || "");
+      return isVisible(inp) && section && /tag/i.test(section.textContent || "");
     });
-    const tagInput = tagInputs[tagInputs.length - 1];
-    if (tagInput) {
-      for (const tag of desiredTags) {
-        tagInput.focus();
-        tagInput.value = tag;
-        tagInput.dispatchEvent(new Event("input", { bubbles: true }));
-        tagInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const input = tagInputs[tagInputs.length - 1];
+    if (!input) return null;
+    input.scrollIntoView({ block: "center", inline: "nearest" });
+    const r = input.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }).catch(() => null);
+}
+
+// Verifica (readback) che il tag risulti effettivamente selezionato come chip nel popup.
+async function isTagConfirmed(page, tag) {
+  return safeEvaluate(page, (wanted) => {
+    const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+      .find((p) => (p.textContent || "").includes("Dettagli"));
+    if (!popup) return false;
+    // Un chip è un elemento foglia (senza figli) il cui testo è esattamente il tag,
+    // e NON è un <input> (quello conterrebbe il testo digitato, non un chip).
+    return [...popup.querySelectorAll("span, div, td, button, a, li")]
+      .some((el) => el.children.length === 0
+        && el.tagName !== "INPUT"
+        && norm(el.textContent) === norm(wanted));
+  }, tag).catch(() => false);
+}
+
+// Scrive i tag in modo AFFIDABILE: focus reale sul campo, digitazione con eventi
+// veri (così l'oracle GWT del SuggestBox si attiva), click sul suggerimento
+// corrispondente (o Enter), poi readback di conferma per ogni tag.
+async function addYapTagChips(page, tags) {
+  if (!tags.length) return { ok: true, added: [], failed: [] };
+  const added = [];
+  const failed = [];
+
+  for (const tag of tags) {
+    // Se è già presente, salta.
+    if (await isTagConfirmed(page, tag)) { added.push(tag); continue; }
+
+    const target = await locateTagInput(page);
+    if (!target) { failed.push(tag); continue; }
+
+    // Focus reale + pulizia eventuale residuo + digitazione con eventi veri.
+    await page.mouse.click(target.x, target.y).catch(() => {});
+    await page.waitForTimeout(120).catch(() => {});
+    await page.keyboard.press("Control+A").catch(() => {});
+    await page.keyboard.press("Delete").catch(() => {});
+    await page.keyboard.type(tag, { delay: 40 }).catch(() => {});
+    await page.waitForTimeout(350).catch(() => {});
+
+    // Clicca il suggerimento corrispondente nel popup di autocomplete.
+    const picked = await safeEvaluate(page, (wanted) => {
+      const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const isVisible = (node) => {
+        const r = node.getBoundingClientRect();
+        const s = window.getComputedStyle(node);
+        return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+      };
+      const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox']")].filter(isVisible);
+      for (const pop of pops) {
+        const items = [...pop.querySelectorAll("td, div, span, li, [role='option']")]
+          .filter(isVisible)
+          .filter((el) => norm(el.textContent).includes(norm(wanted)));
+        if (items.length) {
+          items[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+          items[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+          return true;
+        }
       }
+      return false;
+    }, tag).catch(() => false);
+
+    if (!picked) {
+      await page.keyboard.press("Enter").catch(() => {});
     }
-  }, tags);
+    await page.waitForTimeout(220).catch(() => {});
+
+    if (await isTagConfirmed(page, tag)) added.push(tag);
+    else failed.push(tag);
+  }
+
+  logPhase("tags", failed.length ? "partial" : "done", { requested: tags, added, failed });
+  return { ok: failed.length === 0, added, failed };
 }
 
 async function clickAppointmentPopupPractice(page) {
@@ -3600,7 +3622,8 @@ async function fillAppointmentPopup(page, job) {
   }
 
   const yapTags = pickYapTagsFromJob(job);
-  await addYapTagChips(page, yapTags);
+  const tagResult = await addYapTagChips(page, yapTags);
+  logAction("tags_written", { requested: yapTags, added: tagResult.added, failed: tagResult.failed, ok: tagResult.ok });
 
   // F2: prova a selezionare il veicolo tramite il widget Veicolo del popup (non-fatal)
   if (job.customer?.plate) {

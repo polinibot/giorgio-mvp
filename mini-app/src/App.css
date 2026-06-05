@@ -1669,6 +1669,29 @@ h2 {
   background: rgba(96, 165, 250, 0.07);
 }
 
+.schedule-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 2px;
+  margin: 4px 0;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.schedule-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.schedule-toggle em {
+  color: var(--text-secondary);
+  font-style: normal;
+  font-size: 12px;
+}
+
 .yap-preview-issue-head {
   display: flex;
   justify-content: space-between;

@@ -155,7 +155,9 @@ export function pickCosa(mapping) {
   if (override) return String(override).trim().toUpperCase().slice(0, 40);
 
   const plate = String(mapping.anagrafica?.targa || "").trim().toUpperCase();
-  if (isRevisionePura(mapping)) return "REVISIONE";
+  // Anche per la revisione pura il "Cosa" deve essere la TARGA: serve per agganciare
+  // il veicolo dall'autocomplete. (Prima era hardcoded a "REVISIONE" — regola storica.)
+  if (isRevisionePura(mapping)) return plate.slice(0, 40);
 
   const brief = pickWorkBrief(mapping);
   if (brief && plate) return `${plate} - ${brief}`.slice(0, 40);
