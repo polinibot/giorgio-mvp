@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05j-rpc-summary";
+const WORKER_BUILD = "2026-06-05k-force-odl-activation";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -867,6 +867,73 @@ async function clickOdlSection(page, { candidateIndex = 0, maxY = 220, returnDeb
     : { clicked: true, label: String(selected.text || "").slice(0, 100) };
 }
 
+async function activateOdlTopTab(page) {
+  const target = await safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 8 && rect.height > 8
+        && style.display !== "none" && style.visibility !== "hidden"
+        && rect.left > -200 && rect.top > -200;
+    };
+    const norm = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+    const candidates = [...document.querySelectorAll(".gwt-TabLayoutPanelTab, [role='tab'], button, a, td, div, span")]
+      .filter(isVisible)
+      .map((el) => {
+        const rect = el.getBoundingClientRect();
+        const cls = String(el.className || "");
+        const text = norm(el.textContent || el.getAttribute("title") || el.getAttribute("aria-label") || "");
+        let host = el;
+        const wrapper = el.closest?.(".gwt-TabLayoutPanelTab");
+        if (wrapper && isVisible(wrapper)) host = wrapper;
+        const hostRect = host.getBoundingClientRect();
+        let score = 0;
+        if (text === "ordini di lavoro" || text === "ordini di lavoro u") score += 30;
+        if (/^ordini di lavoro\b/.test(text)) score += 18;
+        if (/\bgwt-TabLayoutPanelTab\b/.test(String(host.className || "")) && !/Inner/.test(String(host.className || ""))) score += 16;
+        if (el.getAttribute("role") === "tab" || host.getAttribute?.("role") === "tab") score += 8;
+        if (hostRect.y >= 50 && hostRect.y <= 150) score += 8;
+        if (hostRect.width >= 60 && hostRect.width <= 180) score += 4;
+        if (hostRect.height >= 18 && hostRect.height <= 40) score += 4;
+        if (/dettagli pratica|preventivi|documenti fiscali|notifiche|firme/.test(text)) score -= 50;
+        return { el, host, text, cls, score, rect: hostRect };
+      })
+      .filter((it) => /^ordini di lavoro\b/.test(it.text) && it.rect.y < 180 && it.score > 0)
+      .sort((a, b) => b.score - a.score || a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+    const selected = candidates[0];
+    if (!selected) return null;
+    const rect = selected.rect;
+    const x = rect.x + (rect.width / 2);
+    const y = rect.y + (rect.height / 2);
+    selected.host.scrollIntoView?.({ block: "nearest", inline: "center" });
+    for (const type of ["mouseover", "mousedown", "mouseup", "click"]) {
+      selected.host.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: x,
+        clientY: y,
+        button: 0,
+      }));
+    }
+    if (typeof selected.host.click === "function") selected.host.click();
+    return {
+      clicked: true,
+      label: selected.text,
+      className: String(selected.host.className || selected.cls || ""),
+      x,
+      y,
+      width: rect.width,
+      height: rect.height,
+      score: selected.score,
+    };
+  }).catch(() => null);
+  if (!target) return { clicked: false, label: null, reason: "odl_gwt_tab_not_found" };
+  await page.mouse.click(target.x, target.y, { button: "left", clickCount: 1 }).catch(() => {});
+  await page.waitForTimeout(300).catch(() => {});
+  return target;
+}
+
 async function snapshotTopOdlCandidates(page) {
   return safeEvaluate(page, () => {
     const isVisible = (el) => {
@@ -907,6 +974,12 @@ async function openFirstOdlEntryFromList(page) {
     const odlListRe = /ordini di lavoro|odl/i;
     const navTabRe = /dettagli pratica|preventivi|note interne|ordini di lavoro|ordini cliente|fattura|archivio/i;
     const subTabRe = /descrizione danni|materiali di consumo|smaltimento rifiuti|note interne|tempi|totali|ordini cliente|prospetti/i;
+    const loadingVisible = [...document.querySelectorAll("div, span, td, label")]
+      .filter(isVisible)
+      .some((el) => /recupero dettagli pratica in corso|caricamento .* in corso|loading/i.test((el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()));
+    if (loadingVisible) {
+      return { clicked: false, strategy: "loading_visible" };
+    }
 
     // Prova 1: bottone/link "Apri" o "Modifica" o simile dentro la lista ODL
     const actionCandidates = [...document.querySelectorAll("button, a, [role='button'], .gwt-Button, .gwt-Anchor")]
@@ -930,6 +1003,7 @@ async function openFirstOdlEntryFromList(page) {
         if (!text || text.length < 3) return false;
         if (subTabRe.test(text) || navTabRe.test(text)) return false;
         const rect = el.getBoundingClientRect();
+        if (rect.y < 130) return false;
         return rect.height >= 16 && rect.height <= 80 && rect.width >= 100;
       });
     if (tableRows.length) {
@@ -950,7 +1024,7 @@ async function openFirstOdlEntryFromList(page) {
         // Cerca celle con numero o ID (pattern ODL comuni: "1", "ODL-1", "Aperto", date brevi)
         if (!/\d/.test(text) && !/^(aperto|chiuso|in corso|preventivo|bozza)$/i.test(text)) return false;
         const rect = el.getBoundingClientRect();
-        return rect.height >= 16 && rect.height <= 50;
+        return rect.y >= 130 && rect.height >= 16 && rect.height <= 50;
       })
       .sort((a, b) => a.getBoundingClientRect().y - b.getBoundingClientRect().y);
     if (idCandidates.length) {
@@ -1455,7 +1529,7 @@ async function openOdlByRoute(page, currentUrl) {
       IdCompanyFolder: parsed.idCompanyFolder,
       Page: "ODL",
       PageEnum: "ODL",
-      ShowOdlMarcatempo: parsed.payload?.ShowOdlMarcatempo ?? true,
+      ShowOdlMarcatempo: true,
     };
     const token = JSON.stringify(nextPayload);
     await page.evaluate((t) => {
@@ -2362,9 +2436,10 @@ async function writePracticeAndOdl(page, job, args) {
   if (/#!pratica/i.test(practiceUrl)) {
     writeReport.odlRouteAttempted = true;
     writeReport.debug.odl.routeAttempted = true;
+    const odlRpcWaitMs = Number(process.env.YAP_ODL_RPC_WAIT_MS) || 8000;
     const odlReadyPromise = page.waitForResponse(
-      (r) => /\/yap\/action\/(OdlGetAnagraficheDepositoVeicoloAction|OdlGetAction|OdlTableAction|PraticaOdlGetOverviewAction)/.test(r.url()) && r.status() === 200,
-      { timeout: 20000 },
+      (r) => /\/yap\/action\/[^/]*Odl[^/]*Action/i.test(r.url()) && r.status() === 200,
+      { timeout: odlRpcWaitMs },
     ).then(() => true).catch(() => false);
     const routeResult = await openOdlByRoute(page, practiceUrl);
     if (args.debug) writeReport.odlRouteResult = routeResult;
@@ -2376,7 +2451,7 @@ async function writePracticeAndOdl(page, job, args) {
       if (args.debug) writeReport.odlRpcReady = odlRpcReady;
       writeReport.debug.odl.odlRpcReady = odlRpcReady;
       logPhase("odl_route", "waiting_ready", { rpcReady: odlRpcReady });
-      await waitForOdlWorkspaceReady(page, 15000);
+      await waitForOdlWorkspaceReady(page, Number(process.env.YAP_ODL_DOM_WAIT_MS) || 6000);
       await page.waitForTimeout(400);
       workspaceState = await getPracticeWorkspaceState(page);
       // Attesa che "Recupero dettagli pratica in corso..." finisca dopo la route ODL.
@@ -2384,7 +2459,7 @@ async function writePracticeAndOdl(page, job, args) {
       // pratica di YAP può metterci di più; con EU+RAM esce comunque presto (early-exit
       // appena lo stato diventa effettivo). Tunabile via YAP_ODL_WAIT_ATTEMPTS.
       let odlWaitAttempts = 0;
-      const maxOdlWaitAttempts = Number(process.env.YAP_ODL_WAIT_ATTEMPTS) || 25;
+      const maxOdlWaitAttempts = Number(process.env.YAP_ODL_WAIT_ATTEMPTS) || 8;
       while ((workspaceState === WORKSPACE_STATES.LOADING || workspaceState === WORKSPACE_STATES.UNKNOWN || workspaceState === WORKSPACE_STATES.ODL_LOADING) && odlWaitAttempts < maxOdlWaitAttempts) {
         await page.waitForTimeout(800);
         workspaceState = await getPracticeWorkspaceState(page);
@@ -2424,6 +2499,13 @@ async function writePracticeAndOdl(page, job, args) {
     writeReport.odlFallbackClickUsed = true;
     let odlTab = null;
     const fallbackAttempts = [];
+    const gwtTabAttempt = await activateOdlTopTab(page);
+    writeReport.debug.odl.gwtTabAttempt = gwtTabAttempt;
+    if (gwtTabAttempt?.clicked) {
+      odlTab = { clicked: true, label: gwtTabAttempt.label || "gwt:ordini_di_lavoro" };
+      fallbackAttempts.push(odlTab.label);
+      logPhase("odl_tab", "gwt_clicked", { label: odlTab.label, score: gwtTabAttempt.score });
+    }
     for (let candidateIndex = 0; candidateIndex < 3 && !odlTab?.clicked; candidateIndex += 1) {
       let currentAttempt = await clickOdlSection(page, { candidateIndex, maxY: 220 });
       if (!currentAttempt?.clicked) {
