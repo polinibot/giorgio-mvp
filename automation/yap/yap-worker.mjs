@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05e-odl-recovery+diagnostic";
+const WORKER_BUILD = "2026-06-05f-recovery-time-budget";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -2396,6 +2396,13 @@ async function writePracticeAndOdl(page, job, args) {
   // È l'ultima rete di sicurezza che evita "openedOdl=false / Da ricontrollare: ODL"
   // quando in locale la stessa scrittura riesce. Abbiamo budget: un sync sta ~63s su
   // ~210s disponibili, quindi possiamo permetterci 1-2 reload extra.
+  // BUDGET DI TEMPO: il backend killa il worker al timeout (210s). Su Railway lento
+  // ogni iterazione di recovery puo' costare 50-70s: senza guardia il worker viene
+  // ucciso DENTRO il recovery, perdendo la diagnostica (era il caso "phases si fermano
+  // a odl_route:failed"). Qui ci fermiamo se manca il tempo, così la diagnostica
+  // odl_open_failed parte sempre e il worker ritorna pulito prima del kill.
+  const ODL_RECOVERY_DEADLINE_MS = Number(process.env.YAP_ODL_RECOVERY_DEADLINE_MS) || 150000;
+  const recoveryHasBudget = () => (Date.now() - _workerStart) < ODL_RECOVERY_DEADLINE_MS;
   if (
     writeReport.odl.attempted
     && !writeReport.openedOdl
@@ -2404,8 +2411,11 @@ async function writePracticeAndOdl(page, job, args) {
       || workspaceState === WORKSPACE_STATES.ODL_LOADING)
   ) {
     const maxOdlRecovery = Number(process.env.YAP_ODL_RECOVERY_RETRIES) || 2;
-    for (let rec = 1; rec <= maxOdlRecovery && !writeReport.openedOdl; rec += 1) {
-      logPhase("odl_recovery", "attempting", { attempt: rec, maxOdlRecovery, state: workspaceState });
+    if (!recoveryHasBudget()) {
+      logPhase("odl_recovery", "skipped_no_time_budget", { elapsed_ms: Date.now() - _workerStart, deadline_ms: ODL_RECOVERY_DEADLINE_MS });
+    }
+    for (let rec = 1; rec <= maxOdlRecovery && !writeReport.openedOdl && recoveryHasBudget(); rec += 1) {
+      logPhase("odl_recovery", "attempting", { attempt: rec, maxOdlRecovery, state: workspaceState, elapsed_ms: Date.now() - _workerStart });
       // Torna alla pratica (ricarica l'URL #!pratica catturato prima).
       if (practiceUrl && /#!pratica/i.test(practiceUrl)) {
         await page.goto(practiceUrl, { waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
