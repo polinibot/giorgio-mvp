@@ -2813,74 +2813,9 @@ async function writePracticeAndOdl(page, job, args) {
     writeReport.practiceScreenshot = practiceShot;
   }
 
-  // Scrivi note interne nella view pratica (sub-tab "Note interne") PRIMA di navigare all'ODL.
-  // FIX: su detail_form non ci sono textarea visibili direttamente — bisogna prima navigare
-  // alla sub-tab "Note interne" della pratica, oppure rimandare la scrittura all'ODL.
-  if (job.internalNotes && hasWriteableOdlWork(job)) {
-    try {
-      // Step 1: prova a navigare al sub-tab "Note interne" nella vista pratica
-      const practiceNoteTabClicked = await clickBottomSectionTab(page, "Note interne").catch(() => false);
-      logPhase("notes_practice_tab", practiceNoteTabClicked ? "clicked" : "not_found", { state: workspaceState });
-      if (practiceNoteTabClicked) {
-        await page.waitForTimeout(200).catch(() => {});
-      }
-
-      // Diagnostica: conta elementi editabili visibili
-      const editableCount = await safeEvaluate(page, () => {
-        const isVisible = (el) => {
-          const r = el.getBoundingClientRect(); const s = window.getComputedStyle(el);
-          return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
-        };
-        return [...document.querySelectorAll("textarea, [contenteditable], [role='textbox']")]
-          .filter(el => isVisible(el) && el.getAttribute("contenteditable") !== "false").length;
-      }).catch(() => -1);
-      logPhase("notes_editable_scan", "info", { editableCount, practiceNoteTabClicked });
-
-      if (editableCount > 0) {
-        // Step 2a: c'è un textarea — scrivi con keyword matching
-        const noteAttempt = await fillWithRetry(
-          page,
-          [
-            ["note interne", "note", "pratica", "annotazioni"],
-            ["note", "annotazioni"],
-            ["note"],
-          ],
-          String(job.internalNotes).trim(),
-          { append: true },
-          { debug: args.debug, fieldId: "notes.primary", returnDebug: args.debug },
-        );
-        writeReport.notes.success = Boolean(noteAttempt?.ok ?? noteAttempt);
-        if (args.debug) {
-          writeReport.debug.notes = { ...(writeReport.debug.notes || {}), primaryAttempt: noteAttempt?.debug || null, editableCount };
-        }
-        if (!writeReport.notes.success) {
-          // Fallback: qualsiasi textarea visibile nella pagina
-          const noteFallback = await appendStructuredBlockToAnyTextarea(
-            page,
-            String(job.internalNotes).trim(),
-            { keywords: ["note interne", "annotazioni", "note"], returnDebug: true },
-          );
-          writeReport.notes.success = Boolean(noteFallback?.ok ?? noteFallback);
-          if (args.debug) {
-            writeReport.debug.notes = { ...(writeReport.debug.notes || {}), fallbackUsed: true, fallbackDebug: noteFallback?.debug || null };
-          }
-          logPhase("notes_fallback", writeReport.notes.success ? "done" : "failed", { target: noteFallback?.debug?.selected?.tag || null });
-        }
-      } else {
-        // Step 2b: nessuna textarea visibile (nemmeno dopo aver cliccato il tab)
-        // — non fallire qui, la nota verrà scritta nell'ODL (phase notes_odl_tab).
-        logPhase("notes_practice_skip", "no_textarea", { editableCount, practiceNoteTabClicked });
-      }
-      if (!writeReport.notes.success && editableCount <= 0) {
-        // Non è un errore definitivo — sarà scritto nell'ODL
-        writeReport.notes.error = "notes_deferred_to_odl";
-      } else if (!writeReport.notes.success) {
-        writeReport.notes.error = "notes_field_not_found";
-      }
-    } catch (error) {
-      writeReport.notes.error = error?.message || "notes_write_failed";
-    }
-  }
+  // RIMOSSO (best-effort): scrittura delle "note interne pratica" tramite ricerca
+  // euristica di una textarea per keyword. Il campo "Note interne (pratica)" non
+  // esiste come campo YAP affidabile ed e' stato tolto anche dalla mini-app.
 
   // F5: guard "no veicolo" — blocca tutte le scritture ODL se la pratica è un guscio
   const noVehicle = await isPracticeShellWithoutVehicle(page);
@@ -3275,66 +3210,11 @@ async function writePracticeAndOdl(page, job, args) {
     }
   }
 
-  const noteSummaryBlock = buildOdlSummaryText(job);
-  if (args.debug) {
-    writeReport.debug.notes = {
-      ...(writeReport.debug.notes || {}),
-      noteSummaryBlock: null,
-    };
-  }
-  if (writeReport.openedOdl) {
-    if (args.debug) {
-      writeReport.bottomTabsBeforeNote = await snapshotBottomSectionTabs(page);
-    }
-    logPhase("odl_notes_tab", "opening");
-    const noteTabOpened = await clickBottomSectionTab(page, "Note interne");
-    if (noteTabOpened) {
-      await page.waitForTimeout(250);
-      await page.waitForFunction(() => {
-        const isVisible = (el) => {
-          const rect = el.getBoundingClientRect();
-          const style = window.getComputedStyle(el);
-          return rect.width > 8 && rect.height > 8 && style.display !== "none" && style.visibility !== "hidden";
-        };
-        return [...document.querySelectorAll("textarea, [contenteditable='true'], [role='textbox']")]
-          .some((el) => isVisible(el) && el.getAttribute("contenteditable") !== "false");
-      }, null, { timeout: 2500 }).catch(() => {});
-      if (args.debug) {
-        writeReport.bottomTabsAfterNote = await snapshotBottomSectionTabs(page);
-      }
-      if (args.debug) {
-        const noteTabShot = path.join(args.artifactDir, `note-tab-${job.practiceId || "payload"}-${Date.now()}.png`);
-        await page.screenshot({ path: noteTabShot, fullPage: true }).catch(() => {});
-        writeReport.noteTabScreenshot = noteTabShot;
-      }
-      const noteSummaryOk = await writeStructuredBlockToBestEditable(
-        page,
-        noteSummaryBlock,
-        { keywords: ["note interne", "note", "annotazioni", "odl", "prospetti"], preferBottomHalf: true, returnDebug: true },
-      );
-      const noteSummaryFallback = !noteSummaryOk?.ok ? await appendStructuredBlockToAnyTextarea(
-        page,
-        noteSummaryBlock,
-        { keywords: ["note interne", "odl", "descrizione danni", "prospetti"], returnDebug: true },
-      ) : null;
-      const noteWriteResult = noteSummaryOk?.ok ? noteSummaryOk : noteSummaryFallback;
-      if (noteWriteResult?.ok) {
-        writeReport.notes.success = true;
-        writeReport.notes.error = null;
-        writeReport.fallbackSummaryWritten = true;
-        writeReport.debug.notes.noteSummaryBlock = noteWriteResult.debug || null;
-        await clickGenericSaveInPractice(page).catch(() => false);
-        await page.waitForTimeout(180).catch(() => {});
-        if (args.debug) {
-          const noteWriteShot = path.join(args.artifactDir, `note-tab-written-${job.practiceId || "payload"}-${Date.now()}.png`);
-          await page.screenshot({ path: noteWriteShot, fullPage: true }).catch(() => {});
-          writeReport.noteTabWrittenScreenshot = noteWriteShot;
-        }
-      } else if (args.debug) {
-        writeReport.debug.notes.noteSummaryBlock = noteWriteResult?.debug || noteSummaryOk?.debug || null;
-      }
-    }
-  }
+  // RIMOSSO (best-effort): in precedenza qui si scriveva un "riassunto ODL" dentro
+  // una textarea individuata euristicamente per keyword (writeStructuredBlockToBestEditable
+  // / appendStructuredBlockToAnyTextarea). Non era un campo YAP affidabile: poteva
+  // finire nella casella sbagliata. I dati reali dell'ODL vengono scritti campo per
+  // campo qui sotto (descrizioni, MAN/MAC, materiali, ricambi). Niente piu' dump.
 
   logPhase("odl_sections", "starting", { count: (job.sections || []).length });
   for (const section of job.sections || []) {

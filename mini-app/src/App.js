@@ -5332,6 +5332,25 @@ function App() {
               )}
             </div>
 
+            {/* Contesti */}
+            <div className="section" data-field="contexts">
+              <h2>🔧 Contesti</h2>
+              <div className="checkboxes">
+                {['officina', 'carrozzeria', 'revisione'].map(context => (
+                  <label key={context} className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={selectedContexts.includes(context)}
+                      onChange={() => toggleContext(context)}
+                    />
+                    {context.charAt(0).toUpperCase() + context.slice(1)}
+                  </label>
+                ))}
+              </div>
+              <div className="field-hint">Seleziona almeno un tipo di sezione</div>
+              {fieldErrors.contexts && <div className="field-error">{fieldErrors.contexts}</div>}
+            </div>
+
             {/* Appuntamento */}
             <div className="section">
               <h2>📅 Appuntamento</h2>
@@ -5384,35 +5403,6 @@ function App() {
                 </select>
               </div>
 
-              <div className="form-group">
-                <label htmlFor="internal_notes">Note interne (pratica)</label>
-                <textarea
-                  id="internal_notes"
-                  {...register('internal_notes')}
-                  className="textarea"
-                  rows="2"
-                  placeholder="Note generali visibili nel mapping verso YAP (non nel popup agenda)"
-                />
-              </div>
-            </div>
-
-            {/* Contesti */}
-            <div className="section" data-field="contexts">
-              <h2>🔧 Contesti</h2>
-              <div className="checkboxes">
-                {['officina', 'carrozzeria', 'revisione'].map(context => (
-                  <label key={context} className="checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={selectedContexts.includes(context)}
-                      onChange={() => toggleContext(context)}
-                    />
-                    {context.charAt(0).toUpperCase() + context.slice(1)}
-                  </label>
-                ))}
-              </div>
-              <div className="field-hint">Seleziona almeno un tipo di sezione</div>
-              {fieldErrors.contexts && <div className="field-error">{fieldErrors.contexts}</div>}
             </div>
 
             {/* Sezioni dinamiche */}
