@@ -10,12 +10,40 @@
     }
   ],
   "routes": [
-    { "src": "/static/(.*)", "dest": "/static/$1" },
-    { "src": "/favicon.ico", "dest": "/favicon.ico" },
-    { "src": "/manifest.json", "dest": "/manifest.json" },
-    { "src": "/asset-manifest.json", "dest": "/asset-manifest.json" },
-    { "src": "/logo192.png", "dest": "/logo192.png" },
-    { "src": "/logo512.png", "dest": "/logo512.png" },
-    { "src": "/(.*)", "dest": "/index.html" }
+    {
+      "src": "/static/(.*)",
+      "headers": { "cache-control": "public, max-age=31536000, immutable" },
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/favicon.ico",
+      "headers": { "cache-control": "public, max-age=86400" },
+      "dest": "/favicon.ico"
+    },
+    {
+      "src": "/manifest.json",
+      "headers": { "cache-control": "no-store, must-revalidate" },
+      "dest": "/manifest.json"
+    },
+    {
+      "src": "/asset-manifest.json",
+      "headers": { "cache-control": "no-store, must-revalidate" },
+      "dest": "/asset-manifest.json"
+    },
+    {
+      "src": "/logo192.png",
+      "headers": { "cache-control": "public, max-age=86400" },
+      "dest": "/logo192.png"
+    },
+    {
+      "src": "/logo512.png",
+      "headers": { "cache-control": "public, max-age=86400" },
+      "dest": "/logo512.png"
+    },
+    {
+      "src": "/(.*)",
+      "headers": { "cache-control": "no-store, must-revalidate" },
+      "dest": "/index.html"
+    }
   ]
 }
