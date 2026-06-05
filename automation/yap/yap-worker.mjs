@@ -53,7 +53,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05g-odl-wait-budget";
+const WORKER_BUILD = "2026-06-05h-no-double-login";
 const _workerStart = Date.now();
 process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "worker", status: "module_loaded", build: WORKER_BUILD, ts: new Date().toISOString(), pid: process.pid }) + "\n");
 function logPhase(phase, status, extra = {}) {
@@ -2410,7 +2410,7 @@ async function writePracticeAndOdl(page, job, args) {
   // quindi tra 150s e 230s c'erano 80s di budget INUTILIZZATO: con un avvio lento
   // (es. doppio re-login) la recovery veniva saltata ("skipped_no_time_budget")
   // pur essendoci ancora tempo utile. 195s lascia comunque ~35s di margine di chiusura.
-  const ODL_RECOVERY_DEADLINE_MS = Number(process.env.YAP_ODL_RECOVERY_DEADLINE_MS) || 195000;
+  const ODL_RECOVERY_DEADLINE_MS = Number(process.env.YAP_ODL_RECOVERY_DEADLINE_MS) || 205000;
   const recoveryHasBudget = () => (Date.now() - _workerStart) < ODL_RECOVERY_DEADLINE_MS;
   if (
     writeReport.odl.attempted
@@ -3467,9 +3467,19 @@ async function runYapAutomation(job, args) {
           await page.waitForTimeout(500 * attempt).catch(() => {});
           continue;
         }
-        if (attempt === 3) {
+        // FIX doppio re-login: la sessione è appena stata stabilita da loginYap.
+        // Diamo a GWT un attimo per propagare i cookie, poi proviamo SUBITO openAgenda
+        // SENZA tornare in cima al loop (che ri-cancellerebbe i cookie appena impostati
+        // e rifarebbe un login completo, bruciando ~50s di budget). Solo se questo
+        // tentativo immediato fallisce ancora lasciamo proseguire il loop.
+        await page.waitForTimeout(700).catch(() => {});
+        try {
           await openAgenda(page, dateIso);
           return;
+        } catch (postLoginError) {
+          if (_isCrash(postLoginError?.message)) throw postLoginError;
+          if (attempt === 3) throw postLoginError;
+          logPhase("agenda", "post_login_retry", { attempt, error: String(postLoginError?.message || postLoginError).slice(0, 160) });
         }
         await page.waitForTimeout(350 * attempt).catch(() => {});
       }
