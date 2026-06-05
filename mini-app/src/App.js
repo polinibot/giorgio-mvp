@@ -2981,9 +2981,12 @@ function App() {
               </div>
             )}
             {(() => {
-              const workerLog = (Array.isArray(safeResult.phase_timeline) && safeResult.phase_timeline.length)
-                ? safeResult.phase_timeline
-                : (Array.isArray(safeResult.worker_phases) ? safeResult.worker_phases : []);
+              // Preferisci le fasi DETTAGLIATE del worker (browser/login/agenda/slot/tags/save...)
+              // rispetto al phase_timeline grossolano del backend (precheck/write/audit/finalize).
+              const detailedPhases = Array.isArray(safeResult.worker_phases) ? safeResult.worker_phases : [];
+              const workerLog = detailedPhases.length
+                ? detailedPhases
+                : (Array.isArray(safeResult.phase_timeline) ? safeResult.phase_timeline : []);
               if (!workerLog.length) return null;
               const HIDDEN = ['phase', 'status', 'elapsed_ms', 'delta_ms', 'ts', 'seq', 'run', 'event'];
               const lines = workerLog.map((p) => {

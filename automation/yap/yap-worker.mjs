@@ -3570,45 +3570,47 @@ async function fillAppointmentPopup(page, job) {
   const cosaValue = pickCosaFromJob(job);
   const endTime = addMinutes(job.appointment.time, job.appointment.duration);
   const notes = buildNotesForPopup(jobToMapping(job));
+  const plate = String(job.customer?.plate || "").trim().toUpperCase();
 
-  await fillVisibleInput(page, cosaInput.index, cosaValue);
+  // Cosa = targa con aggancio veicolo AFFIDABILE: digitazione REALE (eventi veri ->
+  // attiva l'oracle del SuggestBox) e click sul veicolo suggerito. Prima si usava
+  // input.value= (sintetico): il dropdown non compariva e il veicolo non si agganciava.
+  let vehicleLinked = false;
+  const cosaX = cosaInput.x + Math.min(cosaInput.width / 2, 60);
+  const cosaY = cosaInput.y + (cosaInput.height / 2);
+  await page.mouse.click(cosaX, cosaY).catch(() => {});
+  await page.waitForTimeout(120).catch(() => {});
+  await page.keyboard.press("Control+A").catch(() => {});
+  await page.keyboard.press("Delete").catch(() => {});
 
-  // F2-bis: gestione dropdown autocomplete veicolo dopo aver scritto la targa in "Cosa"
-  if (job.customer?.plate) {
-    await page.waitForTimeout(300).catch(() => {});
-    const plateSelected = await safeEvaluate(page, (targetPlate) => {
+  if (plate) {
+    await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
+    await page.waitForTimeout(450).catch(() => {});
+    vehicleLinked = await safeEvaluate(page, (targetPlate) => {
       const isVisible = (el) => {
         const r = el.getBoundingClientRect();
         const s = window.getComputedStyle(el);
         return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
       };
-      // Cerca dropdown di autocomplete (suggestion popup o lista risultati)
-      const suggestions = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox'], .dropdown, .autocomplete")]
-        .filter(isVisible);
-      for (const popup of suggestions) {
-        const items = [...popup.querySelectorAll("div, span, td, tr, li, [role='option']")]
+      const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox'], .dropdown, .autocomplete")].filter(isVisible);
+      for (const pop of pops) {
+        const items = [...pop.querySelectorAll("div, span, td, tr, li, [role='option']")]
           .filter(isVisible)
-          .filter((el) => el.textContent.toUpperCase().includes(targetPlate.toUpperCase()));
+          .filter((el) => el.textContent.toUpperCase().includes(targetPlate));
         if (items.length > 0) {
+          items[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
           items[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-          return { selected: true, match: items[0].textContent.trim() };
+          return true;
         }
       }
-      // Fallback: cerca qualsiasi elemento visibile con la targa (risultato ricerca)
-      const matches = [...document.querySelectorAll("div, span, td, tr")]
-        .filter(isVisible)
-        .filter((el) => el.textContent.toUpperCase().includes(targetPlate.toUpperCase()));
-      if (matches.length > 0) {
-        const best = matches.sort((a, b) => b.getBoundingClientRect().y - a.getBoundingClientRect().y)[0];
-        best.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-        return { selected: true, match: best.textContent.trim() };
-      }
-      return { selected: false };
-    }, job.customer.plate).catch(() => ({ selected: false }));
-    if (plateSelected?.selected) {
-      await page.waitForTimeout(200).catch(() => {});
-    }
+      return false;
+    }, plate).catch(() => false);
+    await page.waitForTimeout(220).catch(() => {});
+  } else {
+    // Nessuna targa: scrivi comunque il testo del Cosa.
+    await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
+  logAction("cosa_vehicle", { plate, cosaValue, vehicleLinked });
 
   await fillVisibleInput(page, dateIndex, toItalianDate(job.appointment.date));
   await fillVisibleInput(page, timeIndexes[0], toYapTime(job.appointment.time));
@@ -3625,10 +3627,20 @@ async function fillAppointmentPopup(page, job) {
   const tagResult = await addYapTagChips(page, yapTags);
   logAction("tags_written", { requested: yapTags, added: tagResult.added, failed: tagResult.failed, ok: tagResult.ok });
 
-  // F2: prova a selezionare il veicolo tramite il widget Veicolo del popup (non-fatal)
-  if (job.customer?.plate) {
-    await selectVehicleByPlate(page, job.customer.plate).catch(() => {});
+  // Fallback aggancio veicolo SOLO se non già agganciato dal Cosa: usa il campo
+  // "Veicolo" dedicato del popup (se presente).
+  if (plate && !vehicleLinked) {
+    const fb = await selectVehicleByPlate(page, plate).catch(() => null);
+    if (fb?.selected) vehicleLinked = true;
+    logAction("vehicle_fallback", { plate, linked: vehicleLinked, found: fb?.found || false });
   }
+
+  return {
+    tagResult,
+    vehicleLinked,
+    plate,
+    cosa: cosaValue,
+  };
 }
 
 // Audit inline: verifica i dati appena salvati senza aprire nuovo browser
@@ -3648,21 +3660,42 @@ async function fillAppointmentPopup(page, job) {
 // forte e più affidabile della riapertura del popup agenda, e non richiede di
 // uscire dalla pratica. L'avvenuta scrittura in agenda è già garantita dal
 // salvataggio del popup appuntamento (putResponse rilevato a monte).
-async function runInlineAudit(page, job, managementWrite) {
+async function runInlineAudit(page, job, managementWrite, popupResult = null) {
   const present = [];
   const missing = [];
 
   // L'agenda è confermata dal salvataggio del popup appuntamento andato a buon fine.
   present.push({ field: "agenda", expected: "appuntamento salvato in agenda" });
 
-  // Se l'ODL non era richiesto, la verifica automatica si limita all'agenda.
+  // Verifica TAG e VEICOLO in base all'esito reale della scrittura del popup
+  // (non dare per riuscito ciò che non lo è). Vale per ogni pratica, anche revisione.
+  const expectedTags = pickYapTagsFromJob(job);
+  if (expectedTags.length) {
+    const addedTags = popupResult?.tagResult?.added || [];
+    const failedTags = expectedTags.filter((t) => !addedTags.includes(t));
+    if (failedTags.length === 0) {
+      present.push({ field: "tag", expected: expectedTags.join(", ") });
+    } else {
+      missing.push({ field: "tag", expected: expectedTags.join(", "), found: addedTags.join(", ") || "nessuno" });
+    }
+  }
+  if (job.customer?.plate) {
+    if (popupResult?.vehicleLinked) {
+      present.push({ field: "veicolo", expected: `agganciato ${job.customer.plate}` });
+    } else {
+      missing.push({ field: "veicolo", expected: `agganciato ${job.customer.plate}`, found: "non agganciato" });
+    }
+  }
+
+  // Se l'ODL non era richiesto (es. revisione), l'esito dipende da agenda + tag + veicolo.
   const odlRequested = shouldWriteOdlFromWorker(job);
   if (!odlRequested) {
     return {
-      verified: true,
+      verified: missing.length === 0,
       present,
       missing,
-      summary: { present: present.length, missing: 0, fields: present.map((p) => p.field), source: "write_report" },
+      error: missing.length ? `Da ricontrollare: ${missing.map((m) => m.field).join(", ")}` : undefined,
+      summary: { present: present.length, missing: missing.length, fields: present.map((p) => p.field), source: "write_report" },
     };
   }
 
@@ -4375,14 +4408,15 @@ async function runYapAutomation(job, args) {
     const _slotClickStart = Date.now();
     await clickApproximateSlot(page, job.appointment.time);
     logPhase("popup", "slot_clicked", { elapsed_ms: Date.now() - _slotClickStart });
+    let popupResult = null;
     try {
-      await fillAppointmentPopup(page, job);
+      popupResult = await fillAppointmentPopup(page, job);
     } catch (firstError) {
       // Fallback rapido: in alcune sessioni il primo popup si apre incompleto.
       await page.keyboard.press("Escape").catch(() => {});
       await page.waitForTimeout(180);
       await clickApproximateSlot(page, job.appointment.time);
-      await fillAppointmentPopup(page, job);
+      popupResult = await fillAppointmentPopup(page, job);
       if (args.debug) {
         console.warn(`Popup refill retry riuscito: ${firstError.message}`);
       }
@@ -4421,7 +4455,7 @@ async function runYapAutomation(job, args) {
     logPhase("inline_audit", "starting");
     let inlineAudit = null;
     try {
-      inlineAudit = await runInlineAudit(page, job, managementWrite);
+      inlineAudit = await runInlineAudit(page, job, managementWrite, popupResult);
       logPhase("inline_audit", inlineAudit?.verified ? "verified" : "partial", {
         present: inlineAudit?.present?.length || 0,
         missing: inlineAudit?.missing?.length || 0,
