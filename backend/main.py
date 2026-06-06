@@ -837,9 +837,9 @@ def _normalize_slot_time(appointment_time: str) -> str:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-def _clean_section_rows(rows: List[str]) -> List[str]:
+def _clean_section_rows(rows: List[str], allow_empty: bool = False) -> List[str]:
     cleaned = [row.strip() for row in rows if isinstance(row, str) and row.strip()]
-    if not cleaned:
+    if not cleaned and not allow_empty:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Almeno una riga descrittiva e obbligatoria per ogni contesto",
@@ -860,7 +860,8 @@ def _validate_full_payload(body: PracticeFullSave):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Sezione non coerente con i contesti: {ctx}")
         if ctx in sections_by_context:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Sezione duplicata: {ctx}")
-        _clean_section_rows(section.description_rows)
+        # La revisione non richiede righe descrittive (non vanno su YAP).
+        _clean_section_rows(section.description_rows, allow_empty=(ctx == "revisione"))
         if section.man_hours is not None and section.man_hours < 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MAN deve essere >= 0")
         if section.mac_hours is not None and section.mac_hours < 0:
@@ -869,7 +870,9 @@ def _validate_full_payload(body: PracticeFullSave):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Smaltimento deve essere tra 0 e 100")
         sections_by_context[ctx] = section
 
-    missing = selected_contexts - set(sections_by_context)
+    # La revisione può non avere sezione/righe: la escludiamo dai contesti obbligatori.
+    required_contexts = selected_contexts - {"revisione"}
+    missing = required_contexts - set(sections_by_context)
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -928,10 +931,11 @@ def _replace_sections_and_parts(db: Session, practice_id: int, sections: List[Se
 
     for section in sections:
         clean = _sanitize_section_for_context(section)
+        clean_ctx = _context_value(clean.context)
         db.add(PracticeSection(
             practice_id=practice_id,
             context=clean.context,
-            description_rows=_json.dumps(_clean_section_rows(clean.description_rows)),
+            description_rows=_json.dumps(_clean_section_rows(clean.description_rows, allow_empty=(clean_ctx == "revisione"))),
             man_hours=clean.man_hours,
             mac_hours=clean.mac_hours,
             materials_amount=clean.materials_amount,
@@ -3550,10 +3554,12 @@ async def create_section(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
 
     try:
+        context_value = _context_value(section_data["context"])
         rows = section_data.get("description_rows", [])
         if isinstance(rows, list):
             non_empty = [r for r in rows if isinstance(r, str) and r.strip()]
-            if not non_empty:
+            # La revisione non richiede righe descrittive (non vanno su YAP).
+            if not non_empty and context_value != "revisione":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Almeno una riga descrittiva Ã¨ obbligatoria per contesto",
@@ -3562,7 +3568,6 @@ async def create_section(
         else:
             rows_json = _json.dumps([str(rows)])
 
-        context_value = _context_value(section_data["context"])
         try:
             Context(context_value)
         except ValueError:
