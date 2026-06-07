@@ -2978,6 +2978,10 @@ async def sync_practice_to_yap(
                 practice.management_external_id = str(external_id)
             audit_result = _build_inline_sync_audit_result(result_data, write_report, response_worker_phases)
             if audit_result:
+                # Persisti le fasi dettagliate del worker nell'audit, così il "Log worker"
+                # resta visibile nel dettaglio anche dopo un reload (non solo a caldo).
+                if isinstance(response_worker_phases, list) and response_worker_phases:
+                    audit_result["worker_phases"] = response_worker_phases[-200:]
                 response_status = _persist_yap_audit_result(db, practice, audit_result, user_data["id"])
                 response_message = _audit_message_for_status(response_status, audit_result)
                 close_phase("audit", "completed" if response_status == "complete_synced" else "partial", response_message)

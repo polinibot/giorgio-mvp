@@ -2832,6 +2832,30 @@ function App() {
     );
   };
 
+  // Pannello "Log worker" riusabile: mostra la timeline dettagliata delle fasi del worker.
+  const renderWorkerLogPanel = (phases) => {
+    const workerLog = Array.isArray(phases) ? phases : [];
+    if (!workerLog.length) return null;
+    const HIDDEN = ['phase', 'status', 'elapsed_ms', 'delta_ms', 'ts', 'seq', 'run', 'event'];
+    const lines = workerLog.map((p) => {
+      const t = typeof p.elapsed_ms === 'number' ? `${(p.elapsed_ms / 1000).toFixed(1)}s` : '';
+      const d = typeof p.delta_ms === 'number' ? `+${p.delta_ms}ms` : '';
+      const extra = Object.entries(p)
+        .filter(([k, v]) => !HIDDEN.includes(k) && v != null && v !== '')
+        .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+        .join(' ');
+      return `${t.padStart(6)} ${d.padStart(8)}  ${p.phase || '?'}:${p.status || '?'}${extra ? '  ' + extra : ''}`;
+    }).join('\n');
+    return (
+      <details className="yap-result-tech" open>
+        <summary>🪵 Log worker ({workerLog.length} azioni)</summary>
+        <div className="yap-result-tech-body">
+          <pre className="yap-worker-log">{lines}</pre>
+        </div>
+      </details>
+    );
+  };
+
   const renderYapResultBanner = (result, { practiceId = null, showRetry = false, showDelete = false } = {}) => {
     const resolvedPracticeId = practiceId || yapLastPracticeId;
     const showActionProgress = Boolean(
@@ -2980,33 +3004,11 @@ function App() {
                 ))}
               </div>
             )}
-            {(() => {
-              // Preferisci le fasi DETTAGLIATE del worker (browser/login/agenda/slot/tags/save...)
-              // rispetto al phase_timeline grossolano del backend (precheck/write/audit/finalize).
-              const detailedPhases = Array.isArray(safeResult.worker_phases) ? safeResult.worker_phases : [];
-              const workerLog = detailedPhases.length
-                ? detailedPhases
-                : (Array.isArray(safeResult.phase_timeline) ? safeResult.phase_timeline : []);
-              if (!workerLog.length) return null;
-              const HIDDEN = ['phase', 'status', 'elapsed_ms', 'delta_ms', 'ts', 'seq', 'run', 'event'];
-              const lines = workerLog.map((p) => {
-                const t = typeof p.elapsed_ms === 'number' ? `${(p.elapsed_ms / 1000).toFixed(1)}s` : '';
-                const d = typeof p.delta_ms === 'number' ? `+${p.delta_ms}ms` : '';
-                const extra = Object.entries(p)
-                  .filter(([k, v]) => !HIDDEN.includes(k) && v != null && v !== '')
-                  .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
-                  .join(' ');
-                return `${t.padStart(6)} ${d.padStart(8)}  ${p.phase || '?'}:${p.status || '?'}${extra ? '  ' + extra : ''}`;
-              }).join('\n');
-              return (
-                <details className="yap-result-tech">
-                  <summary>🪵 Log worker ({workerLog.length} azioni)</summary>
-                  <div className="yap-result-tech-body">
-                    <pre className="yap-worker-log">{lines}</pre>
-                  </div>
-                </details>
-              );
-            })()}
+            {renderWorkerLogPanel(
+              (Array.isArray(safeResult.worker_phases) && safeResult.worker_phases.length)
+                ? safeResult.worker_phases
+                : (Array.isArray(safeResult.phase_timeline) ? safeResult.phase_timeline : [])
+            )}
             {technicalDiagnostics && (status === 'sync_failed' || status === 'delete_failed' || status === 'partial_synced' || status === 'agenda_synced' || showTechnicalAuditState) && (
               <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || status === 'partial_synced' || showTechnicalAuditState}>
                 <summary>Crash log YAP</summary>
@@ -4901,6 +4903,15 @@ function App() {
           {detailTab === 'yap' && (
             <>
           {yapLastPracticeId === practice.id && renderYapResultBanner(yapLastResult, { practiceId: practice.id, showRetry: true, showDelete: true })}
+
+          {/* Log worker persistito: visibile anche dopo un reload / riapertura pratica. */}
+          {yapLastPracticeId !== practice.id && (() => {
+            let mar = practice.management_audit_result;
+            if (typeof mar === 'string') {
+              try { mar = JSON.parse(mar); } catch { mar = null; }
+            }
+            return renderWorkerLogPanel(mar?.worker_phases);
+          })()}
 
           {renderYapAuditReport(getYapAuditResult(yapLastPracticeId === practice.id ? yapLastResult : null) || practice.management_audit_result)}
 
