@@ -839,11 +839,17 @@ async function locateTagInput(page) {
     const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
       .find((p) => (p.textContent || "").includes("Dettagli"));
     if (!popup) return null;
-    const tagInputs = [...popup.querySelectorAll("input")].filter((inp) => {
-      const section = inp.closest("div");
-      return isVisible(inp) && section && /tag/i.test(section.textContent || "");
-    });
-    const input = tagInputs[tagInputs.length - 1];
+    const visInputs = [...popup.querySelectorAll("input")].filter(isVisible);
+    // Il campo Tag e' identificabile in modo stabile: maxlength="25" e
+    // text-transform lowercase (a differenza del Cosa uppercase e degli orari HH.MM).
+    let input = visInputs.find((el) => el.getAttribute("maxlength") === "25");
+    if (!input) input = visInputs.find((el) => (el.style && el.style.textTransform === "lowercase"));
+    if (!input) {
+      // Fallback: un gwt-SuggestBox vuoto che non sia un orario (HH.MM) ne' una data.
+      input = visInputs.find((el) => /gwt-SuggestBox/.test(el.className)
+        && !/^\d{1,2}\.\d{2}$/.test(el.value || "")
+        && !/^\d{2}\/\d{2}\/\d{4}$/.test(el.value || ""));
+    }
     if (!input) return null;
     input.scrollIntoView({ block: "center", inline: "nearest" });
     const r = input.getBoundingClientRect();
@@ -3614,10 +3620,14 @@ async function fillAppointmentPopup(page, job) {
   const notes = buildNotesForPopup(jobToMapping(job));
   const plate = String(job.customer?.plate || "").trim().toUpperCase();
 
-  // Cosa = targa con aggancio veicolo AFFIDABILE: digitazione REALE (eventi veri ->
-  // attiva l'oracle del SuggestBox) e click sul veicolo suggerito. Prima si usava
-  // input.value= (sintetico): il dropdown non compariva e il veicolo non si agganciava.
-  let vehicleLinked = false;
+  // Cosa = targa, con aggancio veicolo secondo la logica reale di YAP:
+  //  1. scrivo la targa nel Cosa (tastiera reale -> attiva l'autocomplete veicolo);
+  //  2. guardo il popup di suggerimento:
+  //     - se contiene "Nessun risultato trovato." -> il veicolo NON esiste in anagrafica
+  //       (NON e' un errore): lascio la targa nel Cosa e proseguo (state=not_found);
+  //     - se trova la targa -> la clicco (state=linked);
+  //  3. altrimenti state=failed (popup inatteso / nessun match).
+  let vehicleState = "skipped"; // skipped|linked|not_found|failed
   const cosaX = cosaInput.x + Math.min(cosaInput.width / 2, 60);
   const cosaY = cosaInput.y + (cosaInput.height / 2);
   await page.mouse.click(cosaX, cosaY).catch(() => {});
@@ -3627,32 +3637,37 @@ async function fillAppointmentPopup(page, job) {
 
   if (plate) {
     await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
-    await page.waitForTimeout(450).catch(() => {});
-    vehicleLinked = await safeEvaluate(page, (targetPlate) => {
+    await page.waitForTimeout(550).catch(() => {});
+    const probe = await safeEvaluate(page, (targetPlate) => {
       const isVisible = (el) => {
         const r = el.getBoundingClientRect();
         const s = window.getComputedStyle(el);
-        return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+        return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
       };
-      const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox'], .dropdown, .autocomplete")].filter(isVisible);
+      // Il popup di autocomplete veicolo e' un popup separato da "Dettagli appuntamento".
+      const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
+        .filter(isVisible)
+        .filter((p) => !/dettagli appuntamento/i.test(p.textContent || ""));
       for (const pop of pops) {
-        const items = [...pop.querySelectorAll("div, span, td, tr, li, [role='option']")]
+        if (/nessun risultato/i.test(pop.textContent || "")) return { state: "not_found" };
+        const items = [...pop.querySelectorAll("td, div, span, li, tr, [role='option']")]
           .filter(isVisible)
-          .filter((el) => el.textContent.toUpperCase().includes(targetPlate));
+          .filter((el) => el.children.length === 0 && el.textContent.toUpperCase().includes(targetPlate));
         if (items.length > 0) {
           items[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
           items[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-          return true;
+          return { state: "linked", match: (items[0].textContent || "").trim().slice(0, 40) };
         }
       }
-      return false;
-    }, plate).catch(() => false);
-    await page.waitForTimeout(220).catch(() => {});
+      return { state: pops.length ? "failed" : "no_popup" };
+    }, plate).catch(() => ({ state: "failed" }));
+    vehicleState = probe.state === "no_popup" ? "failed" : probe.state;
+    await page.waitForTimeout(200).catch(() => {});
   } else {
-    // Nessuna targa: scrivi comunque il testo del Cosa.
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
-  logAction("cosa_vehicle", { plate, cosaValue, vehicleLinked });
+  const vehicleLinked = vehicleState === "linked";
+  logAction("cosa_vehicle", { plate, cosaValue, vehicleState });
 
   await fillVisibleInput(page, dateIndex, toItalianDate(job.appointment.date));
   await fillVisibleInput(page, timeIndexes[0], toYapTime(job.appointment.time));
@@ -3669,16 +3684,9 @@ async function fillAppointmentPopup(page, job) {
   const tagResult = await addYapTagChips(page, yapTags);
   logAction("tags_written", { requested: yapTags, added: tagResult.added, failed: tagResult.failed, ok: tagResult.ok });
 
-  // Fallback aggancio veicolo SOLO se non già agganciato dal Cosa: usa il campo
-  // "Veicolo" dedicato del popup (se presente).
-  if (plate && !vehicleLinked) {
-    const fb = await selectVehicleByPlate(page, plate).catch(() => null);
-    if (fb?.selected) vehicleLinked = true;
-    logAction("vehicle_fallback", { plate, linked: vehicleLinked, found: fb?.found || false });
-  }
-
   return {
     tagResult,
+    vehicleState,
     vehicleLinked,
     plate,
     cosa: cosaValue,
@@ -3716,16 +3724,20 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
     const addedTags = popupResult?.tagResult?.added || [];
     const failedTags = expectedTags.filter((t) => !addedTags.includes(t));
     if (failedTags.length === 0) {
-      present.push({ field: "tag", expected: expectedTags.join(", ") });
+      present.push({ field: "tag", expected: `tag: ${expectedTags.join(", ")}` });
     } else {
-      missing.push({ field: "tag", expected: expectedTags.join(", "), found: addedTags.join(", ") || "nessuno" });
+      missing.push({ field: "tag", expected: `tag: ${expectedTags.join(", ")}`, found: addedTags.join(", ") || "nessuno" });
     }
   }
   if (job.customer?.plate) {
-    if (popupResult?.vehicleLinked) {
-      present.push({ field: "veicolo", expected: `agganciato ${job.customer.plate}` });
+    const vstate = popupResult?.vehicleState || (popupResult?.vehicleLinked ? "linked" : "failed");
+    if (vstate === "linked") {
+      present.push({ field: "veicolo", expected: `veicolo agganciato (${job.customer.plate})` });
+    } else if (vstate === "not_found") {
+      // Il veicolo non e' in anagrafica YAP: NON e' un errore, lo segnaliamo come presente/ok.
+      present.push({ field: "veicolo", expected: `veicolo non in anagrafica YAP (${job.customer.plate}) — ok` });
     } else {
-      missing.push({ field: "veicolo", expected: `agganciato ${job.customer.plate}`, found: "non agganciato" });
+      missing.push({ field: "veicolo", expected: `veicolo agganciato (${job.customer.plate})`, found: "aggancio non riuscito" });
     }
   }
 
@@ -4379,8 +4391,9 @@ async function runYapAutomation(job, args) {
       let saveAttemptsUsed = 0;
       let popupSaveError = null;
       let putResponseSummary = null;
+      let popupResult = null;
       try {
-        await fillAppointmentPopup(page, job);
+        popupResult = await fillAppointmentPopup(page, job);
         const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 4 });
         putResponse = popupSave.putResponse;
         saveAttemptsUsed = popupSave.saveAttemptsUsed;
@@ -4399,9 +4412,22 @@ async function runYapAutomation(job, args) {
           error: error.message,
         }));
       }
+      // Audit anche sull'upsert: riporta esito tag/veicolo (non lasciare "verifica non conclusa").
+      let dedupAudit = null;
+      try {
+        dedupAudit = await runInlineAudit(page, job, managementWrite, popupResult);
+        logPhase("inline_audit", dedupAudit?.verified ? "verified" : "partial", {
+          present: dedupAudit?.present?.length || 0,
+          missing: dedupAudit?.missing?.length || 0,
+        });
+      } catch (auditErr) {
+        logPhase("inline_audit", "error", { error: auditErr.message });
+      }
+      const dedupVerified = dedupAudit?.verified === true;
       return {
         saved: true,
         mode: "commit-upsert-duplicate",
+        status: dedupVerified ? "complete_synced" : "agenda_synced",
         dedup,
         putAction: {
           detected: Boolean(putResponse),
@@ -4412,14 +4438,17 @@ async function runYapAutomation(job, args) {
         telemetry: buildYapTelemetry({
           runtime,
           startedAtMs: _runStart,
-          extra: { saveAttempts: saveAttemptsUsed },
+          extra: { saveAttempts: saveAttemptsUsed, audit: dedupAudit?.summary },
         }),
         warning: popupSaveError || undefined,
         managementWrite,
         write_report: managementWrite,
+        inline_audit: dedupAudit,
         message: popupSaveError
           ? "Duplicato gestito: popup agenda non confermato, verifica tramite audit."
-          : "Appuntamento duplicato aggiornato su YAP.",
+          : (dedupVerified
+            ? "Appuntamento duplicato aggiornato e verificato su YAP."
+            : "Appuntamento duplicato aggiornato su YAP."),
       };
     }
 
