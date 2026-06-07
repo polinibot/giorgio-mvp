@@ -3541,11 +3541,53 @@ async function writePracticeAndOdl(page, job, args) {
   return writeReport;
 }
 
+// Diagnostica: mappa i campi del popup appuntamento (input + etichette + widget
+// Tag/Veicolo). Serve per ricostruire i selettori esatti da log, senza tirare a indovinare.
+async function dumpPopupFields(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
+      .find((p) => isVisible(p) && (p.textContent || "").toLowerCase().includes("dettagli appuntamento"));
+    if (!popup) return { found: false };
+    const labelFor = (el) => {
+      let node = el;
+      for (let i = 0; i < 6 && node && node !== popup; i += 1) {
+        node = node.parentElement;
+        if (!node) break;
+        const own = [...node.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(" ").replace(/\s+/g, " ").trim();
+        if (own && own.length <= 40) return own;
+      }
+      return "";
+    };
+    const inputs = [...popup.querySelectorAll("input, textarea")].filter(isVisible).map((el) => ({
+      tag: el.tagName,
+      type: el.getAttribute("type") || "",
+      cls: (el.className || "").slice(0, 60),
+      value: (el.value || "").slice(0, 30),
+      placeholder: el.getAttribute("placeholder") || "",
+      label: labelFor(el),
+    }));
+    // Elementi cliccabili / etichette rilevanti per Tag e Veicolo.
+    const widgets = [...popup.querySelectorAll("div, span, td, button, a, label")].filter(isVisible)
+      .map((el) => ({ el, t: (el.textContent || "").replace(/\s+/g, " ").trim() }))
+      .filter((x) => /^(tag|veicolo|autoveicolo|nessun veicolo|note|cosa)\b/i.test(x.t) || /nessun veicolo selezionato/i.test(x.t))
+      .slice(0, 20)
+      .map((x) => ({ tag: x.el.tagName, cls: (x.el.className || "").slice(0, 50), txt: x.t.slice(0, 50) }));
+    return { found: true, inputs, widgets };
+  }).catch(() => ({ found: false }));
+}
+
 async function fillAppointmentPopup(page, job) {
   const rect = await appointmentPopupRect(page);
   if (!rect) {
     throw new Error("Popup 'Dettagli appuntamento' non trovato");
   }
+  // Diagnostica selettori (Tag/Veicolo): finisce nel Log worker per il debug preciso.
+  logAction("popup_fields", await dumpPopupFields(page));
 
   const inputs = (await inputSnapshot(page)).filter((item) => {
     const insideX = item.x >= rect.x && item.x + item.width <= rect.x + rect.width + 2;
