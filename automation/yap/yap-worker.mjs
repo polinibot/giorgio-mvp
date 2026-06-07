@@ -3637,32 +3637,53 @@ async function fillAppointmentPopup(page, job) {
 
   if (plate) {
     await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
-    await page.waitForTimeout(550).catch(() => {});
-    const probe = await safeEvaluate(page, (targetPlate) => {
-      const isVisible = (el) => {
-        const r = el.getBoundingClientRect();
-        const s = window.getComputedStyle(el);
-        return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
-      };
-      // Il popup di autocomplete veicolo e' un popup separato da "Dettagli appuntamento".
-      const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
-        .filter(isVisible)
-        .filter((p) => !/dettagli appuntamento/i.test(p.textContent || ""));
-      for (const pop of pops) {
-        if (/nessun risultato/i.test(pop.textContent || "")) return { state: "not_found" };
-        const items = [...pop.querySelectorAll("td, div, span, li, tr, [role='option']")]
+    // L'autocomplete veicolo fa una lookup sul SERVER: il popup ("Nessun risultato"
+    // o la targa) puo' arrivare dopo 1-2s. Per questo pollo fino a ~3.5s invece di
+    // guardare una volta sola (prima davo 'failed' troppo presto su veicoli inesistenti).
+    let resolved = false;
+    let sawPopup = false;
+    for (let i = 0; i < 14 && !resolved; i += 1) {
+      const probe = await safeEvaluate(page, (targetPlate) => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
           .filter(isVisible)
-          .filter((el) => el.children.length === 0 && el.textContent.toUpperCase().includes(targetPlate));
-        if (items.length > 0) {
-          items[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-          items[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-          return { state: "linked", match: (items[0].textContent || "").trim().slice(0, 40) };
+          .filter((p) => !/dettagli appuntamento/i.test(p.textContent || ""));
+        let sawContent = false;
+        for (const pop of pops) {
+          const txt = (pop.textContent || "").trim();
+          if (!txt) continue;
+          sawContent = true;
+          if (/nessun risultato/i.test(txt)) return { state: "not_found" };
+          const items = [...pop.querySelectorAll("td, div, span, li, tr, [role='option']")]
+            .filter(isVisible)
+            .filter((el) => el.children.length === 0 && el.textContent.toUpperCase().includes(targetPlate));
+          if (items.length > 0) {
+            const r = items[0].getBoundingClientRect();
+            return { state: "match", x: r.x + (r.width / 2), y: r.y + (r.height / 2), label: (items[0].textContent || "").trim().slice(0, 40) };
+          }
         }
+        return { state: "pending", sawContent };
+      }, plate).catch(() => ({ state: "pending" }));
+      if (probe.state === "match") {
+        await page.mouse.click(probe.x, probe.y).catch(() => {});
+        vehicleState = "linked";
+        resolved = true;
+      } else if (probe.state === "not_found") {
+        vehicleState = "not_found";
+        resolved = true;
+      } else {
+        if (probe.sawContent) sawPopup = true;
+        await page.waitForTimeout(250).catch(() => {});
       }
-      return { state: pops.length ? "failed" : "no_popup" };
-    }, plate).catch(() => ({ state: "failed" }));
-    vehicleState = probe.state === "no_popup" ? "failed" : probe.state;
-    await page.waitForTimeout(200).catch(() => {});
+    }
+    // Timeout: se abbiamo visto un popup ma non un match -> failed; se mai nessun
+    // popup -> il veicolo non e' proponibile = trattalo come non in anagrafica.
+    if (!resolved) vehicleState = sawPopup ? "failed" : "not_found";
+    await page.waitForTimeout(150).catch(() => {});
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
