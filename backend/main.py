@@ -1478,7 +1478,10 @@ def _build_inline_sync_audit_result(
 
     if inline_audit.get("error"):
         write_issues = _write_report_issue_labels(write_report, worker_phases)
-        if write_issues or write_report.get("ok") is False or write_report.get("error") or inline_audit.get("present") or inline_audit.get("missing") or inline_audit.get("mismatch"):
+        # write_report puo' essere None (es. revisione pura: nessun ODL scritto):
+        # accedi in modo sicuro per non sollevare AttributeError.
+        wr = write_report if isinstance(write_report, dict) else {}
+        if write_issues or wr.get("ok") is False or wr.get("error") or inline_audit.get("present") or inline_audit.get("missing") or inline_audit.get("mismatch"):
             return _build_post_write_review_audit(
                 {
                     "message": str(inline_audit.get("error") or "Verifica automatica parziale."),
