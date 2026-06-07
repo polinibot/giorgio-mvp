@@ -419,11 +419,24 @@ class AutomationService:
                 validation["errors"].append(str(exc))
                 validation["ready"] = False
 
-        if not payload.get("sections"):
+        # I contesti diversi da "revisione" richiedono una sezione lavoro con righe
+        # descrittive. La revisione NON le richiede (non vanno su YAP).
+        raw_contexts = payload.get("contexts") or []
+        if isinstance(raw_contexts, str):
+            raw_contexts = [c.strip() for c in raw_contexts.split(",") if c.strip()]
+        contexts_norm = [str(c).strip().lower() for c in raw_contexts]
+        work_contexts = [c for c in contexts_norm if c != "revisione"]
+
+        sections = payload.get("sections") or {}
+        sections_items = sections.items() if isinstance(sections, dict) else []
+
+        if work_contexts and not sections_items:
             validation["errors"].append("Almeno una sezione lavoro richiesta")
             validation["ready"] = False
         else:
-            for context, section in payload["sections"].items():
+            for context, section in sections_items:
+                if str(context).strip().lower() == "revisione":
+                    continue  # la revisione non richiede righe descrittive
                 rows = section.get("description_rows") or []
                 if not isinstance(rows, list) or not any(str(row).strip() for row in rows):
                     validation["errors"].append(f"Sezione '{context}' senza righe descrittive")
