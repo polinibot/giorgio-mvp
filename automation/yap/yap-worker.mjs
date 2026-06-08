@@ -2758,7 +2758,19 @@ async function writeWorkGrid(page, job) {
   const officina = sections.find((s) => String(s.reparto || "").toLowerCase() === "officina");
   const manHours = officina?.ore_man ?? officina?.man_hours ?? null;
 
-  const onGrid = await safeEvaluate(page, () => !!document.querySelector("td[yapcolumnid]")).catch(() => false);
+  // Rileva la griglia anche se il documento e' VUOTO (niente righe yapcolumnid):
+  // bottone "Aggiungi prima riga" / header colonne / testo "documento non ha righe".
+  let onGrid = false;
+  for (let i = 0; i < 16 && !onGrid; i += 1) {
+    onGrid = await safeEvaluate(page, () => {
+      const hasRows = !!document.querySelector("td[yapcolumnid]");
+      const hasAddBtn = [...document.querySelectorAll("button")].some((b) => /aggiungi prima riga/i.test(b.textContent || ""));
+      const hasEmpty = /il documento non ha righe/i.test(document.body?.innerText || "");
+      const hasHeader = [...document.querySelectorAll("th")].some((th) => /articolo/i.test(th.textContent || ""));
+      return hasRows || hasAddBtn || hasEmpty || hasHeader;
+    }).catch(() => false);
+    if (!onGrid) await page.waitForTimeout(400).catch(() => {});
+  }
   logAction("grid_check", { onGrid, manHours: manHours ?? null });
   if (!onGrid) return { ok: false, reason: "not_on_grid" };
 
@@ -2991,8 +3003,12 @@ async function writePracticeAndOdl(page, job, args) {
   // F2-ter: pausa per automatismi YAP (creazione ODL in background) - adaptive, env-tunable.
   // Poll più frequente => early-exit più rapido quando l'ODL è pronto; budget ridotto perché
   // gli step ODL successivi hanno comunque i propri retry di readiness (waitForOdlWorkspaceReady).
-  logPhase("automatismi_wait", "starting", { state: await getPracticeWorkspaceState(page) });
+  // Per il PREVENTIVO NON aspettiamo gli automatismi ODL (creano l'ODL, non il preventivo):
+  // quell'attesa bruciava ~77s a vuoto. Navighiamo subito alla pagina Preventivo e scriviamo.
+  const isPreventivoFlow = String(job?.appointment?.type || "").trim().toLowerCase() === "preventivo";
+  logPhase("automatismi_wait", isPreventivoFlow ? "skipped_preventivo" : "starting", { state: await getPracticeWorkspaceState(page) });
   let workspaceState = await getPracticeWorkspaceState(page);
+  if (!isPreventivoFlow) {
   let autoAttempts = 0;
   const autoPollMs = Number(process.env.YAP_AUTOMATISMI_POLL_MS) || 1000;
   // Budget aumentato a 30s (era 20s): su Railway headless/memoria limitata gli
@@ -3072,6 +3088,8 @@ async function writePracticeAndOdl(page, job, args) {
     await page.screenshot({ path: practiceShot, fullPage: true }).catch(() => {});
     writeReport.practiceScreenshot = practiceShot;
   }
+
+  } // fine attesa automatismi (saltata per preventivo)
 
   // RIMOSSO (best-effort): scrittura delle "note interne pratica" tramite ricerca
   // euristica di una textarea per keyword. Il campo "Note interne (pratica)" non
@@ -3165,12 +3183,19 @@ async function writePracticeAndOdl(page, job, args) {
       writeReport.pageEnumAfterRoute = parsedAfterRoute.pageEnum ?? (parsedAfterRoute.ok ? "no_page_field" : parsedAfterRoute.reason);
       writeReport.debug.odl.pageEnumAfterRoute = writeReport.pageEnumAfterRoute;
       // FLUSSO NUOVO — PREVENTIVO: scrivi le righe nella griglia documento (MANODOPERA per ora),
-      // instrumentato. Separato dal flusso ODL keyword-based (che resta invariato).
+      // instrumentato. Separato dal flusso ODL keyword-based; al termine RITORNA SUBITO
+      // (salta sezioni keyword + verify ODL: inutili e lentissimi per il preventivo).
       if (workPageEnum === "PREVENTIVO") {
         const gridResult = await writeWorkGrid(page, job).catch((e) => ({ ok: false, error: e?.message }));
         writeReport.gridResult = gridResult;
-        if (gridResult?.manodopera?.articolo) writeReport.openedOdl = true;
-        logPhase("grid_write", gridResult?.ok ? "done" : "failed", { manodopera: gridResult?.manodopera?.articolo || false });
+        const manOk = Boolean(gridResult?.manodopera?.articolo);
+        if (manOk) { writeReport.openedOdl = true; writeReport.odl.success = true; writeReport.odl.error = null; }
+        writeReport.ok = manOk;
+        writeReport.workspaceState = workspaceState;
+        writeReport.fields = buildFieldWriteReport(job, writeReport);
+        logPhase("grid_write", gridResult?.ok ? "done" : "failed", { manodopera: manOk });
+        _detachRpcTrace();
+        return writeReport;
       }
       if (isEffectiveOdlState(workspaceState)) {
         odlNavigated = true;
