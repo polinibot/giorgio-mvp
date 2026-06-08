@@ -3627,31 +3627,13 @@ async function fillAppointmentPopup(page, job) {
   const notes = buildNotesForPopup(jobToMapping(job));
   const plate = String(job.customer?.plate || "").trim().toUpperCase();
 
-  // ORDINE IMPORTANTE: facciamo data/ora e TAG PRIMA, e l'aggancio VEICOLO per ULTIMO.
-  // Motivo: selezionare il veicolo fa una fetch + re-render del popup; se il tag fosse
-  // scritto dopo, fallirebbe. Mettendo il veicolo per ultimo (subito prima del save)
-  // il suo re-render non disturba piu' niente.
-  await fillVisibleInput(page, dateIndex, toItalianDate(job.appointment.date));
-  await fillVisibleInput(page, timeIndexes[0], toYapTime(job.appointment.time));
-  await fillVisibleInput(page, timeIndexes[1], toYapTime(endTime));
-
-  const emptyAfterTimes = inputs.filter(
-    (item) => item.index > timeIndexes[1] && !item.value && item.width > 40,
-  );
-  if (notes && emptyAfterTimes[0]) {
-    await fillVisibleInput(page, emptyAfterTimes[0].index, notes).catch(() => {});
-  }
-
-  const yapTags = pickYapTagsFromJob(job);
-  const tagResult = await addYapTagChips(page, yapTags);
-  logAction("tags_written", { requested: yapTags, added: tagResult.added, failed: tagResult.failed, ok: tagResult.ok });
-
-  // --- VEICOLO (per ultimo) ---
+  // --- VEICOLO (per primo, sul campo Cosa) ---
   // 1. scrivo la targa nel Cosa (tastiera reale -> attiva l'autocomplete veicolo);
   // 2. guardo il popup di suggerimento:
   //    - "Nessun risultato trovato." -> veicolo NON in anagrafica (state=not_found, ok);
   //    - trova la targa -> la clicco (state=linked);
-  // 3. timeout: popup visto senza match -> failed; nessun popup -> not_found.
+  // 3. se linked: ATTENDO che il veicolo sia committato ("Nessun veicolo selezionato"
+  //    sparisce) cosi' il re-render finisce PRIMA di toccare data/ora/tag e prima del save.
   let vehicleState = "skipped"; // skipped|linked|not_found|failed
   const cosaX = cosaInput.x + Math.min(cosaInput.width / 2, 60);
   const cosaY = cosaInput.y + (cosaInput.height / 2);
@@ -3703,12 +3685,41 @@ async function fillAppointmentPopup(page, job) {
       }
     }
     if (!resolved) vehicleState = sawPopup ? "failed" : "not_found";
-    await page.waitForTimeout(vehicleState === "linked" ? 400 : 120).catch(() => {});
+    // Attendi il COMMIT del veicolo: "Nessun veicolo selezionato" deve sparire.
+    if (vehicleState === "linked") {
+      for (let i = 0; i < 15; i += 1) {
+        const committed = await safeEvaluate(page, () => {
+          const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+            .find((p) => /dettagli appuntamento/i.test(p.textContent || ""));
+          if (!popup) return false;
+          return !/nessun veicolo selezionato/i.test(popup.textContent || "");
+        }).catch(() => false);
+        if (committed) break;
+        await page.waitForTimeout(200).catch(() => {});
+      }
+    }
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
   const vehicleLinked = vehicleState === "linked";
   logAction("cosa_vehicle", { plate, cosaValue, vehicleState });
+
+  // --- DATA/ORA (il veicolo e' ora committato, popup stabile) ---
+  await fillVisibleInput(page, dateIndex, toItalianDate(job.appointment.date));
+  await fillVisibleInput(page, timeIndexes[0], toYapTime(job.appointment.time));
+  await fillVisibleInput(page, timeIndexes[1], toYapTime(endTime));
+
+  const emptyAfterTimes = inputs.filter(
+    (item) => item.index > timeIndexes[1] && !item.value && item.width > 40,
+  );
+  if (notes && emptyAfterTimes[0]) {
+    await fillVisibleInput(page, emptyAfterTimes[0].index, notes).catch(() => {});
+  }
+
+  // --- TAG (per ultimo, su popup ormai stabile) ---
+  const yapTags = pickYapTagsFromJob(job);
+  const tagResult = await addYapTagChips(page, yapTags);
+  logAction("tags_written", { requested: yapTags, added: tagResult.added, failed: tagResult.failed, ok: tagResult.ok });
 
   return {
     tagResult,
