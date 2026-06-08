@@ -1556,19 +1556,26 @@ async function waitForPracticeTransition(page, timeout = 6000) {
 
 async function openPracticeFromAppointment(page, job) {
   const searchTerms = [job.customer?.plate, pickCosaFromJob(job)].filter(Boolean);
+  // "text" (click sul link "Gestione pratica") PRIMA: e' piu' affidabile del click a
+  // coordinate sul footer. Il footer resta come fallback.
   const strategies = [
+    { type: "text" },
     { type: "footer", slotIndex: 2 },
     { type: "footer", slotIndex: 2, retry: true },
     { type: "text" },
   ];
   const attempts = [];
 
+  // Riapertura popup robusta: dopo un salvataggio (path creazione) il popup si chiude;
+  // l'evento appena creato puo' metterci un attimo a comparire in agenda -> ritenta.
   const ensurePopup = async () => {
-    const visible = await waitForAppointmentPopup(page, 600);
-    if (visible) return true;
-    const reopened = await clickAgendaEvent(page, searchTerms).catch(() => ({ success: false }));
-    if (!reopened?.success) return false;
-    return waitForAppointmentPopup(page, 1500);
+    if (await waitForAppointmentPopup(page, 600)) return true;
+    for (let i = 0; i < 3; i += 1) {
+      const reopened = await clickAgendaEvent(page, searchTerms).catch(() => ({ success: false }));
+      if (reopened?.success && await waitForAppointmentPopup(page, 1500)) return true;
+      await page.waitForTimeout(700).catch(() => {});
+    }
+    return false;
   };
 
   for (const strategy of strategies) {
