@@ -2726,29 +2726,28 @@ async function gridSelectArticolo(page, rowIndex, code) {
   return { ok: false, reason: "no_exact_match", codes: picked?.codes || [] };
 }
 
-// Imposta una cella (Qtà/Descrizione): le celle GWT non entrano in modifica col click
-// singolo -> serve DOPPIO click per far comparire l'input editabile. Poi digita.
+// Imposta una cella (Qtà/Descrizione). Diagnostica forte: cosa diventa attivo al click,
+// e dove finisce il testo digitato (per capire se la cella entra davvero in modifica).
 async function gridSetCell(page, rowIndex, colId, value) {
   const cell = await gridCellRect(page, rowIndex, colId);
   if (!cell) return { ok: false, reason: "cell_not_found" };
   await page.mouse.dblclick(cell.x, cell.y).catch(() => {});
   await page.waitForTimeout(220).catch(() => {});
-  // DIAGNOSTICA: dopo il doppio click compare un input editabile nella cella?
-  const afterClick = await safeEvaluate(page, () => {
+  // Stato attivo PRIMA di digitare.
+  const before = await safeEvaluate(page, () => {
     const ae = document.activeElement;
-    const editInputs = [...document.querySelectorAll("td[yapcolumnid] input, td[yapcolumnid] textarea")]
-      .map((el) => ({ tag: el.tagName, cls: (el.className || "").slice(0, 40), val: (el.value || "").slice(0, 20) }))
-      .slice(0, 4);
-    return {
-      active: ae ? { tag: ae.tagName, cls: (ae.className || "").slice(0, 40), editable: ae.isContentEditable } : null,
-      editInputs,
-    };
+    return ae ? { tag: ae.tagName, cls: (ae.className || "").slice(0, 40), val: (ae.value || "").slice(0, 20) } : null;
   }).catch(() => null);
   await page.keyboard.press("Control+A").catch(() => {});
   await page.keyboard.type(String(value), { delay: 45 }).catch(() => {});
+  // DOVE e' finito il testo? Leggo il valore dell'elemento attivo DOPO la digitazione.
+  const afterType = await safeEvaluate(page, () => {
+    const ae = document.activeElement;
+    return ae ? { tag: ae.tagName, cls: (ae.className || "").slice(0, 40), val: (ae.value || "").slice(0, 30) } : null;
+  }).catch(() => null);
   await page.keyboard.press("Enter").catch(() => {});
   await page.waitForTimeout(220).catch(() => {});
-  return { ok: true, afterClick };
+  return { ok: true, before, afterType, typedInActive: Boolean(afterType?.val && afterType.val.length > 0) };
 }
 
 // Legge il contenuto testuale delle celle chiave di una riga (readback).
@@ -2831,9 +2830,22 @@ async function writeWorkGrid(page, job) {
     const rc = await gridCellRect(page, 0, GRID_COL.descrizione);
     const newRow = Math.max(0, (rc?.rowCount || 1) - 1);
     const set = await gridSetCell(page, newRow, GRID_COL.descrizione, line.text);
-    const after = await gridDumpRow(page, newRow);
-    const written = Boolean(after?.descrizione && after.descrizione.length > 0);
-    logAction("grid_desc", { row: newRow, kind: line.kind, text: line.text.slice(0, 30), added: added.ok, set: set.ok, written, afterClick: set.afterClick, readback: after });
+    // Cerca il testo in TUTTA la griglia (non solo nella riga indovinata): cosi' so se
+    // e' entrato da qualche parte anche se l'indice riga e' sbagliato.
+    const anywhere = await safeEvaluate(page, (needle) => {
+      const n = String(needle || "").toUpperCase();
+      const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]"));
+      for (let i = 0; i < rows.length; i += 1) {
+        if ((rows[i].textContent || "").toUpperCase().includes(n)) return { found: true, rowIndex: i };
+      }
+      return { found: false, rowCount: rows.length };
+    }, line.text).catch(() => ({ found: false }));
+    const written = anywhere.found;
+    logAction("grid_desc", {
+      row: newRow, kind: line.kind, text: line.text.slice(0, 30), added: added.ok,
+      before: set.before, afterType: set.afterType, typedInActive: set.typedInActive,
+      writtenInGrid: written, anywhere,
+    });
     out.righe.push({ ...line, written });
   }
   return out;
