@@ -118,6 +118,12 @@ async def _yap_keepalive_loop():
     # Primo refresh dopo un breve ritardo per non rallentare lo startup.
     await asyncio.sleep(min(60, interval_s))
     while True:
+        # NON deve MAI bloccare un'operazione utente: se il lock YAP e' gia' occupato
+        # (sync/audit/delete in corso), salta del tutto questo ciclo e riprova dopo.
+        if _get_yap_run_lock().locked():
+            logger.info("YAP keep-alive: lock occupato, ciclo saltato")
+            await asyncio.sleep(interval_s)
+            continue
         state_db = SessionLocal()
         try:
             await _run_yap_script("yap-keepalive.mjs", [], timeout_seconds=120, db=state_db)
