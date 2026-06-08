@@ -2726,13 +2726,14 @@ async function gridSelectArticolo(page, rowIndex, code) {
   return { ok: false, reason: "no_exact_match", codes: picked?.codes || [] };
 }
 
-// Imposta la Qtà (o altra cella numerica) cliccandola e digitando.
+// Imposta una cella (Qtà/Descrizione): le celle GWT non entrano in modifica col click
+// singolo -> serve DOPPIO click per far comparire l'input editabile. Poi digita.
 async function gridSetCell(page, rowIndex, colId, value) {
   const cell = await gridCellRect(page, rowIndex, colId);
   if (!cell) return { ok: false, reason: "cell_not_found" };
-  await page.mouse.click(cell.x, cell.y).catch(() => {});
-  await page.waitForTimeout(180).catch(() => {});
-  // DIAGNOSTICA: cosa appare dopo il click sulla cella? (input? activeElement?)
+  await page.mouse.dblclick(cell.x, cell.y).catch(() => {});
+  await page.waitForTimeout(220).catch(() => {});
+  // DIAGNOSTICA: dopo il doppio click compare un input editabile nella cella?
   const afterClick = await safeEvaluate(page, () => {
     const ae = document.activeElement;
     const editInputs = [...document.querySelectorAll("td[yapcolumnid] input, td[yapcolumnid] textarea")]
@@ -2743,10 +2744,9 @@ async function gridSetCell(page, rowIndex, colId, value) {
       editInputs,
     };
   }).catch(() => null);
-  // Se è comparso un input editabile, prova prima la doppia-attivazione (dblclick) se serve.
   await page.keyboard.press("Control+A").catch(() => {});
   await page.keyboard.type(String(value), { delay: 45 }).catch(() => {});
-  await page.keyboard.press("Tab").catch(() => {});
+  await page.keyboard.press("Enter").catch(() => {});
   await page.waitForTimeout(220).catch(() => {});
   return { ok: true, afterClick };
 }
