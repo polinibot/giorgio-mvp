@@ -890,7 +890,11 @@ async function addYapTagChips(page, tags) {
     let ok = false;
     for (let attempt = 0; attempt < 2 && !ok; attempt += 1) {
       const target = await locateTagInput(page);
-      if (!target) { await page.waitForTimeout(300).catch(() => {}); continue; }
+      if (!target) {
+        logAction("tag_debug", { tag, attempt, located: false });
+        await page.waitForTimeout(300).catch(() => {});
+        continue;
+      }
 
       // Focus reale + pulizia eventuale residuo + digitazione con eventi veri.
       await page.mouse.click(target.x, target.y).catch(() => {});
@@ -900,34 +904,53 @@ async function addYapTagChips(page, tags) {
       await page.keyboard.type(tag, { delay: 45 }).catch(() => {});
       await page.waitForTimeout(450).catch(() => {});
 
-      // Clicca il suggerimento corrispondente nel popup di autocomplete.
-      const picked = await safeEvaluate(page, (wanted) => {
+      // Diagnostica + ricerca suggerimento: leggo cosa c'e' nel campo e nel popup.
+      const probe = await safeEvaluate(page, ({ wanted, tx, ty }) => {
         const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
         const isVisible = (node) => {
           const r = node.getBoundingClientRect();
           const s = window.getComputedStyle(node);
           return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
         };
-        const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox']")].filter(isVisible);
+        // valore attuale dell'input Tag (l'elemento sotto le coordinate cliccate)
+        const active = document.activeElement;
+        const inputVal = active && active.tagName === "INPUT" ? (active.value || "") : null;
+        const activeCls = active ? (active.className || "").slice(0, 50) : null;
+        const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox']")]
+          .filter(isVisible)
+          .filter((p) => !/dettagli appuntamento/i.test(p.textContent || ""));
+        const suggestions = [];
+        let match = null;
         for (const pop of pops) {
-          const items = [...pop.querySelectorAll("td, div, span, li, [role='option']")]
-            .filter(isVisible)
-            .filter((el) => norm(el.textContent).includes(norm(wanted)));
-          if (items.length) {
-            const r = items[0].getBoundingClientRect();
-            return { x: r.x + (r.width / 2), y: r.y + (r.height / 2) };
+          for (const el of [...pop.querySelectorAll("td, div, span, li, [role='option']")].filter(isVisible)) {
+            if (el.children.length !== 0) continue;
+            const t = (el.textContent || "").trim();
+            if (!t) continue;
+            if (suggestions.length < 8) suggestions.push(t.slice(0, 30));
+            if (!match && norm(t).includes(norm(wanted))) {
+              const r = el.getBoundingClientRect();
+              match = { x: r.x + (r.width / 2), y: r.y + (r.height / 2) };
+            }
           }
         }
-        return null;
-      }, tag).catch(() => null);
+        return { inputVal, activeCls, suggestions, match };
+      }, { wanted: tag, tx: target.x, ty: target.y }).catch(() => ({}));
 
-      if (picked) {
-        await page.mouse.click(picked.x, picked.y).catch(() => {});
+      if (probe?.match) {
+        await page.mouse.click(probe.match.x, probe.match.y).catch(() => {});
       } else {
         await page.keyboard.press("Enter").catch(() => {});
       }
       await page.waitForTimeout(260).catch(() => {});
       ok = await isTagConfirmed(page, tag);
+      logAction("tag_debug", {
+        tag, attempt, located: true, target,
+        inputVal: probe?.inputVal ?? null,
+        activeCls: probe?.activeCls ?? null,
+        suggestions: probe?.suggestions || [],
+        pickedSuggestion: Boolean(probe?.match),
+        confirmed: ok,
+      });
     }
 
     if (ok) added.push(tag);
@@ -3581,6 +3604,8 @@ async function dumpPopupFields(page) {
       type: el.getAttribute("type") || "",
       cls: (el.className || "").slice(0, 60),
       value: (el.value || "").slice(0, 30),
+      maxlength: el.getAttribute("maxlength") || "",
+      transform: (el.style && el.style.textTransform) || "",
       placeholder: el.getAttribute("placeholder") || "",
       label: labelFor(el),
     }));
