@@ -2624,6 +2624,167 @@ function hasVerifiedOdlWorkspace(writeReport) {
   ].some((state) => state === WORKSPACE_STATES.ODL_FULL || state === "odl_full");
 }
 
+// === GRIGLIA PREVENTIVO/ODL (righe-documento, GWT CellTable) =================
+// Mappa colonne (da DOM reale, attributo yapcolumnid sui <td>).
+const GRID_COL = { tipo: 2, articolo: 3, descrizione: 4, udm: 7, qta: 8, prezzo: 9 };
+
+// Coordinate del centro di una cella della griglia documento (righe con td[yapcolumnid]).
+async function gridCellRect(page, rowIndex, colId) {
+  return safeEvaluate(page, ({ rowIndex, colId }) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    // righe della griglia documento = tr che contengono celle con yapcolumnid (esclude il popup catalogo)
+    const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]") && isVisible(tr));
+    const row = rows[rowIndex];
+    if (!row) return null;
+    const cell = row.querySelector(`td[yapcolumnid="${colId}"]`);
+    if (!cell) return null;
+    const r = cell.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2, rowCount: rows.length };
+  }, { rowIndex, colId }).catch(() => null);
+}
+
+// Clicca "Aggiungi prima riga" (1ª) oppure l'anchor "T" (yapcolumnid=13) per le successive.
+async function gridAddRow(page, hasRows) {
+  const clicked = await safeEvaluate(page, (hasRows) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    if (!hasRows) {
+      const btn = [...document.querySelectorAll("button.gwt-Button, button")]
+        .find((b) => /aggiungi prima riga/i.test(b.textContent || ""));
+      if (btn && isVisible(btn)) { btn.click(); return { ok: true, via: "first_row_button" }; }
+    }
+    // righe esistenti: clicca l'anchor "T" (aggiungi) nell'ultima riga, colonna 13
+    const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector('td[yapcolumnid="13"]') && isVisible(tr));
+    const last = rows[rows.length - 1];
+    const addAnchor = last?.querySelector('td[yapcolumnid="13"] a.gwt-Anchor');
+    if (addAnchor) { addAnchor.click(); return { ok: true, via: "add_anchor" }; }
+    return { ok: false };
+  }, hasRows).catch(() => ({ ok: false }));
+  await page.waitForTimeout(400).catch(() => {});
+  return clicked;
+}
+
+// Seleziona un articolo per CODICE ESATTO dal catalogo autocomplete.
+async function gridSelectArticolo(page, rowIndex, code) {
+  const cell = await gridCellRect(page, rowIndex, GRID_COL.articolo);
+  if (!cell) return { ok: false, reason: "cell_not_found" };
+  await page.mouse.click(cell.x, cell.y).catch(() => {});
+  await page.waitForTimeout(200).catch(() => {});
+  await page.keyboard.type(code, { delay: 45 }).catch(() => {});
+  // il catalogo fa una lookup server: pollo fino a ~3s per i risultati
+  let picked = null;
+  for (let i = 0; i < 12 && !picked; i += 1) {
+    await page.waitForTimeout(250).catch(() => {});
+    picked = await safeEvaluate(page, (wanted) => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
+      // righe del popup catalogo = tr SENZA yapcolumnid ma con uno span in grassetto (codice)
+      const rows = [...document.querySelectorAll("tr")].filter((tr) =>
+        !tr.querySelector("[yapcolumnid]") && isVisible(tr)
+        && [...tr.querySelectorAll("span")].some((s) => /font-weight:\s*bolder/i.test(s.getAttribute("style") || "")));
+      const results = rows.map((tr) => {
+        const bold = [...tr.querySelectorAll("span")].find((s) => /font-weight:\s*bolder/i.test(s.getAttribute("style") || ""));
+        return { tr, code: norm(bold?.textContent) };
+      });
+      const exact = results.find((r) => r.code === norm(wanted));
+      if (exact) {
+        const rr = exact.tr.getBoundingClientRect();
+        return { x: rr.x + rr.width / 2, y: rr.y + rr.height / 2, codes: results.slice(0, 6).map((r) => r.code) };
+      }
+      return results.length ? { x: null, y: null, codes: results.slice(0, 6).map((r) => r.code) } : null;
+    }, code).catch(() => null);
+    if (picked && picked.x == null) {
+      // popup presente ma nessun match esatto ancora: continua a pollare
+      if (i >= 6) break;
+      picked = null;
+    }
+  }
+  if (picked && picked.x != null) {
+    await page.mouse.click(picked.x, picked.y).catch(() => {});
+    await page.waitForTimeout(400).catch(() => {});
+    return { ok: true, codes: picked.codes };
+  }
+  await page.keyboard.press("Escape").catch(() => {});
+  return { ok: false, reason: "no_exact_match", codes: picked?.codes || [] };
+}
+
+// Imposta la Qtà (o altra cella numerica) cliccandola e digitando.
+async function gridSetCell(page, rowIndex, colId, value) {
+  const cell = await gridCellRect(page, rowIndex, colId);
+  if (!cell) return { ok: false, reason: "cell_not_found" };
+  await page.mouse.click(cell.x, cell.y).catch(() => {});
+  await page.waitForTimeout(160).catch(() => {});
+  await page.keyboard.press("Control+A").catch(() => {});
+  await page.keyboard.type(String(value), { delay: 45 }).catch(() => {});
+  await page.keyboard.press("Tab").catch(() => {});
+  await page.waitForTimeout(220).catch(() => {});
+  return { ok: true };
+}
+
+// Legge il contenuto testuale delle celle chiave di una riga (readback).
+async function gridDumpRow(page, rowIndex) {
+  return safeEvaluate(page, ({ rowIndex, COL }) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]") && isVisible(tr));
+    const row = rows[rowIndex];
+    if (!row) return { found: false };
+    const txt = (id) => (row.querySelector(`td[yapcolumnid="${id}"]`)?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40);
+    return {
+      found: true,
+      tipo: txt(COL.tipo), articolo: txt(COL.articolo), descrizione: txt(COL.descrizione),
+      udm: txt(COL.udm), qta: txt(COL.qta), prezzo: txt(COL.prezzo),
+    };
+  }, { rowIndex, COL: GRID_COL }).catch(() => ({ found: false }));
+}
+
+// Orchestratore: scrive le righe del documento (Preventivo/ODL). Per ora: MANODOPERA.
+async function writeWorkGrid(page, job) {
+  const sections = job.sections || [];
+  const officina = sections.find((s) => String(s.reparto || "").toLowerCase() === "officina");
+  const manHours = officina?.ore_man ?? officina?.man_hours ?? null;
+
+  const onGrid = await safeEvaluate(page, () => !!document.querySelector("td[yapcolumnid]")).catch(() => false);
+  logAction("grid_check", { onGrid, manHours: manHours ?? null });
+  if (!onGrid) return { ok: false, reason: "not_on_grid" };
+
+  const out = { ok: true, manodopera: null };
+  if (manHours != null) {
+    const hasRows = await safeEvaluate(page, () =>
+      [...document.querySelectorAll("tr")].some((tr) => tr.querySelector("td[yapcolumnid]"))
+    ).catch(() => false);
+    const added = await gridAddRow(page, hasRows);
+    logAction("grid_add_row", added);
+    const rc = await gridCellRect(page, 0, GRID_COL.articolo);
+    const newRow = Math.max(0, (rc?.rowCount || 1) - 1);
+    const art = await gridSelectArticolo(page, newRow, "MAN");
+    logAction("grid_articolo", { row: newRow, code: "MAN", ...art });
+    let qta = null;
+    if (art.ok) {
+      qta = await gridSetCell(page, newRow, GRID_COL.qta, manHours);
+      logAction("grid_qta", { row: newRow, value: manHours, ...qta });
+    }
+    const after = await gridDumpRow(page, newRow);
+    logAction("grid_row_after", after);
+    out.manodopera = { added: added.ok, articolo: art.ok, qta: Boolean(qta?.ok), readback: after };
+  }
+  return out;
+}
+
 // Diagnostica (read-only): mappa lo stato della pratica dopo "Gestione pratica".
 // Cattura URL/hash, i TAB disponibili (Preventivi/ODL/Dettagli...) e gli input della
 // tabella visibile. Serve per ricostruire la navigazione e i campi precisi (come popup_fields).
@@ -3003,6 +3164,14 @@ async function writePracticeAndOdl(page, job, args) {
       const parsedAfterRoute = parsePraticaHashPayload(urlAfterRoute);
       writeReport.pageEnumAfterRoute = parsedAfterRoute.pageEnum ?? (parsedAfterRoute.ok ? "no_page_field" : parsedAfterRoute.reason);
       writeReport.debug.odl.pageEnumAfterRoute = writeReport.pageEnumAfterRoute;
+      // FLUSSO NUOVO — PREVENTIVO: scrivi le righe nella griglia documento (MANODOPERA per ora),
+      // instrumentato. Separato dal flusso ODL keyword-based (che resta invariato).
+      if (workPageEnum === "PREVENTIVO") {
+        const gridResult = await writeWorkGrid(page, job).catch((e) => ({ ok: false, error: e?.message }));
+        writeReport.gridResult = gridResult;
+        if (gridResult?.manodopera?.articolo) writeReport.openedOdl = true;
+        logPhase("grid_write", gridResult?.ok ? "done" : "failed", { manodopera: gridResult?.manodopera?.articolo || false });
+      }
       if (isEffectiveOdlState(workspaceState)) {
         odlNavigated = true;
         writeReport.odlRouteEffective = true;
