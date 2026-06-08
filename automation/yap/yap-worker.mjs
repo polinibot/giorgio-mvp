@@ -1794,7 +1794,8 @@ async function openOdlByRoute(page, currentUrl, pageEnum = "ODL") {
       IdCompanyFolder: parsed.idCompanyFolder,
       Page: pageEnum,
       PageEnum: pageEnum,
-      ShowOdlMarcatempo: true,
+      // Il marcatempo ODL non si applica alla pagina Preventivo.
+      ShowOdlMarcatempo: pageEnum !== "PREVENTIVO",
     };
     const token = JSON.stringify(nextPayload);
     await page.evaluate((t) => {
@@ -1834,7 +1835,8 @@ async function openOdlByFullReload(page, currentUrl, pageEnum = "ODL") {
       IdCompanyFolder: parsed.idCompanyFolder,
       Page: pageEnum,
       PageEnum: pageEnum,
-      ShowOdlMarcatempo: true,
+      // Il marcatempo ODL non si applica alla pagina Preventivo.
+      ShowOdlMarcatempo: pageEnum !== "PREVENTIVO",
     };
     const baseUrl = new URL(currentUrl || page.url());
     baseUrl.hash = `!pratica|${JSON.stringify(nextPayload)}`;
@@ -2934,10 +2936,15 @@ async function writePracticeAndOdl(page, job, args) {
   // DIAGNOSTICA: stato pratica + tab disponibili (per mappare Preventivi/ODL e la tabella).
   logAction("practice_state", await dumpPracticeState(page));
 
-  // F3+F4: naviga all'ODL via hash in-place + gating su RPC
+  // F3+F4: naviga alla pagina di lavoro via hash in-place + gating su RPC.
+  // PageEnum REALE (da URL YAP): preventivo -> "PREVENTIVO", ordine -> "ODL".
+  // (Stessa tabella su entrambe; cambia solo la pagina e i tag.)
   let odlNavigated = false;
   const practiceUrl = page.url();
-  const workPageEnum = "ODL";
+  const workPageEnum = String(job?.appointment?.type || "").trim().toLowerCase() === "preventivo"
+    ? "PREVENTIVO"
+    : "ODL";
+  logAction("work_page", { practiceType: job?.appointment?.type || null, pageEnum: workPageEnum });
   writeReport.debug.odl = {
     routeAttempted: false,
     routeResult: null,
@@ -2972,6 +2979,9 @@ async function writePracticeAndOdl(page, job, args) {
       await waitForOdlWorkspaceReady(page, Number(process.env.YAP_ODL_DOM_WAIT_MS) || 6000);
       await page.waitForTimeout(400);
       workspaceState = await getPracticeWorkspaceState(page);
+      // DIAGNOSTICA: DOM della pagina di lavoro dopo la navigazione (Preventivo/ODL):
+      // tab + input della tabella, per mappare i campi precisi.
+      logAction("work_page_state", { pageEnum: workPageEnum, ...(await dumpPracticeState(page)) });
       // Attesa che "Recupero dettagli pratica in corso..." finisca dopo la route ODL.
       // Alzato da 10 a 25 tentativi (8s -> 20s): su link lento la RPC dei dettagli
       // pratica di YAP può metterci di più; con EU+RAM esce comunque presto (early-exit
