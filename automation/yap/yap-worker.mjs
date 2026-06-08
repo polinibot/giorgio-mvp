@@ -2622,6 +2622,45 @@ function hasVerifiedOdlWorkspace(writeReport) {
   ].some((state) => state === WORKSPACE_STATES.ODL_FULL || state === "odl_full");
 }
 
+// Diagnostica (read-only): mappa lo stato della pratica dopo "Gestione pratica".
+// Cattura URL/hash, i TAB disponibili (Preventivi/ODL/Dettagli...) e gli input della
+// tabella visibile. Serve per ricostruire la navigazione e i campi precisi (come popup_fields).
+async function dumpPracticeState(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 2 && r.height > 2 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const tabs = [...document.querySelectorAll(".gwt-TabLayoutPanelTab, [role='tab']")]
+      .filter(isVisible)
+      .map((el) => ({
+        txt: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 30),
+        cls: (el.className || "").slice(0, 50),
+        selected: /selected/i.test(el.className || ""),
+      }))
+      .slice(0, 16);
+    const inputs = [...document.querySelectorAll("input, textarea")]
+      .filter(isVisible)
+      .map((el) => ({
+        tag: el.tagName,
+        type: el.getAttribute("type") || "",
+        cls: (el.className || "").slice(0, 50),
+        value: (el.value || "").slice(0, 20),
+        maxlength: el.getAttribute("maxlength") || "",
+        ph: el.getAttribute("placeholder") || "",
+      }))
+      .slice(0, 30);
+    return {
+      hash: (location.hash || "").slice(0, 200),
+      tabCount: tabs.length,
+      tabs,
+      inputCount: inputs.length,
+      inputs,
+    };
+  }).catch(() => ({ error: true }));
+}
+
 async function writePracticeAndOdl(page, job, args) {
   const summary = buildOdlSummaryText(job);
   // CATTURA RPC: registra il traffico GWT /yap/action/* durante apertura pratica+ODL.
@@ -2892,6 +2931,9 @@ async function writePracticeAndOdl(page, job, args) {
     _detachRpcTrace();
     return writeReport; // early return — niente da scrivere senza veicolo
   }
+  // DIAGNOSTICA: stato pratica + tab disponibili (per mappare Preventivi/ODL e la tabella).
+  logAction("practice_state", await dumpPracticeState(page));
+
   // F3+F4: naviga all'ODL via hash in-place + gating su RPC
   let odlNavigated = false;
   const practiceUrl = page.url();
