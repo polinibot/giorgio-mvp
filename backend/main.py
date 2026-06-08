@@ -1800,13 +1800,20 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
     queued_started_monotonic = time.perf_counter()
 
     lock = _get_yap_run_lock()
+    # I sync durano ~70s (re-login). Con timeout 10s, un secondo sync lanciato mentre
+    # il primo gira falliva subito (YAP_BUSY). Ora ASPETTIAMO che il primo finisca: il
+    # secondo si mette in coda e parte dopo, invece di dare errore.
     try:
-        await asyncio.wait_for(lock.acquire(), timeout=10)
+        _lock_wait_s = int(os.getenv("YAP_LOCK_WAIT_S", "100") or "100")
+    except (TypeError, ValueError):
+        _lock_wait_s = 100
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=_lock_wait_s)
     except asyncio.TimeoutError:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail={
-                "message": "Un'altra operazione YAP Ã¨ giÃ  in corso. Attendi il completamento e riprova.",
+                "message": "Un sync YAP e ancora in corso. Attendi qualche secondo e riprova.",
                 "error_code": "YAP_BUSY",
                 "next_action": "retry",
             },
