@@ -2724,12 +2724,24 @@ async function gridSetCell(page, rowIndex, colId, value) {
   const cell = await gridCellRect(page, rowIndex, colId);
   if (!cell) return { ok: false, reason: "cell_not_found" };
   await page.mouse.click(cell.x, cell.y).catch(() => {});
-  await page.waitForTimeout(160).catch(() => {});
+  await page.waitForTimeout(180).catch(() => {});
+  // DIAGNOSTICA: cosa appare dopo il click sulla cella? (input? activeElement?)
+  const afterClick = await safeEvaluate(page, () => {
+    const ae = document.activeElement;
+    const editInputs = [...document.querySelectorAll("td[yapcolumnid] input, td[yapcolumnid] textarea")]
+      .map((el) => ({ tag: el.tagName, cls: (el.className || "").slice(0, 40), val: (el.value || "").slice(0, 20) }))
+      .slice(0, 4);
+    return {
+      active: ae ? { tag: ae.tagName, cls: (ae.className || "").slice(0, 40), editable: ae.isContentEditable } : null,
+      editInputs,
+    };
+  }).catch(() => null);
+  // Se è comparso un input editabile, prova prima la doppia-attivazione (dblclick) se serve.
   await page.keyboard.press("Control+A").catch(() => {});
   await page.keyboard.type(String(value), { delay: 45 }).catch(() => {});
   await page.keyboard.press("Tab").catch(() => {});
   await page.waitForTimeout(220).catch(() => {});
-  return { ok: true };
+  return { ok: true, afterClick };
 }
 
 // Legge il contenuto testuale delle celle chiave di una riga (readback).
@@ -2814,7 +2826,7 @@ async function writeWorkGrid(page, job) {
     const set = await gridSetCell(page, newRow, GRID_COL.descrizione, line.text);
     const after = await gridDumpRow(page, newRow);
     const written = Boolean(after?.descrizione && after.descrizione.length > 0);
-    logAction("grid_desc", { row: newRow, kind: line.kind, text: line.text.slice(0, 30), added: added.ok, set: set.ok, written, readback: after });
+    logAction("grid_desc", { row: newRow, kind: line.kind, text: line.text.slice(0, 30), added: added.ok, set: set.ok, written, afterClick: set.afterClick, readback: after });
     out.righe.push({ ...line, written });
   }
   return out;
