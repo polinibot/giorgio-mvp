@@ -2794,6 +2794,29 @@ async function writeWorkGrid(page, job) {
     logAction("grid_row_after", after);
     out.manodopera = { added: added.ok, articolo: art.ok, qta: Boolean(qta?.ok), readback: after };
   }
+
+  // Descrizioni libere + ricambi come righe descrittive (i nomi non sono codici catalogo).
+  const descrLines = [];
+  for (const d of (officina?.descrizioni || [])) {
+    const t = String(d || "").trim();
+    if (t) descrLines.push({ kind: "descrizione", text: t });
+  }
+  for (const r of (officina?.ricambi || [])) {
+    const name = r?.name || r?.nome;
+    const qty = r?.quantity || r?.quantita;
+    if (name) descrLines.push({ kind: "ricambio", text: `${String(name).trim()}${qty ? ` x ${String(qty).trim()}` : ""}` });
+  }
+  out.righe = [];
+  for (const line of descrLines) {
+    const added = await gridAddRow(page, true);
+    const rc = await gridCellRect(page, 0, GRID_COL.descrizione);
+    const newRow = Math.max(0, (rc?.rowCount || 1) - 1);
+    const set = await gridSetCell(page, newRow, GRID_COL.descrizione, line.text);
+    const after = await gridDumpRow(page, newRow);
+    const written = Boolean(after?.descrizione && after.descrizione.length > 0);
+    logAction("grid_desc", { row: newRow, kind: line.kind, text: line.text.slice(0, 30), added: added.ok, set: set.ok, written, readback: after });
+    out.righe.push({ ...line, written });
+  }
   return out;
 }
 
@@ -4062,6 +4085,29 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
   }
 
   const wr = managementWrite && typeof managementWrite === "object" ? managementWrite : null;
+
+  // PREVENTIVO (griglia documento): la verifica si basa sull'esito REALE della
+  // scrittura griglia, NON sui vecchi needle ODL (che non si applicano alla pagina
+  // Preventivo). Niente note.interne (rimosse). Onesto: presente solo cio' che e' scritto.
+  if (wr?.gridResult) {
+    const g = wr.gridResult;
+    if (g.manodopera?.articolo) {
+      present.push({ field: "preventivo.manodopera", expected: `MAN (${g.manodopera?.readback?.qta || "ore"})` });
+    } else {
+      missing.push({ field: "preventivo.manodopera", expected: "riga manodopera (MAN)" });
+    }
+    for (const r of (g.righe || [])) {
+      if (r.written) present.push({ field: `preventivo.${r.kind}`, expected: r.text });
+      else missing.push({ field: `preventivo.${r.kind}`, expected: r.text, found: "non scritto" });
+    }
+    return {
+      verified: missing.length === 0,
+      present,
+      missing,
+      error: missing.length ? `Da ricontrollare: ${missing.map((m) => m.field).join(", ")}` : undefined,
+      summary: { present: present.length, missing: missing.length, fields: present.map((p) => p.field), source: "preventivo_grid" },
+    };
+  }
 
   // ODL richiesto ma non aperto/scritto: verifica fallita con dettaglio.
   if (!wr || (!wr.openedOdl && wr.ok === false)) {
