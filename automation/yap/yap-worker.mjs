@@ -885,45 +885,52 @@ async function addYapTagChips(page, tags) {
     // Se è già presente, salta.
     if (await isTagConfirmed(page, tag)) { added.push(tag); continue; }
 
-    const target = await locateTagInput(page);
-    if (!target) { failed.push(tag); continue; }
+    // Fino a 2 tentativi: dopo l'aggancio veicolo il popup puo' essere ancora
+    // "in movimento" (fetch + re-render) e il primo tentativo puo' fallire.
+    let ok = false;
+    for (let attempt = 0; attempt < 2 && !ok; attempt += 1) {
+      const target = await locateTagInput(page);
+      if (!target) { await page.waitForTimeout(300).catch(() => {}); continue; }
 
-    // Focus reale + pulizia eventuale residuo + digitazione con eventi veri.
-    await page.mouse.click(target.x, target.y).catch(() => {});
-    await page.waitForTimeout(120).catch(() => {});
-    await page.keyboard.press("Control+A").catch(() => {});
-    await page.keyboard.press("Delete").catch(() => {});
-    await page.keyboard.type(tag, { delay: 40 }).catch(() => {});
-    await page.waitForTimeout(350).catch(() => {});
+      // Focus reale + pulizia eventuale residuo + digitazione con eventi veri.
+      await page.mouse.click(target.x, target.y).catch(() => {});
+      await page.waitForTimeout(140).catch(() => {});
+      await page.keyboard.press("Control+A").catch(() => {});
+      await page.keyboard.press("Delete").catch(() => {});
+      await page.keyboard.type(tag, { delay: 45 }).catch(() => {});
+      await page.waitForTimeout(450).catch(() => {});
 
-    // Clicca il suggerimento corrispondente nel popup di autocomplete.
-    const picked = await safeEvaluate(page, (wanted) => {
-      const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
-      const isVisible = (node) => {
-        const r = node.getBoundingClientRect();
-        const s = window.getComputedStyle(node);
-        return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
-      };
-      const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox']")].filter(isVisible);
-      for (const pop of pops) {
-        const items = [...pop.querySelectorAll("td, div, span, li, [role='option']")]
-          .filter(isVisible)
-          .filter((el) => norm(el.textContent).includes(norm(wanted)));
-        if (items.length) {
-          items[0].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-          items[0].dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-          return true;
+      // Clicca il suggerimento corrispondente nel popup di autocomplete.
+      const picked = await safeEvaluate(page, (wanted) => {
+        const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const isVisible = (node) => {
+          const r = node.getBoundingClientRect();
+          const s = window.getComputedStyle(node);
+          return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+        };
+        const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-PopupPanel, [role='listbox']")].filter(isVisible);
+        for (const pop of pops) {
+          const items = [...pop.querySelectorAll("td, div, span, li, [role='option']")]
+            .filter(isVisible)
+            .filter((el) => norm(el.textContent).includes(norm(wanted)));
+          if (items.length) {
+            const r = items[0].getBoundingClientRect();
+            return { x: r.x + (r.width / 2), y: r.y + (r.height / 2) };
+          }
         }
+        return null;
+      }, tag).catch(() => null);
+
+      if (picked) {
+        await page.mouse.click(picked.x, picked.y).catch(() => {});
+      } else {
+        await page.keyboard.press("Enter").catch(() => {});
       }
-      return false;
-    }, tag).catch(() => false);
-
-    if (!picked) {
-      await page.keyboard.press("Enter").catch(() => {});
+      await page.waitForTimeout(260).catch(() => {});
+      ok = await isTagConfirmed(page, tag);
     }
-    await page.waitForTimeout(220).catch(() => {});
 
-    if (await isTagConfirmed(page, tag)) added.push(tag);
+    if (ok) added.push(tag);
     else failed.push(tag);
   }
 
@@ -3683,7 +3690,9 @@ async function fillAppointmentPopup(page, job) {
     // Timeout: se abbiamo visto un popup ma non un match -> failed; se mai nessun
     // popup -> il veicolo non e' proponibile = trattalo come non in anagrafica.
     if (!resolved) vehicleState = sawPopup ? "failed" : "not_found";
-    await page.waitForTimeout(150).catch(() => {});
+    // Se il veicolo e' stato agganciato, il popup fa una fetch + re-render: attendi
+    // che si stabilizzi PRIMA di toccare il campo Tag (altrimenti il tag fallisce).
+    await page.waitForTimeout(vehicleState === "linked" ? 600 : 150).catch(() => {});
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
