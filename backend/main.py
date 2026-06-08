@@ -104,8 +104,12 @@ async def _yap_keepalive_loop():
       YAP_KEEPALIVE_ENABLED  default "1"  (metti "0" per disattivare)
       YAP_KEEPALIVE_MINUTES  default "10" (intervallo; deve stare sotto il TTL sessione YAP)
     """
-    if str(os.getenv("YAP_KEEPALIVE_ENABLED", "1")).strip() == "0":
-        logger.info("YAP keep-alive disabilitato (YAP_KEEPALIVE_ENABLED=0)")
+    # Default DISATTIVATO: i log hanno provato che la sessione YAP NON e' riattivabile
+    # via sessionStorage (anche con session_storage_injected, YAP rifa' il login). Quindi
+    # il keep-alive non evita il login -> e' inutile e consuma risorse. Riattivabile con
+    # YAP_KEEPALIVE_ENABLED=1 se in futuro la sessione diventasse riusabile.
+    if str(os.getenv("YAP_KEEPALIVE_ENABLED", "0")).strip() != "1":
+        logger.info("YAP keep-alive disabilitato (default: sessione YAP non riusabile)")
         return
     try:
         interval_min = float(os.getenv("YAP_KEEPALIVE_MINUTES", "10"))
