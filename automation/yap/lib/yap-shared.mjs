@@ -392,6 +392,11 @@ export async function createYapRuntime(
         },
         { resolveModule, cwd },
       );
+      // FIX BOTTLENECK: il token di sessione YAP vive in sessionStorage, che NON
+      // sopravvive tra i run nemmeno col profilo persistente. Va re-iniettato qui,
+      // altrimenti ogni run rifa' il login completo (~20s). Prima questa chiamata
+      // c'era solo nel ramo fallback (non persistente) -> sessione mai riusata.
+      await applyYapSessionStorage(context, { freshLogin });
       telemetry.session_mode = "persistent_profile";
       telemetry.used_persistent_profile = true;
     } else {
