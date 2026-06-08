@@ -2750,6 +2750,42 @@ async function gridSetCell(page, rowIndex, colId, value) {
   return { ok: true, before, afterType, typedInActive: Boolean(afterType?.val && afterType.val.length > 0) };
 }
 
+// Scrive nella cella Descrizione della riga in modifica targettando direttamente
+// l'INPUT (il piu' largo della griglia, sotto la testata), non le coordinate della cella.
+async function gridTypeDescrizione(page, text) {
+  const target = await safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 30 && r.height > 6 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    // Input di testo nella zona "Righe" (sotto la testata, top > 250): la Descrizione
+    // e' di gran lunga il piu' largo.
+    const inputs = [...document.querySelectorAll("input.gwt-TextBox[type='text'], input.gwt-TextBox:not([type])")]
+      .filter(isVisible)
+      .filter((el) => el.getBoundingClientRect().top > 250);
+    if (!inputs.length) return null;
+    inputs.sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width);
+    const el = inputs[0];
+    const r = el.getBoundingClientRect();
+    return { x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: Math.round(r.width), cls: (el.className || "").slice(0, 50) };
+  }).catch(() => null);
+  if (!target) return { ok: false, reason: "descr_input_not_found" };
+  await page.mouse.click(target.x, target.y).catch(() => {});
+  await page.waitForTimeout(120).catch(() => {});
+  await page.keyboard.press("Control+A").catch(() => {});
+  await page.keyboard.type(String(text), { delay: 40 }).catch(() => {});
+  await page.keyboard.press("Tab").catch(() => {});
+  await page.waitForTimeout(200).catch(() => {});
+  // Readback: il valore e' rimasto nell'input?
+  const value = await safeEvaluate(page, ({ tx, ty }) => {
+    const el = document.elementFromPoint(tx, ty);
+    const input = el && el.tagName === "INPUT" ? el : (el ? el.querySelector("input") : null);
+    return input ? (input.value || "") : null;
+  }, { tx: target.x, ty: target.y }).catch(() => null);
+  return { ok: true, target, value };
+}
+
 // Legge il contenuto testuale delle celle chiave di una riga (readback).
 async function gridDumpRow(page, rowIndex) {
   return safeEvaluate(page, ({ rowIndex, COL }) => {
@@ -2827,11 +2863,10 @@ async function writeWorkGrid(page, job) {
   out.righe = [];
   for (const line of descrLines) {
     const added = await gridAddRow(page, true);
-    const rc = await gridCellRect(page, 0, GRID_COL.descrizione);
-    const newRow = Math.max(0, (rc?.rowCount || 1) - 1);
-    const set = await gridSetCell(page, newRow, GRID_COL.descrizione, line.text);
-    // Cerca il testo in TUTTA la griglia (non solo nella riga indovinata): cosi' so se
-    // e' entrato da qualche parte anche se l'indice riga e' sbagliato.
+    await page.waitForTimeout(300).catch(() => {});
+    // Scrive direttamente nell'input Descrizione (il piu' largo) della riga in modifica.
+    const set = await gridTypeDescrizione(page, line.text);
+    // Verifica: il testo compare in una qualsiasi riga della griglia?
     const anywhere = await safeEvaluate(page, (needle) => {
       const n = String(needle || "").toUpperCase();
       const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]"));
@@ -2840,11 +2875,10 @@ async function writeWorkGrid(page, job) {
       }
       return { found: false, rowCount: rows.length };
     }, line.text).catch(() => ({ found: false }));
-    const written = anywhere.found;
+    const written = anywhere.found || Boolean(set.value && set.value.length > 0);
     logAction("grid_desc", {
-      row: newRow, kind: line.kind, text: line.text.slice(0, 30), added: added.ok,
-      before: set.before, afterType: set.afterType, typedInActive: set.typedInActive,
-      writtenInGrid: written, anywhere,
+      kind: line.kind, text: line.text.slice(0, 30), added: added.ok,
+      descrInput: set.target, inputValue: set.value, writtenInGrid: anywhere.found, written,
     });
     out.righe.push({ ...line, written });
   }
