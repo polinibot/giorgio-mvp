@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09f-cosa-prefill-no-plate";
+const WORKER_BUILD = "2026-06-09g-vehicle-target-and-tag-retry";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1928,33 +1928,17 @@ async function locateAppointmentVehicleControls(page) {
       })
       .filter((item) => item.text && /veicolo|nessun veicolo selezionato/.test(item.text));
 
-    const vehicleLabel = rows.find((item) => item.text === "veicolo" || /nessun veicolo selezionato/.test(item.text));
-    const labelBox = vehicleLabel?.el?.closest?.(".LCWVQRD-jb-x") || vehicleLabel?.el?.parentElement || null;
-    const anchors = labelBox
-      ? [...labelBox.querySelectorAll("a.gwt-Anchor")]
-          .filter(isVisible)
-          .map((el) => {
-            const r = el.getBoundingClientRect();
-            return {
-              x: r.x + (r.width / 2),
-              y: r.y + (r.height / 2),
-              text: (el.textContent || "").replace(/\s+/g, " ").trim(),
-              area: r.width * r.height,
-            };
-          })
-      : [];
-
-    const target = anchors[0]
-      || anchors[1]
-      || rows.sort((a, b) => a.area - b.area || a.rect.y - b.rect.y || a.rect.x - b.rect.x)[0]
+    const target = rows
+      .sort((a, b) => a.area - b.area || a.rect.y - b.rect.y || a.rect.x - b.rect.x)[0]
       || null;
     if (!target) return null;
+    const r = target.rect;
     return {
-      x: target.x,
-      y: target.y,
-      strategy: target.text ? `anchor:${target.text}` : (vehicleLabel?.label ? `label:${vehicleLabel.label}` : `text:${vehicleLabel?.text?.slice(0, 40) || ""}`),
-      kind: anchors.length ? "anchor" : "text",
-      anchors: anchors.map((a) => a.text || ""),
+      x: r.x + (r.width / 2),
+      y: r.y + (r.height / 2),
+      strategy: target.text ? `text:${target.text.slice(0, 40)}` : (target.label ? `label:${target.label}` : "vehicle_target"),
+      kind: "row",
+      text: target.text.slice(0, 80),
     };
   }).catch(() => null);
 }
@@ -2064,36 +2048,9 @@ async function selectVehicleByPlate(page, plate, { skipInputFallback = false } =
   const cleanPlate = String(plate).trim().toUpperCase();
 
   const vehicleControls = await locateAppointmentVehicleControls(page).catch(() => null);
-  if (vehicleControls?.kind === "anchor") {
-    for (const anchor of vehicleControls.anchors || []) {
-      if (!anchor) continue;
-      const action = await safeEvaluate(page, (wanted) => {
-        const isVisible = (el) => {
-          const r = el.getBoundingClientRect();
-          const s = window.getComputedStyle(el);
-          return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
-        };
-        const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
-          .find((p) => isVisible(p) && /dettagli appuntamento/i.test(p.textContent || ""));
-        if (!popup) return null;
-        const anchors = [...popup.querySelectorAll("a.gwt-Anchor")].filter(isVisible);
-        const hit = anchors.find((a) => (a.textContent || "").replace(/\s+/g, " ").trim() === wanted)
-          || anchors[0];
-        if (!hit) return null;
-        const r = hit.getBoundingClientRect();
-        return { x: r.x + (r.width / 2), y: r.y + (r.height / 2), text: (hit.textContent || "").replace(/\s+/g, " ").trim() };
-      }, anchor).catch(() => null);
-      if (!action) continue;
-      await page.mouse.click(action.x, action.y).catch(() => {});
-      await page.waitForTimeout(220).catch(() => {});
-      if (await hasVehicleSearchOverlay(page)) break;
-    }
-  } else {
-    const vehicleToggle = vehicleControls;
-    if (vehicleToggle) {
-      await page.mouse.click(vehicleToggle.x, vehicleToggle.y).catch(() => {});
-      await page.waitForTimeout(220).catch(() => {});
-    }
+  if (vehicleControls) {
+    await page.mouse.click(vehicleControls.x, vehicleControls.y).catch(() => {});
+    await page.waitForTimeout(220).catch(() => {});
   }
 
   const overlayAttempt = await chooseVehicleFromSearchOverlay(page, cleanPlate).catch(() => null);
@@ -4516,6 +4473,16 @@ async function fillAppointmentPopup(page, job) {
     logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, ...vehicle, vehicleState });
   } else {
     await fillVisibleInput(page, cosaInput.index, cosaValue).catch(() => {});
+  }
+  if (yapTags.length) {
+    const missingTags = [];
+    for (const tag of yapTags) {
+      if (!(await isTagConfirmed(page, tag))) missingTags.push(tag);
+    }
+    if (missingTags.length) {
+      const repairedTags = await addYapTagChips(page, missingTags);
+      logAction("tags_retry", { missing: missingTags, added: repairedTags.added, failed: repairedTags.failed, ok: repairedTags.ok });
+    }
   }
   const vehicleLinked = vehicleState === "linked";
   logAction("cosa_vehicle", { plate, cosaValue, writtenValue: cosaWrittenValue, vehicleState });
