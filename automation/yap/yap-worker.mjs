@@ -12,6 +12,7 @@ import {
   gotoAgendaDate,
   clickAgendaEvent,
   scanVisibleAgendaEvents,
+  scanVisibleAgendaEventTargets,
   toItalianDate,
   toYapTime,
   addMinutes,
@@ -55,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09a-descrizioni-tipo-d";
+const WORKER_BUILD = "2026-06-09b-veicolo-confirmed-popup";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1864,6 +1865,31 @@ async function openOdlByFullReload(page, currentUrl, pageEnum = "ODL") {
 }
 
 // F2: seleziona il widget Veicolo nel popup appuntamento e collega la targa
+async function readAppointmentVehicleText(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
+      .find((p) => isVisible(p) && /dettagli appuntamento/i.test(p.textContent || ""));
+    if (!popup) return null;
+    const vehicleRow = [...popup.querySelectorAll("div, td, span, a, button")]
+      .filter(isVisible)
+      .find((el) => {
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+        return text.includes("veicolo") && (text.includes("nessun veicolo selezionato") || text.length > 8);
+      });
+    if (!vehicleRow) return null;
+    const text = (vehicleRow.textContent || "").replace(/\s+/g, " ").trim();
+    return {
+      text: text.slice(0, 160),
+      linked: !/nessun veicolo selezionato/i.test(text),
+    };
+  }).catch(() => null);
+}
+
 async function selectVehicleByPlate(page, plate) {
   if (!plate) return { found: false, reason: "no_plate" };
   const cleanPlate = String(plate).trim().toUpperCase();
@@ -1913,39 +1939,71 @@ async function selectVehicleByPlate(page, plate) {
 
   if (!vehicleInputCoords) return { found: false, reason: "vehicle_input_not_found" };
 
-  // Step 2: click + type (usa keyboard per triggerare autocomplete GWT)
-  await page.mouse.click(vehicleInputCoords.x, vehicleInputCoords.y).catch(() => {});
-  await page.waitForTimeout(150);
-  await page.keyboard.press("Control+a").catch(() => {});
-  await page.keyboard.type(cleanPlate, { delay: 55 }).catch(() => {});
-  await page.waitForTimeout(700);
+  const attempts = [];
+  let confirmed = false;
+  let selected = false;
+  let vehicleText = null;
 
-  // Step 3: clicca il primo suggerimento del dropdown autocomplete
-  const selected = await safeEvaluate(page, (targetPlate) => {
-    const isVisible = (el) => {
-      const r = el.getBoundingClientRect();
-      const s = window.getComputedStyle(el);
-      return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
-    };
-    const candidates = [...document.querySelectorAll(
-      ".gwt-SuggestBoxPopup li, .gwt-SuggestBoxPopup td, .gwt-SuggestBoxPopup .item, " +
-      "[class*='suggest'] li, [class*='suggest'] td, [class*='autocomplete'] li, " +
-      ".gwt-MenuBar li, .gwt-MenuBar td"
-    )].filter(isVisible);
-    const match = candidates.find((el) => (el.textContent || "").toUpperCase().includes(targetPlate));
-    const target = match || candidates[0];
-    if (!target) return false;
-    target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-    return true;
-  }, cleanPlate).catch(() => false);
+  for (let attempt = 1; attempt <= 3 && !confirmed; attempt += 1) {
+    // Step 2: click + type (usa keyboard per triggerare autocomplete GWT)
+    await page.mouse.click(vehicleInputCoords.x, vehicleInputCoords.y).catch(() => {});
+    await page.waitForTimeout(150);
+    await page.keyboard.press("Control+a").catch(() => {});
+    await page.keyboard.press("Delete").catch(() => {});
+    await page.keyboard.type(cleanPlate, { delay: 55 }).catch(() => {});
+    await page.waitForTimeout(650);
 
-  if (!selected) {
-    await page.keyboard.press("Enter").catch(() => {});
-    await page.waitForTimeout(250);
+    // Step 3: clicca il suggerimento del dropdown autocomplete.
+    selected = await safeEvaluate(page, (targetPlate) => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      const candidates = [...document.querySelectorAll(
+        ".gwt-SuggestBoxPopup li, .gwt-SuggestBoxPopup td, .gwt-SuggestBoxPopup .item, " +
+        "[class*='suggest'] li, [class*='suggest'] td, [class*='autocomplete'] li, " +
+        ".gwt-MenuBar li, .gwt-MenuBar td"
+      )].filter(isVisible);
+      const match = candidates.find((el) => (el.textContent || "").toUpperCase().includes(targetPlate));
+      const target = match || candidates[0];
+      if (!target) return false;
+      target.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+      target.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return true;
+    }, cleanPlate).catch(() => false);
+
+    if (!selected) {
+      await page.keyboard.press("ArrowDown").catch(() => {});
+      await page.waitForTimeout(120);
+      await page.keyboard.press("Enter").catch(() => {});
+    }
+    await page.waitForTimeout(450);
+
+    const popupVehicle = await readAppointmentVehicleText(page);
+    vehicleText = popupVehicle?.text || vehicleText;
+    confirmed = Boolean(popupVehicle?.linked)
+      || Boolean(popupVehicle?.text && !/nessun veicolo selezionato/i.test(popupVehicle.text) && popupVehicle.text.toUpperCase().includes(cleanPlate));
+    attempts.push({
+      attempt,
+      selected,
+      confirmed,
+      vehicleText: vehicleText ? vehicleText.slice(0, 80) : null,
+    });
+    if (!confirmed) {
+      await page.waitForTimeout(200);
+    }
   }
-  await page.waitForTimeout(250);
-  return { found: true, strategy: vehicleInputCoords.strategy, selected };
+
+  return {
+    found: true,
+    strategy: vehicleInputCoords.strategy,
+    selected,
+    confirmed,
+    vehicleText,
+    attempts,
+  };
 }
 
 // F5: guard "no veicolo" — rileva pratica guscio senza veicolo reale
@@ -4224,87 +4282,9 @@ async function fillAppointmentPopup(page, job) {
   await page.keyboard.press("Delete").catch(() => {});
 
   if (plate) {
-    await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
-
-    // Trova la RIGA-suggerimento (CellList GWT) con la targa, fuori dall'agenda di sfondo.
-    // Cliccare QUESTA cella aggancia il veicolo (confermato nel run reale).
-    const findSuggestion = () => safeEvaluate(page, (targetPlate) => {
-      const isVisible = (el) => {
-        const r = el.getBoundingClientRect();
-        const s = window.getComputedStyle(el);
-        return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
-      };
-      const P = String(targetPlate || "").toUpperCase();
-      const panels = [...document.querySelectorAll(
-        ".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel, [role='listbox']",
-      )].filter(isVisible);
-      if (panels.some((p) => /nessun risultato/i.test(p.textContent || ""))) return { state: "not_found" };
-      let el = null;
-      for (const sel of ["[__gwt_cell]", "tr[__gwt_row]", "[role='option']", ".gwt-MenuItem"]) {
-        const m = [...document.querySelectorAll(sel)]
-          .filter(isVisible)
-          .filter((e) => (e.textContent || "").toUpperCase().includes(P))
-          .filter((e) => e.getBoundingClientRect().height < 140)
-          .filter((e) => !e.closest(".fc-time-grid, .fc-view-container")); // no agenda di sfondo
-        if (m.length) { el = m[0]; break; }
-      }
-      if (el) {
-        const r = el.getBoundingClientRect();
-        return {
-          state: "match",
-          x: r.x + Math.min(r.width / 2, 120),
-          y: r.y + (r.height / 2),
-          label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 50),
-        };
-      }
-      const sawContent = panels.some((p) => (p.textContent || "").trim().length > 0);
-      return { state: "pending", sawContent };
-    }, plate).catch(() => ({ state: "pending" }));
-
-    // Attendi la tendina (lookup server ~1-2s).
-    let sug = { state: "pending" };
-    let sawPopup = false;
-    for (let i = 0; i < 16; i += 1) {
-      sug = await findSuggestion();
-      if (sug.state === "match" || sug.state === "not_found") break;
-      if (sug.sawContent) sawPopup = true;
-      await page.waitForTimeout(220).catch(() => {});
-    }
-    if (sug.state === "match") {
-      // Selezione robusta: il SINGOLO click spesso NON aggancia (CellList GWT). C'e' UN
-      // SOLO suggerimento (la targa), quindi escalare e' SICURO: non puoi scegliere il
-      // veicolo sbagliato. Provo click -> ArrowDown+Enter -> doppio-clic, fermandomi
-      // appena la tendina sparisce (= suggerimento selezionato). Verita' = agenda post-save.
-      const suggestionGone = async () => (await findSuggestion()).state !== "match";
-      const steps = [];
-      await page.mouse.click(sug.x, sug.y).catch(() => {});
-      await page.waitForTimeout(320).catch(() => {});
-      steps.push({ how: "click", gone: await suggestionGone() });
-      if (!steps[steps.length - 1].gone) {
-        await page.keyboard.press("ArrowDown").catch(() => {});
-        await page.waitForTimeout(140).catch(() => {});
-        await page.keyboard.press("Enter").catch(() => {});
-        await page.waitForTimeout(320).catch(() => {});
-        steps.push({ how: "arrowdown_enter", gone: await suggestionGone() });
-      }
-      if (!steps[steps.length - 1].gone) {
-        const again = await findSuggestion();
-        if (again.state === "match") {
-          await page.mouse.dblclick(again.x, again.y).catch(() => {});
-          await page.waitForTimeout(320).catch(() => {});
-        }
-        steps.push({ how: "dblclick", gone: await suggestionGone() });
-      }
-      await page.waitForTimeout(500).catch(() => {}); // re-render veicolo
-      vehicleState = "linked"; // tentativo: confermato/corretto dall'agenda post-save
-      logAction("cosa_vehicle_pick", { plate, label: sug.label || null, steps });
-    } else if (sug.state === "not_found") {
-      vehicleState = "not_found";
-      logAction("cosa_vehicle_pick", { plate, sug: "not_found" });
-    } else {
-      vehicleState = sawPopup ? "failed" : "not_found";
-      logAction("cosa_vehicle_pick", { plate, sug: sug.state, vehicleState });
-    }
+    const vehicle = await selectVehicleByPlate(page, plate);
+    vehicleState = vehicle.confirmed ? "linked" : (vehicle.found ? "failed" : "not_found");
+    logAction("cosa_vehicle_pick", { plate, ...vehicle, vehicleState });
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
@@ -4322,10 +4302,9 @@ async function fillAppointmentPopup(page, job) {
 
 // Verifica AUTOREVOLE del veicolo agganciato: dopo il salvataggio l'evento in agenda
 // mostra le info veicolo SOLO se il veicolo e' davvero agganciato.
-//   non agganciato: "08:40 - CN401MV"
-//   agganciato:     "08:40 - CN401MV - VOLKSWAGEN GOLF «V» - SINGH GURWINDER - ..."
-// Quindi: se il titolo dell'evento contiene testo (marca/intestatario) OLTRE la targa,
-// il veicolo e' agganciato. Segnale piu' affidabile del DOM del popup.
+// Criterio forte: hover sull'evento e verifica del tooltip #agendaTip con
+// Targa / Veicolo / Intestatario / Cellulare. Fallback: titolo evento piu' ricco
+// della sola targa.
 async function verifyVehicleInAgenda(page, plate) {
   const norm = (s) => String(s || "").toUpperCase().replace(/\s+/g, "");
   const P = norm(plate);
@@ -4335,13 +4314,45 @@ async function verifyVehicleInAgenda(page, plate) {
   // Se in QUALSIASI scan risulta agganciato -> agganciato (no falsi negativi da timing).
   for (let i = 0; i < 4; i += 1) {
     try {
-      const events = await scanVisibleAgendaEvents(page); // [{time, title, repartoClass}]
+      const events = await scanVisibleAgendaEventTargets(page, { includeStyle: true }); // [{time, title, repartoClass, x, y, bgColor...}]
       const ev = events.find((e) => norm(e.title).includes(P));
       if (ev) {
+        await page.mouse.move(ev.x, ev.y).catch(() => {});
+        await page.waitForTimeout(250).catch(() => {});
+        const tip = await safeEvaluate(page, () => {
+          const isVisible = (el) => {
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 6 && r.height > 6 && s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
+          };
+          const candidates = [
+            ...document.querySelectorAll("#agendaTip, .agendaTip, [id*='agendaTip'], [class*='agendaTip']"),
+          ].filter(isVisible);
+          const tipEl = candidates[0] || null;
+          if (!tipEl) return null;
+          const text = (tipEl.textContent || "").replace(/\s+/g, " ").trim();
+          return { text: text.slice(0, 240), html: (tipEl.innerHTML || "").slice(0, 400) };
+        }).catch(() => null);
+        const tipText = norm(tip?.text || "");
+        const tipLinked = /TARGA/.test(tipText)
+          && /VEICOLO/.test(tipText)
+          && /INTESTATARIO/.test(tipText)
+          && /CELLULARE/.test(tipText)
+          && !/NESSUN VEICOLO SELEZIONATO/.test(tipText);
         const title = norm(ev.title);
         const afterPlate = title.split(P).slice(1).join(" ").replace(/[^A-Z]/g, "");
-        const linked = /[A-Z]{3,}/.test(afterPlate); // marca/nome dopo la targa
-        last = { linked, found: true, title: String(ev.title || "").slice(0, 90), reparto: ev.repartoClass || "", scans: i + 1 };
+        const titleLinked = /[A-Z]{3,}/.test(afterPlate); // marca/nome dopo la targa
+        const linked = tipLinked || titleLinked;
+        last = {
+          linked,
+          found: true,
+          title: String(ev.title || "").slice(0, 90),
+          tooltip: tip?.text || null,
+          bgColor: ev.bgColor || null,
+          borderColor: ev.borderColor || null,
+          reparto: ev.repartoClass || "",
+          scans: i + 1,
+        };
         if (linked) return last;
       } else if (!last.found) {
         last = { linked: false, found: false, scans: i + 1 };
