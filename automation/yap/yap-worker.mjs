@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09b-veicolo-confirmed-popup";
+const WORKER_BUILD = "2026-06-09c-cosa-fallback-vehicle";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1868,7 +1868,7 @@ async function openOdlByFullReload(page, currentUrl, pageEnum = "ODL") {
   }
 }
 
-// F2: seleziona il widget Veicolo nel popup appuntamento e collega la targa
+// F2: usa il campo Cosa del popup appuntamento per agganciare la targa.
 async function readAppointmentVehicleText(page) {
   return safeEvaluate(page, () => {
     const isVisible = (el) => {
@@ -1898,8 +1898,9 @@ async function selectVehicleByPlate(page, plate) {
   if (!plate) return { found: false, reason: "no_plate" };
   const cleanPlate = String(plate).trim().toUpperCase();
 
-  // Step 1: individua l'input Veicolo nel popup tramite il contesto del DOM
-  const vehicleInputCoords = await safeEvaluate(page, (targetPlate) => {
+  // Step 1: individua il campo Cosa nel popup tramite il contesto del DOM.
+  // Nel popup compatto il veicolo non ha un input dedicato: si usa il campo Cosa.
+  const vehicleInputCoords = await safeEvaluate(page, () => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
       const s = window.getComputedStyle(el);
@@ -1909,39 +1910,44 @@ async function selectVehicleByPlate(page, plate) {
       .find((p) => isVisible(p) && (p.textContent || "").toLowerCase().includes("dettagli appuntamento"));
     if (!popup) return null;
 
-    const inputs = [...popup.querySelectorAll("input[type='text'], input:not([type])")].filter(isVisible);
-    for (const input of inputs) {
-      // Cerca "veicolo" / "autoveicolo" in max 5 antenati
+    const labelFor = (input) => {
       let node = input;
-      for (let i = 0; i < 5; i++) {
-        node = node?.parentElement;
-        if (!node || node === popup) break;
-        const txt = ([...node.childNodes].map((n) => n.nodeType === 3 ? n.textContent : "").join("")).toLowerCase();
-        if (txt.includes("veicolo") || txt.includes("autoveicolo")) {
-          const r = input.getBoundingClientRect();
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, strategy: "ancestor_text" };
-        }
+      for (let i = 0; i < 6 && node && node !== popup; i += 1) {
+        node = node.parentElement;
+        if (!node) break;
+        const own = [...node.childNodes]
+          .filter((n) => n.nodeType === 3)
+          .map((n) => n.textContent)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+        if (own && own.length <= 40) return own;
       }
-    }
-    // Fallback: cerca label "Veicolo" nel popup e poi l'input fratello
-    const labels = [...popup.querySelectorAll("td, label, span, div")]
-      .filter(isVisible)
-      .find((el) => {
-        const t = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-        return t === "veicolo" || t === "autoveicolo";
-      });
-    if (labels) {
-      const tr = labels.closest("tr") || labels.parentElement;
-      const sibInput = tr ? [...tr.querySelectorAll("input")].find(isVisible) : null;
-      if (sibInput) {
-        const r = sibInput.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2, strategy: "sibling_label" };
-      }
-    }
-    return null;
-  }, cleanPlate).catch(() => null);
+      return "";
+    };
+    const inputs = [...popup.querySelectorAll("input[type='text'], input:not([type])")].filter(isVisible).map((input) => {
+      const r = input.getBoundingClientRect();
+      const s = window.getComputedStyle(input);
+      return {
+        input,
+        label: labelFor(input),
+        x: r.x + (r.width / 2),
+        y: r.y + (r.height / 2),
+        width: r.width,
+        textTransform: (s.textTransform || "").toLowerCase(),
+        maxlength: input.getAttribute("maxlength") || "",
+        readOnly: Boolean(input.readOnly),
+      };
+    });
+    const target = inputs.find((el) => /cosa/.test(el.label))
+      || inputs.find((el) => el.textTransform === "uppercase" && el.width > 80 && !el.readOnly && el.maxlength !== "25")
+      || inputs.find((el) => el.width > 80 && !el.readOnly);
+    if (!target) return null;
+    return { x: target.x, y: target.y, strategy: target.label ? `label:${target.label}` : "uppercase_input" };
+  }).catch(() => null);
 
-  if (!vehicleInputCoords) return { found: false, reason: "vehicle_input_not_found" };
+  if (!vehicleInputCoords) return { found: false, reason: "cosa_input_not_found" };
 
   const attempts = [];
   let confirmed = false;
@@ -4289,6 +4295,14 @@ async function fillAppointmentPopup(page, job) {
     const vehicle = await selectVehicleByPlate(page, plate);
     vehicleState = vehicle.confirmed ? "linked" : (vehicle.found ? "failed" : "not_found");
     logAction("cosa_vehicle_pick", { plate, ...vehicle, vehicleState });
+    if (!vehicle.confirmed) {
+      await fillVisibleInput(page, cosaInput.index, cosaValue).catch(() => {});
+      logAction("cosa_vehicle_fallback", {
+        plate,
+        cosaValue: cosaValue.slice(0, 40),
+        reason: vehicle.reason || (vehicle.found ? "vehicle_not_confirmed" : "vehicle_input_not_found"),
+      });
+    }
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
