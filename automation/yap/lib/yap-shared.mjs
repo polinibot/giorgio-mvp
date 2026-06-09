@@ -836,6 +836,13 @@ async function navigateWithRetry(page, url, options = {}, attempts = 3) {
 }
 
 export async function gotoAgendaDate(page, isoDate) {
+  // Timing leggero (solo log) per individuare il sink dei ~16s senza cambiare comportamento.
+  const _gt0 = Date.now();
+  const _gMark = (status, extra = {}) => {
+    try {
+      process.stderr.write(JSON.stringify({ event: "yap:phase", phase: "gotoDate", status, ms: Date.now() - _gt0, ts: new Date().toISOString(), ...extra }) + "\n");
+    } catch {}
+  };
   const months = {
     gennaio: 0,
     febbraio: 1,
@@ -883,6 +890,7 @@ export async function gotoAgendaDate(page, isoDate) {
     if (!(await agendaLoadingVisible())) break;
     await page.waitForTimeout(250).catch(() => {});
   }
+  _gMark("loading_settled");
 
   let consecutiveNulls = 0;
   for (let guard = 0; guard < 36; guard += 1) {
@@ -899,6 +907,7 @@ export async function gotoAgendaDate(page, isoDate) {
     await page.waitForTimeout(80);
   }
   await page.waitForTimeout(250).catch(() => {});
+  _gMark("month_nav_done");
 
   const dayTarget = await page.evaluate(({ dayText, isoDate }) => {
     const normalizeText = (value) => String(value || "").replace(/\s+/g, " ").trim();
@@ -946,15 +955,17 @@ export async function gotoAgendaDate(page, isoDate) {
   }, { dayText: targetDay, isoDate }).catch(() => false);
 
   const moved = Boolean(dayTarget && Number.isFinite(dayTarget.x) && Number.isFinite(dayTarget.y));
+  _gMark("day_target", { moved });
   if (moved) {
     await page.mouse.click(dayTarget.x, dayTarget.y).catch(() => {});
     await page.waitForTimeout(250).catch(() => {});
   } else {
     await page.keyboard.press("Home").catch(() => {});
   }
-  await waitForAgendaReady(page, 5000).catch(() => {});
+  await waitForAgendaReady(page, 3500).catch(() => {});
+  _gMark("agenda_ready");
   for (let loadingGuard = 0; loadingGuard < 12; loadingGuard += 1) {
-    if (await agendaShowsTargetDate()) return true;
+    if (await agendaShowsTargetDate()) { _gMark("done", { via: "loadingGuard", i: loadingGuard }); return true; }
     const state = await readAgendaViewportState(page).catch(() => null);
     const selectedMatches = state?.selectedMiniDay === targetDay;
     const centerMentionsTargetMonth = normalize(state?.centerDateLabel || "").includes(normalize(`${Object.keys(months)[target.getMonth()]} ${target.getFullYear()}`));
@@ -962,13 +973,15 @@ export async function gotoAgendaDate(page, isoDate) {
     if (!loadingVisible && !selectedMatches && !centerMentionsTargetMonth) break;
     await page.waitForTimeout(280);
   }
+  _gMark("loading_guard_done");
   for (let verify = 0; verify < 5; verify += 1) {
-    if (await agendaShowsTargetDate()) return true;
+    if (await agendaShowsTargetDate()) { _gMark("done", { via: "verify", i: verify }); return true; }
     await page.waitForTimeout(280);
     if ((verify === 1 || verify === 3) && moved) {
       await page.mouse.dblclick(dayTarget.x, dayTarget.y).catch(() => {});
     }
   }
+  _gMark("verify_exhausted");
   await page.waitForTimeout(200);
   const finalState = await readAgendaViewportState(page).catch(() => null);
   const stateSuffix = finalState
