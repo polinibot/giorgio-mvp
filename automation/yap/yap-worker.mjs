@@ -2806,6 +2806,53 @@ async function gridDumpRow(page, rowIndex) {
   }, { rowIndex, COL: GRID_COL }).catch(() => ({ found: false }));
 }
 
+// Salva il documento (Preventivo/ODL): bottone gwt-Button con <span>Salva</span>
+// (anche nascosto) + icona floppy. Abilitato == ci sono modifiche da salvare;
+// dopo il salvataggio diventa gwt-Button-disabled -> segnale di conferma affidabile.
+async function saveWorkDocument(page) {
+  const locate = () => safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 6 && r.height > 6 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const btns = [...document.querySelectorAll("button.gwt-Button, .gwt-Button")].filter(isVisible);
+    const save = btns.find((b) => {
+      const span = b.querySelector("span");
+      const label = (span?.textContent || b.getAttribute("title") || "").trim().toLowerCase();
+      return label === "salva";
+    });
+    if (!save) return { found: false };
+    const disabled = /gwt-Button-disabled/.test(save.className || "") || save.disabled === true;
+    const r = save.getBoundingClientRect();
+    return { found: true, disabled, x: r.x + (r.width / 2), y: r.y + (r.height / 2) };
+  }).catch(() => ({ found: false }));
+
+  const info = await locate();
+  if (!info.found) { logAction("doc_save", { found: false }); return { ok: false, reason: "save_btn_not_found" }; }
+  if (info.disabled) { logAction("doc_save", { found: true, disabled: true, note: "niente da salvare" }); return { ok: false, reason: "nothing_to_save", disabled: true }; }
+
+  // RPC di salvataggio (best-effort, secondario rispetto al bottone che si disabilita).
+  const saveRpc = page.waitForResponse(
+    (r) => /\/yap\/action\/\w+Action/i.test(r.url()) && r.request().method() === "POST" && r.status() === 200,
+    { timeout: 8000 },
+  ).then((r) => (r.url().split("/action/")[1] || "").slice(0, 44)).catch(() => null);
+
+  await page.mouse.click(info.x, info.y).catch(() => {});
+  // Conferma: il bottone Salva diventa disabled == documento salvato.
+  let becameDisabled = false;
+  for (let i = 0; i < 22; i += 1) {
+    const s = await locate();
+    if (s.found && s.disabled) { becameDisabled = true; break; }
+    if (!s.found) { becameDisabled = true; break; } // sparito = probabile reload post-save
+    await page.waitForTimeout(200).catch(() => {});
+  }
+  const rpc = await saveRpc;
+  const ok = becameDisabled || Boolean(rpc);
+  logAction("doc_save", { found: true, clicked: true, becameDisabled, rpc, ok });
+  return { ok, becameDisabled, rpc };
+}
+
 // Orchestratore: scrive le righe del documento (Preventivo/ODL). Per ora: MANODOPERA.
 async function writeWorkGrid(page, job) {
   const sections = job.sections || [];
@@ -2916,6 +2963,10 @@ async function writeWorkGrid(page, job) {
     expected: out.righe.length,
     sample: finalRows.slice(0, 14),
   });
+
+  // SALVA il documento: senza questo le righe restano solo client-side e si perdono
+  // (su YAP "Preventivi" risultava vuoto). Il bottone Salva che si disabilita conferma.
+  out.saved = await saveWorkDocument(page);
   return out;
 }
 
@@ -4226,6 +4277,9 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
       if (r.written) present.push({ field: `preventivo.${r.kind}`, expected: r.text });
       else missing.push({ field: `preventivo.${r.kind}`, expected: r.text, found: "non scritto" });
     }
+    // Salvataggio del documento: senza, le righe NON persistono su YAP. Onesto.
+    if (g.saved?.ok) present.push({ field: "preventivo.salvataggio", expected: "documento salvato" });
+    else missing.push({ field: "preventivo.salvataggio", expected: "documento salvato", found: g.saved?.reason || "non salvato" });
     return {
       verified: missing.length === 0,
       present,
