@@ -4038,21 +4038,8 @@ async function fillAppointmentPopup(page, job) {
   if (plate) {
     await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
 
-    // Veicolo agganciato == "Nessun veicolo selezionato" sparisce dal popup.
-    const isCommitted = () => safeEvaluate(page, () => {
-      const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
-        .find((p) => /dettagli appuntamento/i.test(p.textContent || ""));
-      if (!popup) return false;
-      return !/nessun veicolo selezionato/i.test(popup.textContent || "");
-    }).catch(() => false);
-    const waitCommitted = async (tries, ms) => {
-      for (let i = 0; i < tries; i += 1) {
-        if (await isCommitted()) return true;
-        await page.waitForTimeout(ms).catch(() => {});
-      }
-      return false;
-    };
     // Trova la RIGA-suggerimento (CellList GWT) con la targa, fuori dall'agenda di sfondo.
+    // Cliccare QUESTA cella aggancia il veicolo (confermato nel run reale).
     const findSuggestion = () => safeEvaluate(page, (targetPlate) => {
       const isVisible = (el) => {
         const r = el.getBoundingClientRect();
@@ -4086,7 +4073,9 @@ async function fillAppointmentPopup(page, job) {
       return { state: "pending", sawContent };
     }, plate).catch(() => ({ state: "pending" }));
 
-    // 1) Attendi la tendina (lookup server ~1-2s).
+    // Attendi la tendina (lookup server ~1-2s) e clicca UNA SOLA volta il suggerimento.
+    // NIENTE escalation tastiera/doppio-clic: rischierebbe di sganciare un veicolo gia'
+    // agganciato. La conferma VERA arriva dopo il salvataggio, dall'evento in agenda.
     let sug = { state: "pending" };
     let sawPopup = false;
     for (let i = 0; i < 16; i += 1) {
@@ -4095,54 +4084,16 @@ async function fillAppointmentPopup(page, job) {
       if (sug.sawContent) sawPopup = true;
       await page.waitForTimeout(220).catch(() => {});
     }
-
-    // 2) Selezione: ogni strategia e' VERIFICATA dal commit reale.
-    let committed = false;
-    const tried = [];
-    if (sug.state === "not_found") {
-      vehicleState = "not_found";
-    } else if (sug.state === "match") {
+    if (sug.state === "match") {
       await page.mouse.click(sug.x, sug.y).catch(() => {});
-      committed = await waitCommitted(10, 200); tried.push({ how: "click", committed });
-      if (!committed) { // SuggestBox GWT: ArrowDown + Enter
-        await page.keyboard.press("ArrowDown").catch(() => {});
-        await page.waitForTimeout(120).catch(() => {});
-        await page.keyboard.press("Enter").catch(() => {});
-        committed = await waitCommitted(6, 200); tried.push({ how: "arrowdown_enter", committed });
-      }
-      if (!committed) { // alcune CellList selezionano su doppio clic
-        const again = await findSuggestion();
-        if (again.state === "match") {
-          await page.mouse.dblclick(again.x, again.y).catch(() => {});
-          committed = await waitCommitted(6, 200); tried.push({ how: "dblclick", committed });
-        }
-      }
-      vehicleState = committed ? "linked" : "failed";
+      await page.waitForTimeout(700).catch(() => {}); // re-render veicolo
+      vehicleState = "linked"; // tentativo: confermato/corretto dall'agenda post-save
+    } else if (sug.state === "not_found") {
+      vehicleState = "not_found";
     } else {
       vehicleState = sawPopup ? "failed" : "not_found";
     }
-
-    // Diagnostico onesto quando NON agganciato: cosa c'era a schermo e cosa ho provato.
-    if (vehicleState !== "linked") {
-      const dump = await safeEvaluate(page, (targetPlate) => {
-        const isVisible = (el) => {
-          const r = el.getBoundingClientRect();
-          const s = window.getComputedStyle(el);
-          return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
-        };
-        const P = String(targetPlate || "").toUpperCase();
-        const cells = [...document.querySelectorAll("[__gwt_cell], tr[__gwt_row], [role='option']")]
-          .filter(isVisible)
-          .filter((e) => !e.closest(".fc-time-grid, .fc-view-container"))
-          .map((e) => ({ cls: (e.className || "").slice(0, 14), h: Math.round(e.getBoundingClientRect().height), txt: (e.textContent || "").replace(/\s+/g, " ").trim().slice(0, 38) }))
-          .filter((c) => c.txt);
-        const popups = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel, [role='listbox']")]
-          .filter(isVisible).map((p) => (p.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60));
-        return { plateCells: cells.filter((c) => c.txt.toUpperCase().includes(P)).slice(0, 6), popups: popups.slice(0, 6) };
-      }, plate).catch(() => null);
-      logAction("vehicle_probe", { state: vehicleState, lastSug: sug.state, label: sug.label || null, tried, dump });
-    }
-    logAction("vehicle_commit", { committed, plate, state: vehicleState });
+    logAction("cosa_vehicle_pick", { plate, sug: sug.state, label: sug.label || null, vehicleState });
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
@@ -4173,6 +4124,30 @@ async function fillAppointmentPopup(page, job) {
     plate,
     cosa: cosaValue,
   };
+}
+
+// Verifica AUTOREVOLE del veicolo agganciato: dopo il salvataggio l'evento in agenda
+// mostra le info veicolo SOLO se il veicolo e' davvero agganciato.
+//   non agganciato: "08:40 - CN401MV"
+//   agganciato:     "08:40 - CN401MV - VOLKSWAGEN GOLF «V» - SINGH GURWINDER - ..."
+// Quindi: se il titolo dell'evento contiene testo (marca/intestatario) OLTRE la targa,
+// il veicolo e' agganciato. Segnale piu' affidabile del DOM del popup.
+async function verifyVehicleInAgenda(page, plate) {
+  const norm = (s) => String(s || "").toUpperCase().replace(/\s+/g, "");
+  const P = norm(plate);
+  if (!P) return { linked: false, found: false };
+  try {
+    const events = await scanVisibleAgendaEvents(page); // [{time, title, repartoClass}]
+    const ev = events.find((e) => norm(e.title).includes(P));
+    if (!ev) return { linked: false, found: false };
+    const title = norm(ev.title);
+    // testo dopo la prima occorrenza della targa, ridotto alle sole lettere
+    const afterPlate = title.split(P).slice(1).join(" ").replace(/[^A-Z]/g, "");
+    const linked = /[A-Z]{3,}/.test(afterPlate); // una parola (marca/nome) dopo la targa
+    return { linked, found: true, title: String(ev.title || "").slice(0, 90), reparto: ev.repartoClass || "" };
+  } catch (e) {
+    return { linked: false, found: false, error: String(e?.message || "").slice(0, 80) };
+  }
 }
 
 // Audit inline: verifica i dati appena salvati senza aprire nuovo browser
@@ -5011,6 +4986,22 @@ async function runYapAutomation(job, args) {
     logPhase("save", "done", { detected: Boolean(putResponse) });
     const putResponseSummary = args.debug ? await summarizeResponseBody(putResponse) : null;
     await page.waitForTimeout(240);
+
+    // VERIFICA VEICOLO AUTOREVOLE: l'evento appena salvato e' ancora in agenda (il
+    // management write naviga via DOPO). Se il titolo mostra info oltre la targa ->
+    // veicolo agganciato davvero. Corregge onestamente lo stato tentativo del popup.
+    if (job.customer?.plate && popupResult) {
+      const vCheck = await verifyVehicleInAgenda(page, job.customer.plate);
+      logAction("vehicle_agenda_verify", vCheck);
+      if (vCheck.found) {
+        // not_found (targa non in anagrafica) resta com'e'; altrimenti decide l'agenda.
+        if (popupResult.vehicleState !== "not_found") {
+          popupResult.vehicleState = vCheck.linked ? "linked" : "failed";
+          popupResult.vehicleLinked = vCheck.linked;
+        }
+      }
+    }
+
     let afterSavePath = null;
     if (args.debug) {
       afterSavePath = path.join(args.artifactDir, `after-save-${suffix}.png`);
