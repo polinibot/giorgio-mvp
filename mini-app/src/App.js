@@ -413,6 +413,177 @@ function getYapAuditResult(resultOrPractice) {
   return resultOrPractice?.audit || resultOrPractice?.management_audit_result || resultOrPractice?.practice?.management_audit_result || null;
 }
 
+function flattenYapAuditItems(audit) {
+  return {
+    present: Array.isArray(audit?.present) ? audit.present : [],
+    missing: Array.isArray(audit?.missing) ? audit.missing : [],
+    mismatch: Array.isArray(audit?.mismatch) ? audit.mismatch : [],
+  };
+}
+
+function matchYapAuditItem(item, matchers = []) {
+  const haystack = [
+    item?.field,
+    item?.label,
+    item?.expected,
+    item?.found,
+    item?.found_preview,
+    item?.reason,
+    item?.hint,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return matchers.some((matcher) => (
+    matcher instanceof RegExp
+      ? matcher.test(haystack)
+      : haystack.includes(String(matcher || '').toLowerCase())
+  ));
+}
+
+function getYapAuditChecklistState(audit, matchers = []) {
+  const groups = flattenYapAuditItems(audit);
+  const hasFailure = groups.missing.some((item) => matchYapAuditItem(item, matchers))
+    || groups.mismatch.some((item) => matchYapAuditItem(item, matchers));
+  const hasSuccess = groups.present.some((item) => matchYapAuditItem(item, matchers));
+  return {
+    seen: hasFailure || hasSuccess,
+    value: hasFailure ? false : (hasSuccess ? true : null),
+  };
+}
+
+function formatYapChecklistValue(value) {
+  if (value === true) return 'si';
+  if (value === false) return 'no';
+  return 'n.d.';
+}
+
+function buildYapChecklist({ audit, result, practiceType }) {
+  const normalizedPracticeType = String(practiceType || result?.practice?.practice_type || '').trim().toLowerCase();
+  const agendaState = getYapAuditChecklistState(audit, [/^agenda$/i, 'appuntamento salvato in agenda']);
+  const vehicleState = getYapAuditChecklistState(audit, [/^veicolo$/i, 'veicolo agganciato']);
+  const tagState = getYapAuditChecklistState(audit, [/^tag$/i, 'tag: ']);
+  const preventivoSaveState = getYapAuditChecklistState(audit, [/^preventivo\.salvataggio$/i, 'documento salvato']);
+  const preventivoManState = getYapAuditChecklistState(audit, [/^preventivo\.manodopera$/i, 'riga manodopera']);
+  const preventivoDescriptionState = getYapAuditChecklistState(audit, [/^preventivo\.descrizione$/i]);
+  const preventivoPartsState = getYapAuditChecklistState(audit, [/^preventivo\.ricambio$/i, /^preventivo\.ricambi$/i]);
+  const odlState = getYapAuditChecklistState(audit, [/^odl$/i, 'scrittura odl']);
+  const status = String(result?.status || result?.practice?.management_sync_status || audit?.status || '').trim().toLowerCase();
+
+  const agendaValue = agendaState.value != null
+    ? agendaState.value
+    : ['agenda_synced', 'partial_synced', 'complete_synced', 'duplicate'].includes(status);
+
+  const checklist = [
+    { key: 'agenda', label: 'Agenda salvata', value: agendaValue },
+    { key: 'veicolo', label: 'Veicolo agganciato', value: vehicleState.value },
+    { key: 'tag', label: 'Tag inserito', value: tagState.value },
+  ];
+
+  if (normalizedPracticeType === 'preventivo' || preventivoSaveState.seen || preventivoManState.seen || preventivoDescriptionState.seen || preventivoPartsState.seen) {
+    checklist.push(
+      { key: 'preventivo-salvato', label: 'Preventivo salvato', value: preventivoSaveState.value },
+      { key: 'preventivo-man', label: 'Preventivo manodopera', value: preventivoManState.value },
+      { key: 'preventivo-descrizioni', label: 'Preventivo descrizioni', value: preventivoDescriptionState.value },
+      { key: 'preventivo-ricambi', label: 'Preventivo ricambi', value: preventivoPartsState.value },
+    );
+  } else if (normalizedPracticeType === 'ordine_di_lavoro' || odlState.seen) {
+    checklist.push(
+      { key: 'odl', label: 'ODL scritto', value: odlState.value },
+    );
+  }
+
+  return checklist;
+}
+
+function buildYapDiagnosticSnapshot({
+  audit,
+  result,
+  practice,
+  checklist,
+  technicalDiagnostics,
+  writeReport,
+}) {
+  const groups = flattenYapAuditItems(audit);
+  const practiceInfo = practice || result?.practice || {};
+  return sanitizeDiagnosticValue({
+    createdAt: new Date().toISOString(),
+    practice: {
+      id: practiceInfo?.id || null,
+      plate: practiceInfo?.plate_confirmed || practiceInfo?.plate || '',
+      customer: practiceInfo?.customer_name || '',
+      phone: practiceInfo?.phone || '',
+      practiceType: practiceInfo?.practice_type || '',
+      appointmentDate: practiceInfo?.appointment_date || '',
+      appointmentTime: practiceInfo?.appointment_time || '',
+      contexts: practiceInfo?.contexts || [],
+    },
+    outcome: {
+      status: result?.status || audit?.status || practiceInfo?.management_sync_status || '',
+      message: result?.message || audit?.message || '',
+      errorCode: result?.error_code || audit?.error_code || '',
+      statusReason: result?.status_reason || audit?.status_reason || '',
+      nextAction: result?.next_action || audit?.next_action || '',
+      actionTarget: result?.action_target || audit?.action_target || '',
+    },
+    checklist: checklist.map((item) => ({
+      key: item.key,
+      label: item.label,
+      value: formatYapChecklistValue(item.value),
+    })),
+    audit: {
+      presentCount: groups.present.length,
+      missingCount: groups.missing.length,
+      mismatchCount: groups.mismatch.length,
+      present: groups.present,
+      missing: groups.missing,
+      mismatch: groups.mismatch,
+      feedback: audit?.feedback || null,
+      lookup: audit?.lookup || null,
+    },
+    writeReport: writeReport || null,
+    technicalDiagnostics: technicalDiagnostics || null,
+    rawResult: result || null,
+  });
+}
+
+function buildYapDiagnosticClipboardText(snapshot) {
+  const practice = snapshot?.practice || {};
+  const outcome = snapshot?.outcome || {};
+  const audit = snapshot?.audit || {};
+  const technical = snapshot?.technicalDiagnostics || {};
+  const lines = [
+    'Diagnostica YAP',
+    `Pratica: ${practice.id || '-'} | targa: ${practice.plate || '-'} | tipo: ${practice.practiceType || '-'}`,
+    `Cliente: ${practice.customer || '-'} | telefono: ${practice.phone || '-'}`,
+    `Appuntamento: ${practice.appointmentDate || '-'} ${practice.appointmentTime || ''}`.trim(),
+    `Stato: ${outcome.status || '-'} | codice: ${outcome.errorCode || '-'} | causa: ${outcome.statusReason || '-'}`,
+    `Messaggio: ${outcome.message || '-'}`,
+    `Azione consigliata: ${outcome.nextAction || '-'}`,
+    '',
+    'Checklist',
+    ...(Array.isArray(snapshot?.checklist) ? snapshot.checklist.map((item) => `- ${item.label}: ${item.value}`) : []),
+    '',
+    `Audit: presenti ${audit.presentCount || 0}, mancanti ${audit.missingCount || 0}, diversi ${audit.mismatchCount || 0}`,
+  ];
+
+  if (technical?.runner?.finished_at || technical?.failedPhase || technical?.workerPhases?.length) {
+    lines.push(
+      `Crash log: ts ${technical?.runner?.finished_at || '-'} | last_phase ${technical?.workerPhases?.length ? `${technical.workerPhases[technical.workerPhases.length - 1]?.phase || '?'}:${technical.workerPhases[technical.workerPhases.length - 1]?.status || '?'}` : (technical?.failedPhase || '-')}`,
+    );
+  }
+
+  if (technical?.stdoutTail) {
+    lines.push('', 'stdout tail', technical.stdoutTail);
+  }
+  if (technical?.stderrTail) {
+    lines.push('', 'stderr tail', technical.stderrTail);
+  }
+
+  lines.push('', 'JSON', JSON.stringify(snapshot, null, 2));
+  return lines.join('\n');
+}
+
 function formatYapStatusReason(reason) {
   const normalized = String(reason || '').trim().toLowerCase();
   if (!normalized) return '';
@@ -2585,6 +2756,7 @@ function App() {
   const [yapDeleteLoading, setYapDeleteLoading] = useState(false);
   const [yapAuditLoading, setYapAuditLoading] = useState(false);
   const [yapLastResult, setYapLastResult] = useState(null);
+  const [yapDiagnosticCopyStatus, setYapDiagnosticCopyStatus] = useState('');
   const [yapActionProgress, setYapActionProgress] = useState(null);
 
   const syncToYap = useCallback(async (id, options = {}) => {
@@ -3244,7 +3416,7 @@ function App() {
     );
   };
 
-  const renderYapAuditReport = (audit) => {
+  const renderYapAuditReport = (audit, { result = null, practice: practiceInfo = null } = {}) => {
     if (!audit) return null;
     const groups = [
       { key: 'present', title: 'Presenti', items: audit.present || [] },
@@ -3269,16 +3441,78 @@ function App() {
       parts: 'Ricambi',
       waste: 'Smaltimento',
     };
+    const technicalDiagnostics = result ? extractYapTechnicalDiagnostics(result) : null;
+    const writeReport = result?.write_report || result?.yap?.result?.write_report || null;
+    const checklist = buildYapChecklist({
+      audit,
+      result,
+      practiceType: practiceInfo?.practice_type || result?.practice?.practice_type || '',
+    });
+    const diagnosticSnapshot = buildYapDiagnosticSnapshot({
+      audit,
+      result,
+      practice: practiceInfo,
+      checklist,
+      technicalDiagnostics,
+      writeReport,
+    });
+    const diagnosticText = buildYapDiagnosticClipboardText(diagnosticSnapshot);
+
+    const copyYapDiagnostic = async () => {
+      try {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(diagnosticText);
+        } else {
+          const helper = document.createElement('textarea');
+          helper.value = diagnosticText;
+          helper.setAttribute('readonly', 'readonly');
+          helper.style.position = 'absolute';
+          helper.style.left = '-9999px';
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand('copy');
+          document.body.removeChild(helper);
+        }
+        setYapDiagnosticCopyStatus('diagnostica copiata');
+      } catch (_) {
+        setYapDiagnosticCopyStatus('copia non riuscita');
+      }
+    };
 
     return (
       <div className="section yap-audit-section">
-        <div className="section-title-row">
+        <div className="section-title-row yap-audit-header">
           <h2>Controllo YAP</h2>
-          <span className={`yap-audit-status yap-audit-status-${audit.status || 'unknown'}`}>
-            {formatYapPracticeStatus({ management_sync_status: audit.status })}
-          </span>
+          <div className="yap-audit-actions">
+            <button
+              type="button"
+              className="yap-result-action"
+              onClick={copyYapDiagnostic}
+            >
+              Copia diagnostica YAP
+            </button>
+            {yapDiagnosticCopyStatus && (
+              <span className="yap-audit-copy-status">{yapDiagnosticCopyStatus}</span>
+            )}
+            <span className={`yap-audit-status yap-audit-status-${audit.status || 'unknown'}`}>
+              {formatYapPracticeStatus({ management_sync_status: audit.status })}
+            </span>
+          </div>
         </div>
         {audit.message && <div className="yap-audit-message">{audit.message}</div>}
+        {checklist.length > 0 && (
+          <div className="yap-audit-checklist">
+            {checklist.map((item) => (
+              <div
+                key={item.key}
+                className={`yap-audit-check-item yap-audit-check-${item.value === true ? 'yes' : item.value === false ? 'no' : 'na'}`}
+              >
+                <span>{item.label}</span>
+                <strong>{formatYapChecklistValue(item.value)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
         {auditTechnicalFailure && totalItems === 0 && (
           <div className="yap-audit-message">
             <strong>Audit non completato:</strong> la scrittura su YAP e' partita, ma la verifica automatica non ha prodotto campi affidabili.
@@ -4913,7 +5147,13 @@ function App() {
             return renderWorkerLogPanel(mar?.worker_phases);
           })()}
 
-          {renderYapAuditReport(getYapAuditResult(yapLastPracticeId === practice.id ? yapLastResult : null) || practice.management_audit_result)}
+          {renderYapAuditReport(
+            getYapAuditResult(yapLastPracticeId === practice.id ? yapLastResult : null) || practice.management_audit_result,
+            {
+              result: yapLastPracticeId === practice.id ? yapLastResult : null,
+              practice,
+            },
+          )}
 
           {!browserPreviewMode && renderYapPreviewPanel(yapPreview, yapPreviewLoading)}
 

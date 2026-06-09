@@ -1574,6 +1574,73 @@ h2 {
   font-size: 13px;
 }
 
+.yap-audit-header {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.yap-audit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.yap-audit-copy-status {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.yap-audit-checklist {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.yap-audit-check-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  min-width: 0;
+}
+
+.yap-audit-check-item span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.yap-audit-check-item strong {
+  font-size: 13px;
+  text-transform: uppercase;
+}
+
+.yap-audit-check-yes {
+  border-color: rgba(52, 211, 153, 0.3);
+}
+
+.yap-audit-check-yes strong {
+  color: #86efac;
+}
+
+.yap-audit-check-no {
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+.yap-audit-check-no strong {
+  color: #fca5a5;
+}
+
+.yap-audit-check-na strong {
+  color: var(--text-secondary);
+}
+
 .yap-audit-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
