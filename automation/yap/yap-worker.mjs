@@ -3117,15 +3117,23 @@ async function gridSetLastRowTipo(page, tipo) {
   } else {
     await page.keyboard.press("Enter").catch(() => {});
   }
-  await page.waitForTimeout(300).catch(() => {});
 
-  const readback = await safeEvaluate(page, () => {
+  // Readback in POLLING: il re-render della cella Tipo arriva con un attimo di ritardo,
+  // leggerlo subito dava vuoto (falso negativo ok=false anche se "D" era impostato).
+  const readTipo = () => safeEvaluate(page, () => {
     const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector('td[yapcolumnid="2"]'));
     const c = rows[rows.length - 1]?.querySelector('td[yapcolumnid="2"]');
     let t = (c?.textContent || "");
     for (const inp of (c?.querySelectorAll("input") || [])) t += " " + (inp.value || "");
     return t.replace(/\s+/g, " ").trim().slice(0, 20);
   }).catch(() => null);
+  const W = String(tipo).toUpperCase();
+  let readback = null;
+  for (let i = 0; i < 6; i += 1) {
+    readback = await readTipo();
+    if (readback && readback.toUpperCase().startsWith(W)) break;
+    await page.waitForTimeout(150).catch(() => {});
+  }
   // Guardia: se siamo finiti sulla dashboard, e' un fallimento grave (non navigare mai via).
   const hash = await safeEvaluate(page, () => location.hash || "").catch(() => "");
   const navigatedAway = /dashboard/i.test(hash);
@@ -3772,8 +3780,11 @@ async function writePracticeAndOdl(page, job, args) {
     writeReport.odlRouteAttempted = true;
     writeReport.debug.odl.routeAttempted = true;
     const odlRpcWaitMs = Number(process.env.YAP_ODL_RPC_WAIT_MS) || 8000;
+    // Gate su RPC: per ODL fira un *Odl*Action, per il PREVENTIVO un *Preventiv*Action.
+    // Prima il regex matchava solo Odl -> sul preventivo andava in timeout (8s persi ogni
+    // volta, rpcReady=false). Ora gattiamo sull'RPC giusto in base alla pagina.
     const odlReadyPromise = page.waitForResponse(
-      (r) => /\/yap\/action\/[^/]*Odl[^/]*Action/i.test(r.url()) && r.status() === 200,
+      (r) => /\/yap\/action\/[^/]*(Odl|Preventiv)[^/]*Action/i.test(r.url()) && r.status() === 200,
       { timeout: odlRpcWaitMs },
     ).then(() => true).catch(() => false);
     const routeResult = await openOdlByRoute(page, practiceUrl, workPageEnum);
