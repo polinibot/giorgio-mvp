@@ -2866,22 +2866,47 @@ async function writeWorkGrid(page, job) {
     await page.waitForTimeout(300).catch(() => {});
     // Scrive direttamente nell'input Descrizione (il piu' largo) della riga in modifica.
     const set = await gridTypeDescrizione(page, line.text);
-    // Verifica: il testo compare in una qualsiasi riga della griglia?
-    const anywhere = await safeEvaluate(page, (needle) => {
+    // Verifica immediata: il testo compare in una riga (testo OPPURE valore di un input)?
+    // Le celle editabili tengono il valore nell'<input>, che NON sta in textContent.
+    const inGridNow = await safeEvaluate(page, (needle) => {
       const n = String(needle || "").toUpperCase();
       const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]"));
       for (let i = 0; i < rows.length; i += 1) {
-        if ((rows[i].textContent || "").toUpperCase().includes(n)) return { found: true, rowIndex: i };
+        let hay = rows[i].textContent || "";
+        for (const inp of rows[i].querySelectorAll("input")) hay += " " + (inp.value || "");
+        if (hay.toUpperCase().includes(n)) return { found: true, rowIndex: i };
       }
       return { found: false, rowCount: rows.length };
     }, line.text).catch(() => ({ found: false }));
-    const written = anywhere.found || Boolean(set.value && set.value.length > 0);
     logAction("grid_desc", {
       kind: line.kind, text: line.text.slice(0, 30), added: added.ok,
-      descrInput: set.target, inputValue: set.value, writtenInGrid: anywhere.found, written,
+      descrInput: set.target, inputValue: set.value, inGridNow: inGridNow.found,
     });
-    out.righe.push({ ...line, written });
+    // typed = ho digitato (l'input ha accettato); written = lo verifico ONESTAMENTE dopo, sotto.
+    out.righe.push({ ...line, typed: Boolean(set.value && set.value.length > 0), written: false });
   }
+
+  // VERIFICA FINALE ONESTA: rileggo TUTTE le righe della griglia una volta sola.
+  // Includo textContent + i valori degli <input> (le celle editabili non mettono il
+  // valore in textContent). out.righe[].written = il testo c'e' DAVVERO nella griglia.
+  const finalRows = await safeEvaluate(page, () => {
+    const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]"));
+    return rows.map((tr) => {
+      let hay = tr.textContent || "";
+      for (const inp of tr.querySelectorAll("input")) hay += " " + (inp.value || "");
+      return hay.replace(/\s+/g, " ").trim().slice(0, 80);
+    });
+  }).catch(() => []);
+  for (const r of out.righe) {
+    const n = String(r.text || "").toUpperCase();
+    r.written = finalRows.some((h) => h.toUpperCase().includes(n));
+  }
+  logAction("grid_desc_verify", {
+    gridRows: finalRows.length,
+    persisted: out.righe.filter((r) => r.written).length,
+    expected: out.righe.length,
+    sample: finalRows.slice(0, 14),
+  });
   return out;
 }
 

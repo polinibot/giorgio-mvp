@@ -1,18 +1,15 @@
 {
-  "scannedAt": "2026-05-25T14:47:55.731Z",
+  "scannedAt": "2026-06-02T20:49:39.607Z",
   "date": "2026-11-12",
   "mode": "readonly",
-  "eventCount": 1,
-  "events": [
-    {
-      "time": "10:00 - 10:20",
-      "title": "TEST99ZZ - PROVA AUTOMAZIONE GIORGIO",
-      "repartoClass": "",
-      "bgColor": "rgb(248, 248, 248)",
-      "borderColor": "rgb(101, 168, 235)",
-      "left": "0px",
-      "width": "1095.81px"
-    }
-  ],
-  "screenshot": "C:\\Users\\Anas\\giorgio\\automation\\artifacts\\yap-readonly\\day-2026-11-12.png"
+  "eventCount": 0,
+  "viewport": {
+    "viewSwitchLabel": "Novembre 2026",
+    "centerDateLabel": "e102030405060 lightbulbFILTRO TAG giovedi 12 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+    "selectedMiniDay": "12",
+    "visibleEventCount": 0,
+    "visibleEvents": []
+  },
+  "events": [],
+  "screenshot": null
 }

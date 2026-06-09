@@ -1,470 +1,1108 @@
 {
-  "generatedAt": "2026-05-22T20:17:50.679Z",
-  "mode": "consolidated_offline_week_dataset",
-  "dayCount": 4,
+  "generatedAt": "2026-06-05T13:40:41.647Z",
+  "mode": "readonly_week_rpc_scan",
+  "range": {
+    "from": "2026-11-01",
+    "days": 30,
+    "dates": [
+      "2026-11-01",
+      "2026-11-02",
+      "2026-11-03",
+      "2026-11-04",
+      "2026-11-05",
+      "2026-11-06",
+      "2026-11-07",
+      "2026-11-08",
+      "2026-11-09",
+      "2026-11-10",
+      "2026-11-11",
+      "2026-11-12",
+      "2026-11-13",
+      "2026-11-14",
+      "2026-11-15",
+      "2026-11-16",
+      "2026-11-17",
+      "2026-11-18",
+      "2026-11-19",
+      "2026-11-20",
+      "2026-11-21",
+      "2026-11-22",
+      "2026-11-23",
+      "2026-11-24",
+      "2026-11-25",
+      "2026-11-26",
+      "2026-11-27",
+      "2026-11-28",
+      "2026-11-29",
+      "2026-11-30"
+    ]
+  },
   "days": [
     {
-      "date": "2025-04-04",
-      "domEvents": [
-        {
-          "time": "10:00 - 10:20",
-          "title": "DW092DR - CITROEN C4 PICASSO «I» - SERUGHETTI LUCIANO - 3384738808 - DW092DR",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "10:20 - 10:40",
-          "title": "EL733YJ - CITROEN C3 PICASSO - MORELLI LILIANA - 3456953099 - REVISIONE",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "10:40 - 11:00",
-          "title": "FV620JS - OPEL VIVARO «B» - BREVI ELENA - 3473814702 - BREVI ELENA - FV620JS",
-          "repartoClass": "LCWVQRD-b-a",
-          "bgColor": "rgb(192, 192, 192)",
-          "borderColor": "rgb(194, 194, 194)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "14:00 - 14:20",
-          "title": "DP126GZ - MERCEDES-BENZ A-CLASS (169) (04-12) - PIKHLYK PETRO - 3280524550 - DP126GZ - KIT FRIZIONE",
-          "repartoClass": "LCWVQRD-b-e",
-          "bgColor": "rgb(224, 194, 64)",
-          "borderColor": "rgb(214, 174, 0)",
-          "left": "0px",
-          "width": "363.938px"
-        },
-        {
-          "time": "14:00 - 14:20",
-          "title": "EJ737EG - FIAT DOBLÒ «III» - K COSTRUZIONI SRL - 3351808436 - EJ737EG",
-          "repartoClass": "LCWVQRD-b-f",
-          "bgColor": "rgb(224, 194, 64)",
-          "borderColor": "rgb(214, 174, 0)",
-          "left": "365.938px",
-          "width": "363.938px"
-        },
-        {
-          "time": "14:00 - 14:20",
-          "title": "GE698SP - LAND ROVER RANGE ROVER EVOQUE - PELIZZOLI MANUELA ASSUNTA - 3477862149 - GE698SP",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "731.875px",
-          "width": "363.938px"
-        },
-        {
-          "time": "14:20 - 14:40",
-          "title": "DH166EY - CITROEN XSARA PICASSO - ROBERTI LODOVICO - 3481662863 - DH166EY",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "14:40 - 15:00",
-          "title": "EK494XK - AUDI A4 «8K5» AVANT - RONCORONI ANDREA - EK494XK",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "15:00 - 15:20",
-          "title": "FP352RL - VOLKSWAGEN POLO «V» - BENWADIH KHALID - 3455102971 - FP352RL",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "15:20 - 15:40",
-          "title": "GH572TV - FIAT FIAT 500X - LETO ELISA - GH572TV",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "8:00 - 8:20",
-          "title": "X9LH58 - HM 50 R AC M - VAVASSORI PABLO - 3289699760 - X9LH58",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "8:20 - 8:40",
-          "title": "ER898VV - SEAT IBIZA V «6J1» COUPE - TALLARINI SILVIO - 3458599139 - ER898VV",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "546.906px"
-        },
-        {
-          "time": "8:20 - 8:40",
-          "title": "EY398AH - MAZDA CX5 «I» - KAUR HARMANJIT - 3333713923 - EY398AH",
-          "repartoClass": "LCWVQRD-b-f",
-          "bgColor": "rgb(224, 194, 64)",
-          "borderColor": "rgb(214, 174, 0)",
-          "left": "548.906px",
-          "width": "546.906px"
-        },
-        {
-          "time": "8:40 - 9:00",
-          "title": "ET778HG - FIAT PUNTO «III» - MSAAD FATIMA - ET778HG",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "546.906px"
-        },
-        {
-          "time": "8:40 - 9:00",
-          "title": "FE263TG - FIAT DOBLÒ «III» CARGO - ASSO TECNO SERVICE SRL - FE263TG",
-          "repartoClass": "LCWVQRD-b-f",
-          "bgColor": "rgb(224, 194, 64)",
-          "borderColor": "rgb(214, 174, 0)",
-          "left": "548.906px",
-          "width": "546.906px"
-        },
-        {
-          "time": "9:00 - 9:20",
-          "title": "EH892LP - FORD C-MAX «III» - KAUR RAMANDEEP - 3284281264 - EH892LP",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "9:20 - 9:40",
-          "title": "EP847ZR - SUZUKI SWIFT «V» - COPPA PIETRO - EP847ZR",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "9:40 - 10:00",
-          "title": "FJ616CL - RENAULT CLIO «IV» - RUSU ELENA - FJ616CL",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
+      "date": "2026-11-01",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG domenica 1 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "1",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
         }
-      ],
-      "domEventCount": 18,
-      "sources": [
-        "readonly-scan-2025-04-04.json",
-        "rpc-trace-2025-04-04-dp126gz-officina-kit-frizione.json"
-      ],
-      "rpcRecords": [
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T09:00",
-          "plate": "EH892LP",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T14:20",
-          "plate": "DH166EY",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T10:40",
-          "plate": "DH166EY",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T14:40",
-          "plate": "FV620JS",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T08:40",
-          "plate": "EK494XK",
-          "title": null,
-          "flags": [
-            "OP",
-            "COP",
-            "CP",
-            "P"
-          ]
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T14:00",
-          "plate": "EJ737EG",
-          "title": "DP126GZ - KIT  FRIZIONE",
-          "flags": [
-            "COP",
-            "CP",
-            "P",
-            "CO",
-            "O"
-          ]
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T10:20",
-          "plate": "DP126GZ",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T09:40",
-          "plate": "EL733YJ",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T15:20",
-          "plate": "FJ616CL",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T08:20",
-          "plate": "GH572TV",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T08:00",
-          "plate": "ER898VV",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T15:00",
-          "plate": "FE263TG",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T09:20",
-          "plate": "FP352RL",
-          "title": null,
-          "flags": []
-        },
-        {
-          "date": "2025-04-04",
-          "datetime": "2025-04-04T10:00",
-          "plate": "EP847ZR",
-          "title": null,
-          "flags": []
-        }
-      ],
-      "rpcRecordCount": 14
-    },
-    {
-      "date": "2026-03-15",
-      "domEvents": [],
+      },
       "domEventCount": 0,
-      "sources": [
-        "readonly-scan-2026-03-15.json"
-      ]
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": true,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG domenica 1 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 30282,
+        "action": "readonly_week_scan",
+        "date": "2026-11-01"
+      }
     },
     {
-      "date": "2026-03-16",
-      "domEvents": [
-        {
-          "time": "8:20 - 8:40",
-          "title": "FX339TM - SPA ITALTRANS - FX339TM",
-          "repartoClass": "LCWVQRD-b-f",
-          "bgColor": "",
-          "borderColor": "",
-          "left": "",
-          "width": ""
+      "date": "2026-11-02",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG lunedi 2 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011:",
+        "selectedMiniDay": "2",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
         }
-      ],
-      "domEventCount": 1,
-      "sources": [
-        "readonly-scan-2026-03-16.json"
-      ]
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG lunedi 2 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011:",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 36618,
+        "action": "readonly_week_scan",
+        "date": "2026-11-02"
+      }
     },
     {
-      "date": "2026-03-20",
-      "domEvents": [
-        {
-          "time": "",
-          "title": "GIO NON CE",
-          "repartoClass": "",
-          "bgColor": "rgb(248, 248, 248)",
-          "borderColor": "rgb(101, 168, 235)",
-          "left": "0px",
-          "width": "1120px"
-        },
-        {
-          "time": "10:00 - 10:20",
-          "title": "DE998HF - IVECO DAILY C «II» - I.C.E.M. - DE998HF",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "10:20 - 10:40",
-          "title": "BN947HE - LANCIA Y (YPSILON) - GUEYE ABDOU - 3888820458 - BN947HE",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "11:40 - 12:00",
-          "title": "DT256KW - FORD S-MAX «I» - BEL MELLASSI MOHAMMED - DT256KW",
-          "repartoClass": "LCWVQRD-b-e",
-          "bgColor": "rgb(224, 194, 64)",
-          "borderColor": "rgb(214, 174, 0)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "13:20 - 13:40",
-          "title": "GJ368BS - FIAT PANDA «III» - GASPARI ELEONORA - GJ368BS",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "14:00 - 14:20",
-          "title": "FM775ZP - VOLKSWAGEN GOLF «VII» - BETTONI BENEDETTO - 3335270632 - FM775ZP",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "14:20 - 14:40",
-          "title": "CL340AS - FIAT PUNTO «II» - SINE MAMADOU - 3897822893 - CL340AS",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "15:00 - 15:20",
-          "title": "DN723MM - FORD FIESTA «V» - NEMBRINI LUIGIA GIACOMINA - 3335746605 - NEMBRINI",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "16:00 - 16:20",
-          "title": "AK63138 - MALAGUTI PHANTOM 100 - RANGHETTI OMBRETTA - AK63138",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "8:20 - 8:40",
-          "title": "CD669FN - FORD TRANSIT «IV» - HAJDINI ADNAN - 3209625361 - - FORSE POMPA DI GASOLIO, CONTROLLARE",
-          "repartoClass": "LCWVQRD-b-e",
-          "bgColor": "rgb(224, 194, 64)",
-          "borderColor": "rgb(214, 174, 0)",
-          "left": "0px",
-          "width": "1095.81px"
-        },
-        {
-          "time": "9:40 - 10:00",
-          "title": "EX32038 - KTM 250 - COLLEONI ALBERTO - 3355302713 - EX32038",
-          "repartoClass": "LCWVQRD-b-r",
-          "bgColor": "rgb(135, 206, 250)",
-          "borderColor": "rgb(135, 206, 235)",
-          "left": "0px",
-          "width": "1095.81px"
+      "date": "2026-11-03",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG martedi 3 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "3",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
         }
-      ],
-      "domEventCount": 11,
-      "sources": [
-        "readonly-scan-2026-03-20.json"
-      ]
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG martedi 3 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 42950,
+        "action": "readonly_week_scan",
+        "date": "2026-11-03"
+      }
+    },
+    {
+      "date": "2026-11-04",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG mercoledi 4 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:40",
+        "selectedMiniDay": "4",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG mercoledi 4 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:40",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 49298,
+        "action": "readonly_week_scan",
+        "date": "2026-11-04"
+      }
+    },
+    {
+      "date": "2026-11-05",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG giovedi 5 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "5",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG giovedi 5 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 55643,
+        "action": "readonly_week_scan",
+        "date": "2026-11-05"
+      }
+    },
+    {
+      "date": "2026-11-06",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG venerdi 6 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "6",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG venerdi 6 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 61977,
+        "action": "readonly_week_scan",
+        "date": "2026-11-06"
+      }
+    },
+    {
+      "date": "2026-11-07",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG sabato 7 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011:",
+        "selectedMiniDay": "7",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG sabato 7 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011:",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 68328,
+        "action": "readonly_week_scan",
+        "date": "2026-11-07"
+      }
+    },
+    {
+      "date": "2026-11-08",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG domenica 8 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "8",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG domenica 8 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 74674,
+        "action": "readonly_week_scan",
+        "date": "2026-11-08"
+      }
+    },
+    {
+      "date": "2026-11-09",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG lunedi 9 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011:",
+        "selectedMiniDay": "9",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG lunedi 9 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011:",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 81016,
+        "action": "readonly_week_scan",
+        "date": "2026-11-09"
+      }
+    },
+    {
+      "date": "2026-11-10",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG martedi 10 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "10",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG martedi 10 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 87353,
+        "action": "readonly_week_scan",
+        "date": "2026-11-10"
+      }
+    },
+    {
+      "date": "2026-11-11",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG mercoledi 11 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4",
+        "selectedMiniDay": "11",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG mercoledi 11 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 93700,
+        "action": "readonly_week_scan",
+        "date": "2026-11-11"
+      }
+    },
+    {
+      "date": "2026-11-12",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG giovedi 12 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "12",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG giovedi 12 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 100052,
+        "action": "readonly_week_scan",
+        "date": "2026-11-12"
+      }
+    },
+    {
+      "date": "2026-11-13",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG venerdi 13 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "13",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG venerdi 13 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 106398,
+        "action": "readonly_week_scan",
+        "date": "2026-11-13"
+      }
+    },
+    {
+      "date": "2026-11-14",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG sabato 14 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "14",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG sabato 14 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 112749,
+        "action": "readonly_week_scan",
+        "date": "2026-11-14"
+      }
+    },
+    {
+      "date": "2026-11-15",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG domenica 15 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:40",
+        "selectedMiniDay": "15",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG domenica 15 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:40",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 119055,
+        "action": "readonly_week_scan",
+        "date": "2026-11-15"
+      }
+    },
+    {
+      "date": "2026-11-16",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG lunedi 16 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "16",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG lunedi 16 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 125395,
+        "action": "readonly_week_scan",
+        "date": "2026-11-16"
+      }
+    },
+    {
+      "date": "2026-11-17",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG martedi 17 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "17",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG martedi 17 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 131717,
+        "action": "readonly_week_scan",
+        "date": "2026-11-17"
+      }
+    },
+    {
+      "date": "2026-11-18",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG mercoledi 18 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4",
+        "selectedMiniDay": "18",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG mercoledi 18 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 138053,
+        "action": "readonly_week_scan",
+        "date": "2026-11-18"
+      }
+    },
+    {
+      "date": "2026-11-19",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG giovedi 19 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "19",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG giovedi 19 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 144424,
+        "action": "readonly_week_scan",
+        "date": "2026-11-19"
+      }
+    },
+    {
+      "date": "2026-11-20",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG venerdi 20 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "20",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG venerdi 20 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 150754,
+        "action": "readonly_week_scan",
+        "date": "2026-11-20"
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG sabato 21 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "21",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG sabato 21 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 157084,
+        "action": "readonly_week_scan",
+        "date": "2026-11-21"
+      }
+    },
+    {
+      "date": "2026-11-22",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG domenica 22 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:40",
+        "selectedMiniDay": "22",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG domenica 22 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:40",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 163422,
+        "action": "readonly_week_scan",
+        "date": "2026-11-22"
+      }
+    },
+    {
+      "date": "2026-11-23",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG lunedi 23 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "23",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG lunedi 23 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 169841,
+        "action": "readonly_week_scan",
+        "date": "2026-11-23"
+      }
+    },
+    {
+      "date": "2026-11-24",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG martedi 24 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "24",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG martedi 24 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 176159,
+        "action": "readonly_week_scan",
+        "date": "2026-11-24"
+      }
+    },
+    {
+      "date": "2026-11-25",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG mercoledi 25 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4",
+        "selectedMiniDay": "25",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG mercoledi 25 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 182515,
+        "action": "readonly_week_scan",
+        "date": "2026-11-25"
+      }
+    },
+    {
+      "date": "2026-11-26",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG giovedi 26 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "26",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG giovedi 26 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 188844,
+        "action": "readonly_week_scan",
+        "date": "2026-11-26"
+      }
+    },
+    {
+      "date": "2026-11-27",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG venerdi 27 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "selectedMiniDay": "27",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG venerdi 27 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:401",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 195183,
+        "action": "readonly_week_scan",
+        "date": "2026-11-27"
+      }
+    },
+    {
+      "date": "2026-11-28",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG sabato 28 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "28",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG sabato 28 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 201508,
+        "action": "readonly_week_scan",
+        "date": "2026-11-28"
+      }
+    },
+    {
+      "date": "2026-11-29",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG domenica 29 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:40",
+        "selectedMiniDay": "29",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG domenica 29 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:40",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 207814,
+        "action": "readonly_week_scan",
+        "date": "2026-11-29"
+      }
+    },
+    {
+      "date": "2026-11-30",
+      "viewport": {
+        "viewSwitchLabel": "Novembre 2026",
+        "centerDateLabel": "/102030405060 lightbulbFILTRO TAG lunedi 30 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "selectedMiniDay": "30",
+        "visibleEventCount": 0,
+        "visibleEvents": [],
+        "agendaSettle": {
+          "polls": 6,
+          "initialCount": 0,
+          "finalCount": 0,
+          "unstable": false,
+          "emptyConfirmed": true
+        }
+      },
+      "domEventCount": 0,
+      "domEvents": [],
+      "rpcRecordCount": 0,
+      "rpcRecords": [],
+      "hasRpc": false,
+      "telemetry": {
+        "session_mode": "browser_context",
+        "used_persistent_profile": false,
+        "profile_lock": null,
+        "agenda_date": "/102030405060 lightbulbFILTRO TAG lunedi 30 novembre 2026Giornaliere08:0008:2008:4009:0009:2009:4010:0010:2010:4011",
+        "event_count": 0,
+        "empty_confirmed": true,
+        "agenda_unstable": false,
+        "agenda_settle_polls": 6,
+        "total_elapsed_ms": 214159,
+        "action": "readonly_week_scan",
+        "date": "2026-11-30"
+      }
     }
   ],
   "stats": {
-    "totalDom": 30,
-    "totalRpc": 14,
-    "columnCounts": {
-      "LCWVQRD-b-r": 21,
-      "LCWVQRD-b-a": 1,
-      "LCWVQRD-b-e": 3,
-      "LCWVQRD-b-f": 4,
-      "unknown": 1
+    "totalDomEvents": 0,
+    "totalRpcRecords": 0,
+    "columnCounts": {},
+    "flagCounts": {},
+    "titleHasRevisione": {
+      "with": 0,
+      "without": 0
     },
-    "flagCounts": {
-      "OP": 1,
-      "COP": 2,
-      "CP": 2,
-      "P": 2,
-      "CO": 1,
-      "O": 1
-    },
-    "titlePatterns": {
-      "revisione": 1,
-      "preventivo": 0,
-      "comunicato": 0,
-      "total": 29
+    "preventivoComunicato": {
+      "both": 0,
+      "preventivoOnly": 0,
+      "neither": 0
     }
   },
-  "clientQuestionHints": [
-    {
-      "question": "Pratiche miste = un solo appuntamento?",
-      "inference": "Nei titoli agenda, revisione compare come suffisso nel titolo (es. MORELLI - REVISIONE), non come appuntamento separato.",
-      "confidence": "medium-high",
-      "needsClientConfirm": false
-    },
-    {
-      "question": "Preventivo/comunicato nei titoli agenda?",
-      "inference": "Nei dataset DOM analizzati non compaiono 'preventivo'/'comunicato' nei titoli barra: sono tag chip popup, non testo barra. Decisione cliente: comunicato resta manuale dopo invio preventivo.",
-      "confidence": "medium",
-      "needsClientConfirm": false
-    }
-  ],
-  "columnMappingProposed": {
-    "LCWVQRD-b-e": "O (Officina) — es. DP126GZ",
-    "LCWVQRD-b-r": "R (Revisione) — colore azzurro, titoli con REVISIONE",
-    "LCWVQRD-b-f": "C/P (Carrozzeria/Pneumatici) — colore giallo",
-    "LCWVQRD-b-a": "altro/neutro — da campionare"
-  }
+  "clientQuestionHints": []
 }
