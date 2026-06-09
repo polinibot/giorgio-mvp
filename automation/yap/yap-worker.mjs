@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09g-vehicle-target-and-tag-retry";
+const WORKER_BUILD = "2026-06-09h-vehicle-row-click";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -2007,7 +2007,7 @@ async function chooseVehicleFromSearchOverlay(page, plate) {
         .filter(isVisible)
         .find((p) => /ricerca autoveicolo|crea un nuovo veicolo dalla targa/i.test((p.textContent || "").replace(/\s+/g, " ")));
       if (!overlay) return false;
-      const candidates = [...overlay.querySelectorAll("tr, td, div, span, a, button, li")]
+      const rows = [...overlay.querySelectorAll("tr")]
         .filter(isVisible)
         .map((el) => {
           const text = (el.textContent || "").replace(/\s+/g, " ").trim();
@@ -2015,9 +2015,19 @@ async function chooseVehicleFromSearchOverlay(page, plate) {
           return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
         })
         .filter((item) => item.text && item.text.length <= 180);
-      const exactPlate = candidates.find((item) => norm(item.text).includes(wanted));
-      const createRow = candidates.find((item) => /crea un nuovo veicolo dalla targa/i.test(item.text));
-      const action = exactPlate || createRow || candidates[0];
+      const rowHit = rows.find((item) => norm(item.text).includes(wanted));
+      const createRow = rows.find((item) => /crea un nuovo veicolo dalla targa/i.test(item.text));
+      const otherRows = rows.filter((item) => item !== rowHit && item !== createRow);
+      const fallback = [...overlay.querySelectorAll("td, div, span, a, button, li")]
+        .filter(isVisible)
+        .map((el) => {
+          const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+          const r = el.getBoundingClientRect();
+          return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
+        })
+        .filter((item) => item.text && item.text.length <= 180);
+      const exactPlate = fallback.find((item) => norm(item.text).includes(wanted));
+      const action = rowHit || createRow || exactPlate || otherRows[0] || fallback[0];
       if (!action) return false;
       action.el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
       action.el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
