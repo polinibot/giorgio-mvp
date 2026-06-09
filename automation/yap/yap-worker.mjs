@@ -55,7 +55,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-05p-inline-audit-odl-state";
+const WORKER_BUILD = "2026-06-09a-descrizioni-tipo-d";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -2786,6 +2786,66 @@ async function gridTypeDescrizione(page, text) {
   return { ok: true, target, value };
 }
 
+// Imposta il TIPO (col 2) dell'ULTIMA riga (quella appena aggiunta, in modifica).
+// Le righe di sola descrizione devono essere Tipo "D" (Descrizione): con "N" (riga
+// articolo) YAP le considera invalide ("Impossibile salvare, alcuni valori non sono
+// validi") perche' senza articolo/prezzo. Dumpa anche le opzioni del dropdown.
+async function gridSetLastRowTipo(page, tipo) {
+  const cell = await safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector('td[yapcolumnid="2"]') && isVisible(tr));
+    if (!rows.length) return null;
+    const c = rows[rows.length - 1].querySelector('td[yapcolumnid="2"]');
+    const r = c.getBoundingClientRect();
+    return { x: r.x + (r.width / 2), y: r.y + (r.height / 2) };
+  }).catch(() => null);
+  if (!cell) return { ok: false, reason: "tipo_cell_not_found" };
+
+  await page.mouse.dblclick(cell.x, cell.y).catch(() => {});
+  await page.waitForTimeout(200).catch(() => {});
+  await page.keyboard.press("Control+A").catch(() => {});
+  await page.keyboard.type(String(tipo), { delay: 60 }).catch(() => {});
+  await page.waitForTimeout(350).catch(() => {}); // lascia comparire il dropdown
+
+  // Dropdown del Tipo: opzioni (diagnostica) + coordinate dell'opzione che inizia con `tipo`.
+  const dd = await safeEvaluate(page, (want) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const items = [...document.querySelectorAll(
+      ".gwt-SuggestBoxPopup [__gwt_cell], .gwt-SuggestBoxPopup tr, [role='option'], .gwt-MenuItem",
+    )].filter(isVisible).filter((e) => (e.textContent || "").trim());
+    const opts = [...new Set(items.map((e) => (e.textContent || "").replace(/\s+/g, " ").trim().slice(0, 30)))].slice(0, 10);
+    const W = String(want).toUpperCase();
+    const hit = items.find((e) => (e.textContent || "").trim().toUpperCase().startsWith(W)) || items[0];
+    let coords = null;
+    if (hit) { const r = hit.getBoundingClientRect(); coords = { x: r.x + Math.min(r.width / 2, 60), y: r.y + (r.height / 2) }; }
+    return { opts, coords };
+  }, tipo).catch(() => ({ opts: [], coords: null }));
+
+  if (dd.coords) {
+    await page.mouse.click(dd.coords.x, dd.coords.y).catch(() => {});
+  } else {
+    await page.keyboard.press("Enter").catch(() => {});
+  }
+  await page.waitForTimeout(250).catch(() => {});
+
+  const readback = await safeEvaluate(page, () => {
+    const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector('td[yapcolumnid="2"]'));
+    const c = rows[rows.length - 1]?.querySelector('td[yapcolumnid="2"]');
+    let t = (c?.textContent || "");
+    for (const inp of (c?.querySelectorAll("input") || [])) t += " " + (inp.value || "");
+    return t.replace(/\s+/g, " ").trim().slice(0, 20);
+  }).catch(() => null);
+  return { ok: true, opts: dd.opts, pickedDropdown: Boolean(dd.coords), readback };
+}
+
 // Legge il contenuto testuale delle celle chiave di una riga (readback).
 async function gridDumpRow(page, rowIndex) {
   return safeEvaluate(page, ({ rowIndex, COL }) => {
@@ -2963,6 +3023,13 @@ async function writeWorkGrid(page, job, args = {}) {
   for (const line of descrLines) {
     const added = await gridAddRow(page, true);
     await page.waitForTimeout(300).catch(() => {});
+    const tipo = await gridSetLastRowTipo(page, "D");
+    logAction("grid_tipo", {
+      kind: line.kind,
+      text: line.text.slice(0, 30),
+      added: added.ok,
+      ...tipo,
+    });
     // Scrive direttamente nell'input Descrizione (il piu' largo) della riga in modifica.
     const set = await gridTypeDescrizione(page, line.text);
     // Verifica immediata: il testo compare in una riga (testo OPPURE valore di un input)?
