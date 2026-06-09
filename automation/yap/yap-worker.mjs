@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09p-vehicle-real-keyboard-no-double";
+const WORKER_BUILD = "2026-06-09q-tipo-D-click-scoped";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -3085,30 +3085,39 @@ async function gridSetLastRowTipo(page, tipo) {
   await page.keyboard.type(String(tipo), { delay: 60 }).catch(() => {});
   await page.waitForTimeout(350).catch(() => {}); // lascia comparire il dropdown
 
-  // Diagnostica: opzioni del dropdown SOLO dal vero .gwt-SuggestBoxPopup (NON il menu in
-  // alto). Il bug precedente catturava .gwt-MenuItem = menu nav (Dashboard/Agenda/...) e
-  // cliccava "Dashboard" (inizia per D) -> navigava via dalla pratica.
-  const opts = await safeEvaluate(page, () => {
+  // Trova e CLICCA l'opzione "D (DESCRITTIVA)" DENTRO il .gwt-SuggestBoxPopup del Tipo.
+  // Lo scoping STRETTO al SuggestBoxPopup esclude il menu di navigazione in alto (il bug
+  // precedente cliccava "Dashboard"). ArrowDown+Enter NON selezionava (readback vuoto),
+  // quindi serve il clic sull'opzione, ma confinato al popup -> sicuro.
+  const pick = await safeEvaluate(page, (want) => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
       const s = window.getComputedStyle(el);
       return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
     };
+    const W = String(want).toUpperCase();
     const items = [];
     for (const p of [...document.querySelectorAll(".gwt-SuggestBoxPopup")].filter(isVisible)) {
-      for (const e of p.querySelectorAll("[__gwt_cell], tr, [role='option']")) {
-        if (isVisible(e) && (e.textContent || "").trim()) items.push((e.textContent || "").replace(/\s+/g, " ").trim().slice(0, 24));
+      for (const e of p.querySelectorAll("td, div, [__gwt_cell], [role='option']")) {
+        const t = (e.textContent || "").replace(/\s+/g, " ").trim();
+        if (isVisible(e) && t) items.push({ e, t });
       }
     }
-    return [...new Set(items)].slice(0, 10);
-  }).catch(() => []);
+    const opts = [...new Set(items.map((i) => i.t.slice(0, 24)))].slice(0, 8);
+    // Opzione foglia che INIZIA col tipo voluto (es. "D (DESCRITTIVA)"), corta (non il
+    // contenitore con tutte le opzioni concatenate).
+    const hit = items.find((i) => i.t.toUpperCase().startsWith(W) && i.t.length < 24);
+    let coords = null;
+    if (hit) { const r = hit.e.getBoundingClientRect(); coords = { x: r.x + Math.min(r.width / 2, 60), y: r.y + (r.height / 2) }; }
+    return { opts, coords, hitText: hit ? hit.t.slice(0, 24) : null };
+  }, tipo).catch(() => ({ opts: [], coords: null, hitText: null }));
 
-  // Selezione SOLO da TASTIERA (ArrowDown + Enter): mai click su coordinate, quindi
-  // impossibile cliccare per sbaglio il menu di navigazione.
-  await page.keyboard.press("ArrowDown").catch(() => {});
-  await page.waitForTimeout(120).catch(() => {});
-  await page.keyboard.press("Enter").catch(() => {});
-  await page.waitForTimeout(250).catch(() => {});
+  if (pick.coords) {
+    await page.mouse.click(pick.coords.x, pick.coords.y).catch(() => {});
+  } else {
+    await page.keyboard.press("Enter").catch(() => {});
+  }
+  await page.waitForTimeout(300).catch(() => {});
 
   const readback = await safeEvaluate(page, () => {
     const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector('td[yapcolumnid="2"]'));
@@ -3120,7 +3129,8 @@ async function gridSetLastRowTipo(page, tipo) {
   // Guardia: se siamo finiti sulla dashboard, e' un fallimento grave (non navigare mai via).
   const hash = await safeEvaluate(page, () => location.hash || "").catch(() => "");
   const navigatedAway = /dashboard/i.test(hash);
-  return { ok: !navigatedAway, opts, readback, navigatedAway: navigatedAway || undefined };
+  const setOk = Boolean(readback && readback.toUpperCase().startsWith(String(tipo).toUpperCase()));
+  return { ok: !navigatedAway && setOk, opts: pick.opts, hitText: pick.hitText, pickedDropdown: Boolean(pick.coords), readback, navigatedAway: navigatedAway || undefined };
 }
 
 // Legge il contenuto testuale delle celle chiave di una riga (readback).
