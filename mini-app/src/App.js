@@ -434,9 +434,13 @@ function matchYapAuditItem(item, matchers = []) {
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
+  // I matcher regex con ancore (^campo$) vanno testati ANCHE contro il solo `field`:
+  // l'haystack unito (field + expected + ...) faceva fallire ^preventivo\.manodopera$
+  // -> la checklist mostrava "n.d." anche quando il campo era presente nell'audit.
+  const field = String(item?.field || '').toLowerCase();
   return matchers.some((matcher) => (
     matcher instanceof RegExp
-      ? matcher.test(haystack)
+      ? (matcher.test(haystack) || (field && matcher.test(field)))
       : haystack.includes(String(matcher || '').toLowerCase())
   ));
 }

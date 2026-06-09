@@ -2948,7 +2948,7 @@ async function gridAddRow(page, hasRows) {
     if (addAnchor) { addAnchor.click(); return { ok: true, via: "add_anchor" }; }
     return { ok: false };
   }, hasRows).catch(() => ({ ok: false }));
-  await page.waitForTimeout(400).catch(() => {});
+  await page.waitForTimeout(280).catch(() => {});
   return clicked;
 }
 
@@ -3083,7 +3083,7 @@ async function gridSetLastRowTipo(page, tipo) {
   await page.waitForTimeout(200).catch(() => {});
   await page.keyboard.press("Control+A").catch(() => {});
   await page.keyboard.type(String(tipo), { delay: 60 }).catch(() => {});
-  await page.waitForTimeout(350).catch(() => {}); // lascia comparire il dropdown
+  await page.waitForTimeout(260).catch(() => {}); // lascia comparire il dropdown
 
   // Trova e CLICCA l'opzione "D (DESCRITTIVA)" DENTRO il .gwt-SuggestBoxPopup del Tipo.
   // Lo scoping STRETTO al SuggestBoxPopup esclude il menu di navigazione in alto (il bug
@@ -3369,7 +3369,7 @@ async function writeWorkGrid(page, job, args = {}) {
   out.righe = [];
   for (const line of descrLines) {
     const added = await gridAddRow(page, true);
-    await page.waitForTimeout(300).catch(() => {});
+    await page.waitForTimeout(150).catch(() => {}); // gridAddRow ha gia' la sua attesa interna
     const tipo = await gridSetLastRowTipo(page, "D");
     logAction("grid_tipo", {
       kind: line.kind,
@@ -3850,7 +3850,27 @@ async function writePracticeAndOdl(page, job, args) {
         if (manOk) { writeReport.openedOdl = true; writeReport.odl.success = true; writeReport.odl.error = null; }
         writeReport.ok = manOk;
         writeReport.workspaceState = workspaceState;
-        writeReport.fields = buildFieldWriteReport(job, writeReport);
+        // Campi ONESTI del preventivo (da gridResult), non i legacy ODL/note.interne che
+        // risultavano sempre "missing" e sporcavano il report senza essere nell'audit.
+        const pf = [{
+          field_id: "preventivo.manodopera", expected: "MAN",
+          found: manOk ? "MAN" : null, status: manOk ? "written" : "missing",
+          hint: "Preventivo > riga MANODOPERA (MAN).",
+        }];
+        for (const r of (gridResult?.righe || [])) {
+          pf.push({
+            field_id: `preventivo.${r.kind}`, expected: r.text,
+            found: r.written ? r.text : null, status: r.written ? "written" : "missing",
+            hint: "Preventivo > righe descrittive (Tipo D).",
+          });
+        }
+        const docSaved = Boolean(gridResult?.saved?.ok);
+        pf.push({
+          field_id: "preventivo.salvataggio", expected: "documento salvato",
+          found: docSaved ? "salvato" : null, status: docSaved ? "written" : "missing",
+          hint: "Preventivo > pulsante Salva.",
+        });
+        writeReport.fields = pf;
         logPhase("grid_write", gridResult?.ok ? "done" : "failed", { manodopera: manOk });
         _detachRpcTrace();
         return writeReport;
