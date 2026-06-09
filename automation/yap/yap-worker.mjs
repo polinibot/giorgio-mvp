@@ -3137,7 +3137,10 @@ async function gridSetLastRowTipo(page, tipo) {
   // Guardia: se siamo finiti sulla dashboard, e' un fallimento grave (non navigare mai via).
   const hash = await safeEvaluate(page, () => location.hash || "").catch(() => "");
   const navigatedAway = /dashboard/i.test(hash);
-  const setOk = Boolean(readback && readback.toUpperCase().startsWith(String(tipo).toUpperCase()));
+  // ok = ho selezionato l'opzione giusta dal dropdown (segnale affidabile) OPPURE il
+  // readback conferma. Il readback da solo dava falsi negativi (legge la riga-coda).
+  const pickedRightOption = Boolean(pick.coords) && String(pick.hitText || "").toUpperCase().startsWith(W);
+  const setOk = pickedRightOption || Boolean(readback && readback.toUpperCase().startsWith(W));
   return { ok: !navigatedAway && setOk, opts: pick.opts, hitText: pick.hitText, pickedDropdown: Boolean(pick.coords), readback, navigatedAway: navigatedAway || undefined };
 }
 

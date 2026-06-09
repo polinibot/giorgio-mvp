@@ -217,7 +217,11 @@ def build_yap_preview(mapping: Dict[str, Any], pre_sync: Optional[Dict[str, Any]
                         "noteReparto": (lav.get("note") or lav.get("notes") or None),
                     }
                     for lav in _sort_lavorazioni(mapping.get("lavorazioni") or [])
-                    if not contexts or lav.get("reparto") in contexts
+                    # La revisione NON ha righe nel preventivo (solo il tag): escluderla
+                    # dall'anteprima, altrimenti mostrava righe mai scritte = "completo"
+                    # ingannevole. Il worker scrive officina (e in futuro carrozzeria).
+                    if (not contexts or lav.get("reparto") in contexts)
+                    and str(lav.get("reparto") or "").strip().lower() != "revisione"
                 ],
             } if has_work else None,
         },

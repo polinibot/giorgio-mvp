@@ -762,13 +762,6 @@ const RANDOM_CARROZZERIA_ROWS = [
   'Allineamento pannello',
   'Controllo finitura',
 ];
-const RANDOM_REVISIONE_ROWS = [
-  'Revisione periodica',
-  'Controllo emissioni',
-  'Verifica fari',
-  'Prova freni',
-  'Controllo pneumatici',
-];
 const RANDOM_OFFICINA_PARTS = [
   'Filtro olio',
   'Olio motore 5W30',
@@ -852,8 +845,9 @@ function randomSectionPayload(context) {
       parts: RANDOM_CARROZZERIA_PARTS,
     },
     revisione: {
-      rows: RANDOM_REVISIONE_ROWS,
-      manHours: [0.5, 2],
+      // La revisione NON ha righe nel preventivo (solo il tag): niente righe/ore/ricambi.
+      rows: [],
+      manHours: null,
       macHours: null,
       materialsMin: null,
       materialsMax: null,
@@ -862,7 +856,9 @@ function randomSectionPayload(context) {
     },
   }[context];
 
-  const descriptionRows = randomSubset(contextConfig.rows, 1, Math.min(3, contextConfig.rows.length));
+  const descriptionRows = contextConfig.rows.length
+    ? randomSubset(contextConfig.rows, 1, Math.min(3, contextConfig.rows.length))
+    : [];
   const manHours = contextConfig.manHours ? Number((Math.random() * (contextConfig.manHours[1] - contextConfig.manHours[0]) + contextConfig.manHours[0]).toFixed(1)) : null;
   const macHours = contextConfig.macHours
     ? Number((Math.random() * (contextConfig.macHours[1] - contextConfig.macHours[0]) + contextConfig.macHours[0]).toFixed(1))
