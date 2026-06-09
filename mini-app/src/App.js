@@ -584,6 +584,49 @@ function buildYapDiagnosticClipboardText(snapshot) {
   return lines.join('\n');
 }
 
+function buildWorkerLogLines(workerPhases) {
+  const workerLog = Array.isArray(workerPhases) ? workerPhases : [];
+  if (!workerLog.length) return '';
+  const hidden = ['phase', 'status', 'elapsed_ms', 'delta_ms', 'ts', 'seq', 'run', 'event'];
+  return workerLog.map((phase) => {
+    const elapsed = typeof phase.elapsed_ms === 'number' ? `${(phase.elapsed_ms / 1000).toFixed(1)}s` : '';
+    const delta = typeof phase.delta_ms === 'number' ? `+${phase.delta_ms}ms` : '';
+    const extra = Object.entries(phase)
+      .filter(([key, value]) => !hidden.includes(key) && value != null && value !== '')
+      .map(([key, value]) => `${key}=${typeof value === 'object' ? JSON.stringify(value) : value}`)
+      .join(' ');
+    return `${elapsed.padStart(6)} ${delta.padStart(8)}  ${phase.phase || '?'}:${phase.status || '?'}${extra ? `  ${extra}` : ''}`;
+  }).join('\n');
+}
+
+function buildYapLogClipboardText({ technicalDiagnostics, workerPhases }) {
+  const lines = ['Crash log YAP + Log worker'];
+  if (technicalDiagnostics?.runner?.finished_at) {
+    lines.push(`ts: ${technicalDiagnostics.runner.finished_at}`);
+  }
+  if (technicalDiagnostics?.runner?.script || technicalDiagnostics?.runner?.timeout_seconds) {
+    lines.push(`script: ${technicalDiagnostics?.runner?.script || 'yap-worker.mjs'}${technicalDiagnostics?.runner?.timeout_seconds ? ` timeout: ${technicalDiagnostics.runner.timeout_seconds}s` : ''}`);
+  }
+  if (technicalDiagnostics?.workerPhases?.length) {
+    const last = technicalDiagnostics.workerPhases[technicalDiagnostics.workerPhases.length - 1];
+    lines.push(`last_phase: ${last?.phase || '?'}:${last?.status || '?'}`);
+    lines.push(`phases: ${summarizeWorkerPhases(technicalDiagnostics.workerPhases)}`);
+  } else if (technicalDiagnostics?.failedPhase) {
+    lines.push(`last_phase: ${technicalDiagnostics.failedPhase}`);
+  }
+  const workerLogText = buildWorkerLogLines(workerPhases || technicalDiagnostics?.workerPhases || []);
+  if (workerLogText) {
+    lines.push('', 'worker log', workerLogText);
+  }
+  if (technicalDiagnostics?.stdoutTail) {
+    lines.push('', 'stdout tail', technicalDiagnostics.stdoutTail);
+  }
+  if (technicalDiagnostics?.stderrTail) {
+    lines.push('', 'stderr tail', technicalDiagnostics.stderrTail);
+  }
+  return lines.join('\n');
+}
+
 function formatYapStatusReason(reason) {
   const normalized = String(reason || '').trim().toLowerCase();
   if (!normalized) return '';
@@ -1835,6 +1878,7 @@ function App() {
   const yapActionProgressTimerRef = useRef(null);
   const yapActionProgressClearTimerRef = useRef(null);
   const yapAbortControllerRef = useRef(null);
+  const yapSyncRequestRef = useRef({ practiceId: null, promise: null });
   const auditYapAppointmentRef = useRef(null);
   const toastIdRef = useRef(0);
   const formRef = useRef(null);
@@ -2757,12 +2801,22 @@ function App() {
   const [yapAuditLoading, setYapAuditLoading] = useState(false);
   const [yapLastResult, setYapLastResult] = useState(null);
   const [yapDiagnosticCopyStatus, setYapDiagnosticCopyStatus] = useState('');
+  const [yapLogCopyStatus, setYapLogCopyStatus] = useState('');
   const [yapActionProgress, setYapActionProgress] = useState(null);
 
   const syncToYap = useCallback(async (id, options = {}) => {
     const silent = options.silent || false;
     const apiOptions = { ...options };
     delete apiOptions.silent;
+    const currentSync = yapSyncRequestRef.current;
+    if (currentSync?.practiceId != null) {
+      if (String(currentSync.practiceId || '') === String(id || '')) {
+        if (!silent) addToast('Sync YAP gia in corso su questa pratica.', 'info');
+        return { status: 'busy', message: 'Sync YAP gia in corso su questa pratica.' };
+      }
+      if (!silent) addToast('C e gia una sync YAP in corso. Attendi il completamento.', 'warning');
+      return { status: 'busy', message: 'C e gia una sync YAP in corso. Attendi il completamento.' };
+    }
     if (browserPreviewMode) {
       if (!silent) addToast('Anteprima: sync YAP simulato', 'success');
       setYapLastPracticeId(id);
@@ -2772,6 +2826,7 @@ function App() {
     if (!silent) {
       startYapActionProgress('sync', id, 'YAP: avvio browser e ripristino sessione...');
     }
+    yapSyncRequestRef.current = { practiceId: id, promise: true };
     setYapSyncLoading(true);
     setYapLastResult(null);
     setYapLastPracticeId(id);
@@ -2833,6 +2888,7 @@ function App() {
       return errorResult;
     } finally {
       yapAbortControllerRef.current = null;
+      yapSyncRequestRef.current = { practiceId: null, promise: null };
       setYapSyncLoading(false);
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
@@ -3008,16 +3064,7 @@ function App() {
   const renderWorkerLogPanel = (phases) => {
     const workerLog = Array.isArray(phases) ? phases : [];
     if (!workerLog.length) return null;
-    const HIDDEN = ['phase', 'status', 'elapsed_ms', 'delta_ms', 'ts', 'seq', 'run', 'event'];
-    const lines = workerLog.map((p) => {
-      const t = typeof p.elapsed_ms === 'number' ? `${(p.elapsed_ms / 1000).toFixed(1)}s` : '';
-      const d = typeof p.delta_ms === 'number' ? `+${p.delta_ms}ms` : '';
-      const extra = Object.entries(p)
-        .filter(([k, v]) => !HIDDEN.includes(k) && v != null && v !== '')
-        .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
-        .join(' ');
-      return `${t.padStart(6)} ${d.padStart(8)}  ${p.phase || '?'}:${p.status || '?'}${extra ? '  ' + extra : ''}`;
-    }).join('\n');
+    const lines = buildWorkerLogLines(workerLog);
     return (
       <details className="yap-result-tech" open>
         <summary>🪵 Log worker ({workerLog.length} azioni)</summary>
@@ -3105,6 +3152,37 @@ function App() {
       }
     }
     const technicalDiagnostics = extractYapTechnicalDiagnostics(safeResult);
+    const workerLogPhases = (Array.isArray(safeResult.worker_phases) && safeResult.worker_phases.length)
+      ? safeResult.worker_phases
+      : (Array.isArray(safeResult.phase_timeline) ? safeResult.phase_timeline : []);
+    const canCopyYapLogs = Boolean((technicalDiagnostics && (
+      technicalDiagnostics.runner?.finished_at
+      || technicalDiagnostics.failedPhase
+      || technicalDiagnostics.stdoutTail
+      || technicalDiagnostics.stderrTail
+      || technicalDiagnostics.workerPhases.length
+    )) || workerLogPhases.length);
+    const copyYapLogs = async () => {
+      const payload = buildYapLogClipboardText({ technicalDiagnostics, workerPhases: workerLogPhases });
+      try {
+        if (navigator?.clipboard?.writeText) {
+          await navigator.clipboard.writeText(payload);
+        } else {
+          const helper = document.createElement('textarea');
+          helper.value = payload;
+          helper.setAttribute('readonly', 'readonly');
+          helper.style.position = 'absolute';
+          helper.style.left = '-9999px';
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand('copy');
+          document.body.removeChild(helper);
+        }
+        setYapLogCopyStatus('log copiato');
+      } catch (_) {
+        setYapLogCopyStatus('copia log non riuscita');
+      }
+    };
     if (workerPhaseLabel) {
       diagnosticItems.push(workerPhaseLabel);
     } else {
@@ -3176,11 +3254,7 @@ function App() {
                 ))}
               </div>
             )}
-            {renderWorkerLogPanel(
-              (Array.isArray(safeResult.worker_phases) && safeResult.worker_phases.length)
-                ? safeResult.worker_phases
-                : (Array.isArray(safeResult.phase_timeline) ? safeResult.phase_timeline : [])
-            )}
+            {renderWorkerLogPanel(workerLogPhases)}
             {technicalDiagnostics && (status === 'sync_failed' || status === 'delete_failed' || status === 'partial_synced' || status === 'agenda_synced' || showTechnicalAuditState) && (
               <details className="yap-result-tech" open={status === 'sync_failed' || status === 'delete_failed' || status === 'partial_synced' || showTechnicalAuditState}>
                 <summary>Crash log YAP</summary>
@@ -3348,8 +3422,17 @@ function App() {
             )}
           </div>
         </div>
-        {(canRetry || canAudit || canDelete || showSyncHint || showAuditHint || showDeleteHint) && (
+        {(canCopyYapLogs || canRetry || canAudit || canDelete || showSyncHint || showAuditHint || showDeleteHint) && (
           <div className="yap-result-actions">
+            {canCopyYapLogs && (
+              <button
+                type="button"
+                className="yap-result-action"
+                onClick={copyYapLogs}
+              >
+                Copia crash + worker log
+              </button>
+            )}
             {canRetry && (
               <button
                 type="button"
@@ -3410,13 +3493,16 @@ function App() {
                 {safeResult.action_label || 'Elimina YAP'}
               </button>
             )}
+            {yapLogCopyStatus && (
+              <span className="yap-audit-copy-status">{yapLogCopyStatus}</span>
+            )}
           </div>
         )}
       </div>
     );
   };
 
-  const renderYapAuditReport = (audit, { result = null, practice: practiceInfo = null } = {}) => {
+  const renderYapAuditReport = (audit, { result = null, practice: practiceInfo = null, source = 'live' } = {}) => {
     if (!audit) return null;
     const groups = [
       { key: 'present', title: 'Presenti', items: audit.present || [] },
@@ -3499,6 +3585,11 @@ function App() {
             </span>
           </div>
         </div>
+        {source === 'persisted' && (
+          <div className="yap-audit-message">
+            <strong>Nota:</strong> questo e' l'ultimo controllo YAP salvato per la pratica, non l'esito della sync che sta partendo adesso.
+          </div>
+        )}
         {audit.message && <div className="yap-audit-message">{audit.message}</div>}
         {checklist.length > 0 && (
           <div className="yap-audit-checklist">
@@ -4480,6 +4571,8 @@ function App() {
           const actionLabel = practice ? 'aggiornata' : 'creata';
           const finalMessage = syncResult.status === 'complete_synced'
             ? `Pratica ${actionLabel}. YAP completo verificato.`
+            : syncResult.status === 'busy'
+              ? `Pratica ${actionLabel}. Sync YAP gia in corso.`
             : ['partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(syncResult.status)
               ? `Pratica ${actionLabel}. ${syncResult.message || 'YAP verificato parzialmente.'}`
             : syncResult.status === 'dry_run'
@@ -4487,7 +4580,7 @@ function App() {
               : syncResult.status === 'not_ready'
                 ? `Pratica ${actionLabel}, ma non pronta per YAP.`
                 : `Pratica ${actionLabel}, ma sync YAP fallita: ${syncResult.message || 'errore sconosciuto'}`;
-          const bannerSyncResult = ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(syncResult.status)
+          const bannerSyncResult = ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'busy'].includes(syncResult.status)
             ? syncResult
             : { ...syncResult, message: finalMessage };
           const finalSyncResult = { ...bannerSyncResult };
@@ -4499,7 +4592,7 @@ function App() {
           setNavigationStack(['dashboard']);
           const toastTone = syncResult.status === 'sync_failed'
             ? 'error'
-            : (['partial_synced', 'agenda_synced', 'not_ready', 'dry_run'].includes(syncResult.status) ? 'warning' : 'success');
+            : (['partial_synced', 'agenda_synced', 'not_ready', 'dry_run', 'busy'].includes(syncResult.status) ? 'warning' : 'success');
           addToast(finalMessage, toastTone);
         } else {
           const missingIdMessage = 'Salvataggio completato, ma ID pratica non disponibile.';
@@ -5053,6 +5146,14 @@ function App() {
       return acc;
     }, {});
     const yapBusy = yapSyncLoading || yapAuditLoading || yapDeleteLoading;
+    const currentPracticeYapAction = Boolean(
+      yapLastPracticeId === practice.id
+      && (yapSyncLoading || yapAuditLoading || yapDeleteLoading || (yapActionProgress && yapActionProgress.status === 'running'))
+    );
+    const liveAudit = yapLastPracticeId === practice.id ? getYapAuditResult(yapLastResult) : null;
+    const auditSource = liveAudit ? 'live' : 'persisted';
+    const persistedAudit = currentPracticeYapAction ? null : practice.management_audit_result;
+    const auditToRender = liveAudit || persistedAudit;
     const openYapTab = () => setDetailTab('yap');
     const runOverviewSync = () => {
       setDetailTab('yap');
@@ -5147,11 +5248,20 @@ function App() {
             return renderWorkerLogPanel(mar?.worker_phases);
           })()}
 
+          {currentPracticeYapAction && !liveAudit && (
+            <div className="section yap-audit-section">
+              <div className="yap-audit-message">
+                <strong>Controllo YAP in aggiornamento:</strong> sto aspettando l'esito corrente della sincronizzazione prima di mostrarti il riepilogo.
+              </div>
+            </div>
+          )}
+
           {renderYapAuditReport(
-            getYapAuditResult(yapLastPracticeId === practice.id ? yapLastResult : null) || practice.management_audit_result,
+            auditToRender,
             {
               result: yapLastPracticeId === practice.id ? yapLastResult : null,
               practice,
+              source: auditSource,
             },
           )}
 
