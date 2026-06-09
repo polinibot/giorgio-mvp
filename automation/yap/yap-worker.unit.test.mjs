@@ -9,6 +9,7 @@ import {
   formatManNeedle,
   hasVerifiedOdlWorkspace,
   parsePraticaHashPayload,
+  shouldBlockPracticeWriteForVehicle,
 } from "./yap-worker.mjs";
 import {
   buildManagementPlan,
@@ -130,6 +131,16 @@ test("verified ODL workspace accepts effective ODL states even when openedOdl is
     workspaceState: "loading_shell",
     debug: { odl: {} },
   }), false);
+});
+
+test("vehicle gate blocks practice write unless the vehicle is linked", () => {
+  const job = { customer: { plate: "CN401MV" } };
+
+  assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "linked" }), false);
+  assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "failed" }), true);
+  assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "not_found" }), true);
+  assert.equal(shouldBlockPracticeWriteForVehicle(job, null), true);
+  assert.equal(shouldBlockPracticeWriteForVehicle({ customer: {} }, { vehicleState: "failed" }), false);
 });
 
 test("extractTrailingJsonBlock finds the final JSON object in mixed output", () => {

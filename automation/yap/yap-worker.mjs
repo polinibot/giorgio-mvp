@@ -390,6 +390,10 @@ function shouldWriteOdlFromWorker(job) {
   return String(process.env.YAP_WRITE_ODL || "1").trim() !== "0" && hasWriteableOdlWork(job);
 }
 
+function shouldBlockPracticeWriteForVehicle(job, popupResult) {
+  return Boolean(job?.customer?.plate) && popupResult?.vehicleState !== "linked";
+}
+
 function normalizeLoose(value) {
   return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
@@ -4389,6 +4393,8 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
   // L'agenda è confermata dal salvataggio del popup appuntamento andato a buon fine.
   present.push({ field: "agenda", expected: "appuntamento salvato in agenda" });
 
+  const odlRequested = shouldWriteOdlFromWorker(job);
+
   // Verifica TAG e VEICOLO in base all'esito reale della scrittura del popup
   // (non dare per riuscito ciò che non lo è). Vale per ogni pratica, anche revisione.
   const expectedTags = pickYapTagsFromJob(job);
@@ -4403,9 +4409,10 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
   }
   if (job.customer?.plate) {
     const vstate = popupResult?.vehicleState || (popupResult?.vehicleLinked ? "linked" : "failed");
-    if (vstate === "linked") {
+    const vehicleLinked = vstate === "linked";
+    if (vehicleLinked) {
       present.push({ field: "veicolo", expected: `veicolo agganciato (${job.customer.plate})` });
-    } else if (vstate === "not_found") {
+    } else if (vstate === "not_found" && !odlRequested) {
       // Il veicolo non e' in anagrafica YAP: NON e' un errore, lo segnaliamo come presente/ok.
       present.push({ field: "veicolo", expected: `veicolo non in anagrafica YAP (${job.customer.plate}) — ok` });
     } else {
@@ -4414,7 +4421,6 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
   }
 
   // Se l'ODL non era richiesto (es. revisione), l'esito dipende da agenda + tag + veicolo.
-  const odlRequested = shouldWriteOdlFromWorker(job);
   if (!odlRequested) {
     return {
       verified: missing.length === 0,
@@ -5226,10 +5232,9 @@ async function runYapAutomation(job, args) {
       await page.screenshot({ path: afterSavePath, fullPage: true });
     }
     let managementWrite = null;
-    // PREREQUISITO: senza veicolo agganciato NON si entra in gestione pratica, quindi
-    // niente preventivo/ODL. Se la targa c'era ma l'aggancio e' fallito, salto la
-    // scrittura (inutile + lenta) e lo segnalo onestamente.
-    const vehicleBlocksPractice = Boolean(job.customer?.plate) && popupResult?.vehicleState === "failed";
+    // PREREQUISITO: senza veicolo agganciato NON si entra in gestione pratica.
+    // Qualsiasi stato diverso da "linked" blocca preventivo/ODL.
+    const vehicleBlocksPractice = shouldBlockPracticeWriteForVehicle(job, popupResult);
     if (shouldWriteOdlFromWorker(job) && vehicleBlocksPractice) {
       logPhase("odl", "skipped_no_vehicle", { plate: job.customer?.plate });
       managementWrite = {
@@ -5468,4 +5473,5 @@ export {
   hasVerifiedOdlWorkspace,
   normalizeLoose,
   parsePraticaHashPayload,
+  shouldBlockPracticeWriteForVehicle,
 };
