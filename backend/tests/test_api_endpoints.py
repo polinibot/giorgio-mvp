@@ -117,7 +117,7 @@ class TestPracticesCRUDEndpoints:
             "customer_type": "privato",
             "billing_to_complete": False,
             "appointment_date": "2026-11-15T00:00:00",
-            "appointment_time": "07:15",
+            "appointment_time": "09:24",
             "practice_type": "preventivo",
             "contexts": ["officina"],
         }
@@ -125,7 +125,24 @@ class TestPracticesCRUDEndpoints:
         response = client.post("/practices?user_id=761118078", json=practice_data)
         assert response.status_code == 200
         data = response.json()["data"]
-        assert data["appointment_time"] == "07:20"
+        assert data["appointment_time"] == "09:20"
+
+    def test_create_practice_rejects_out_of_yap_visible_range(self, client):
+        practice_data = {
+            "plate_confirmed": "TEST01YX",
+            "phone": "+391234567890",
+            "customer_name": "Test Orario Fuori Fascia",
+            "customer_type": "privato",
+            "billing_to_complete": False,
+            "appointment_date": "2026-11-15T00:00:00",
+            "appointment_time": "00:40",
+            "practice_type": "preventivo",
+            "contexts": ["officina"],
+        }
+
+        response = client.post("/practices?user_id=761118078", json=practice_data)
+        assert response.status_code == 400
+        assert "Orario fuori fascia YAP" in response.json()["detail"]
 
     def test_create_and_get_practice_detail(self, client):
         """Test POST /practices e GET /api/practices/{id}."""

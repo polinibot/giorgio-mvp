@@ -618,22 +618,21 @@ async function clickApproximateSlot(page, targetTime) {
 
     if (!rows.length) return null;
 
-    let best = rows[0];
-    let bestScore = Number.POSITIVE_INFINITY;
-    for (const item of rows) {
-      const diff = Math.abs(item.minutes - targetMinutes);
-      const penalty = item.minutes < targetMinutes ? 1 : 0;
-      const score = diff + penalty;
-      if (score < bestScore) {
-        best = item;
-        bestScore = score;
-      }
+    const exact = rows.find((item) => item.minutes === targetMinutes);
+    if (!exact) {
+      return {
+        missing: true,
+        requestedTime,
+        minTime: rows[0]?.time || null,
+        maxTime: rows[rows.length - 1]?.time || null,
+        availableSample: rows.slice(0, 4).map((item) => item.time).concat(rows.slice(-4).map((item) => item.time)),
+      };
     }
 
-    best.cell.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
-    const rect = best.cell.getBoundingClientRect();
+    exact.cell.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+    const rect = exact.cell.getBoundingClientRect();
     return {
-      time: best.time,
+      time: exact.time,
       x: rect.x,
       y: rect.y,
       width: rect.width,
@@ -642,6 +641,9 @@ async function clickApproximateSlot(page, targetTime) {
   }, normalizedTarget).catch(() => null);
 
   if (candidate) {
+    if (candidate.missing) {
+      throw new Error(`Slot YAP non visibile per ${normalizedTarget} (range visibile ${candidate.minTime || "?"}-${candidate.maxTime || "?"})`);
+    }
     await page.waitForTimeout(300).catch(() => {});
   }
   let slot = candidate;
@@ -664,12 +666,15 @@ async function clickApproximateSlot(page, targetTime) {
 
     const targetMinutes = minutesOf(normalizedTarget);
     const sorted = labels.sort((a, b) => minutesOf(a.text || a.time) - minutesOf(b.text || b.time));
-    slot = sorted[0];
+    slot = null;
     for (const item of sorted) {
       const candidateTime = item.text || item.time;
-      if (minutesOf(candidateTime) <= targetMinutes) {
+      if (minutesOf(candidateTime) === targetMinutes) {
         slot = item;
       }
+    }
+    if (!slot) {
+      throw new Error(`Slot YAP non visibile per ${normalizedTarget} (range visibile ${sorted[0]?.text || "?"}-${sorted[sorted.length - 1]?.text || "?"})`);
     }
   }
 
@@ -3315,11 +3320,101 @@ async function snapshotWorkGrid(page) {
   }).catch(() => ({ error: true }));
 }
 
-// Orchestratore: scrive le righe del documento (Preventivo/ODL). Per ora: MANODOPERA.
+async function readWorkGridTexts(page) {
+  return safeEvaluate(page, () => {
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    return [...document.querySelectorAll("tr")]
+      .filter((tr) => tr.querySelector("td[yapcolumnid]"))
+      .map((tr) => {
+        let hay = tr.textContent || "";
+        for (const inp of tr.querySelectorAll("input")) hay += ` ${inp.value || ""}`;
+        return normalize(hay);
+      })
+      .filter(Boolean);
+  }).catch(() => []);
+}
+
+function comparableGridText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+
+function gridRowsIncludeText(rows, needle) {
+  const n = comparableGridText(needle);
+  if (!n) return false;
+  return (rows || []).some((row) => comparableGridText(row).includes(n));
+}
+
+function gridRowsIncludeManodopera(rows) {
+  return (rows || []).some((row) => {
+    const text = comparableGridText(row);
+    return /\bMAN+\b/.test(text) || /MANODOPERA/.test(text);
+  });
+}
+
+function gridWorkSections(job) {
+  const order = { officina: 0, carrozzeria: 1 };
+  return (job.sections || [])
+    .filter((section) => {
+      const reparto = String(section?.reparto || "").trim().toLowerCase();
+      return reparto === "officina" || reparto === "carrozzeria";
+    })
+    .sort((a, b) => {
+      const ar = String(a?.reparto || "").trim().toLowerCase();
+      const br = String(b?.reparto || "").trim().toLowerCase();
+      return (order[ar] ?? 99) - (order[br] ?? 99);
+    });
+}
+
+function sectionGridLabel(section) {
+  const reparto = String(section?.reparto || "").trim().toLowerCase();
+  if (reparto === "officina") return "Officina";
+  if (reparto === "carrozzeria") return "Carrozzeria";
+  return reparto || "Reparto";
+}
+
+function sectionNumber(value) {
+  if (value == null || value === "") return null;
+  return value;
+}
+
+function buildWorkGridDescriptionLines(job) {
+  const workSections = gridWorkSections(job);
+  const addRepartoPrefix = workSections.length > 1;
+  const descrLines = [];
+  const pushLine = (section, kind, rawText) => {
+    const text = String(rawText || "").trim();
+    if (!text) return;
+    const reparto = String(section?.reparto || "").trim().toLowerCase();
+    const displayText = addRepartoPrefix ? `${sectionGridLabel(section)} - ${text}` : text;
+    descrLines.push({ kind, reparto, text: displayText });
+  };
+
+  for (const section of workSections) {
+    for (const d of (section?.descrizioni || [])) {
+      pushLine(section, "descrizione", d);
+    }
+    const macHours = sectionNumber(section?.ore_mac ?? section?.mac_hours);
+    if (macHours != null) pushLine(section, "mac", `MAC: ${macHours} h`);
+    const materialsAmount = sectionNumber(section?.materiali_euro ?? section?.materials_amount);
+    if (materialsAmount != null) pushLine(section, "materiali", `Materiali: ${materialsAmount}`);
+    if (section?.smaltimento_applica) {
+      pushLine(section, "smaltimento", `Smaltimento: ${section.smaltimento_percentuale ?? 2}%`);
+    }
+    for (const r of (section?.ricambi || [])) {
+      const name = r?.name || r?.nome;
+      const qty = r?.quantity || r?.quantita;
+      if (name) pushLine(section, "ricambio", `${String(name).trim()}${qty ? ` x ${String(qty).trim()}` : ""}`);
+    }
+  }
+
+  return descrLines;
+}
+
+// Orchestratore: scrive le righe del documento (Preventivo/ODL).
 async function writeWorkGrid(page, job, args = {}) {
-  const sections = job.sections || [];
-  const officina = sections.find((s) => String(s.reparto || "").toLowerCase() === "officina");
-  const manHours = officina?.ore_man ?? officina?.man_hours ?? null;
+  const workSections = gridWorkSections(job);
+  const manSection = workSections.find((s) => sectionNumber(s?.ore_man ?? s?.man_hours) != null);
+  const manHours = sectionNumber(manSection?.ore_man ?? manSection?.man_hours);
 
   // Rileva la griglia anche se il documento e' VUOTO (niente righe yapcolumnid):
   // bottone "Aggiungi prima riga" / header colonne / testo "documento non ha righe".
@@ -3334,46 +3429,72 @@ async function writeWorkGrid(page, job, args = {}) {
     }).catch(() => false);
     if (!onGrid) await page.waitForTimeout(400).catch(() => {});
   }
-  logAction("grid_check", { onGrid, manHours: manHours ?? null });
+  logAction("grid_check", {
+    onGrid,
+    sections: workSections.map((s) => String(s?.reparto || "").trim()).filter(Boolean),
+    manHours: manHours ?? null,
+  });
   if (!onGrid) return { ok: false, reason: "not_on_grid" };
+  const existingRows = await readWorkGridTexts(page);
+  logAction("grid_existing_rows", { count: existingRows.length, sample: existingRows.slice(0, 10) });
   logAction("grid_snapshot_before", await snapshotWorkGrid(page));
 
-  const out = { ok: true, manodopera: null };
+  const out = { ok: true, changed: false, manodopera: null, sections: workSections.map((s) => String(s?.reparto || "").trim()).filter(Boolean) };
   if (manHours != null) {
-    const hasRows = await safeEvaluate(page, () =>
-      [...document.querySelectorAll("tr")].some((tr) => tr.querySelector("td[yapcolumnid]"))
-    ).catch(() => false);
-    const added = await gridAddRow(page, hasRows);
-    logAction("grid_add_row", added);
-    const rc = await gridCellRect(page, 0, GRID_COL.articolo);
-    const newRow = Math.max(0, (rc?.rowCount || 1) - 1);
-    const art = await gridSelectArticolo(page, newRow, "MAN");
-    logAction("grid_articolo", { row: newRow, code: "MAN", ...art });
-    let qta = null;
-    if (art.ok) {
-      qta = await gridSetCell(page, newRow, GRID_COL.qta, manHours);
-      logAction("grid_qta", { row: newRow, value: manHours, ...qta });
+    if (gridRowsIncludeManodopera(existingRows)) {
+      logAction("grid_man_skip_existing", { reparto: String(manSection?.reparto || "").trim(), value: manHours });
+      out.manodopera = {
+        expected: true,
+        reparto: String(manSection?.reparto || "").trim(),
+        added: false,
+        existing: true,
+        articolo: true,
+        qta: true,
+        readback: { found: true, existing: true },
+      };
+    } else {
+      const hasRows = await safeEvaluate(page, () =>
+        [...document.querySelectorAll("tr")].some((tr) => tr.querySelector("td[yapcolumnid]"))
+      ).catch(() => false);
+      const added = await gridAddRow(page, hasRows);
+      out.changed = out.changed || Boolean(added.ok);
+      logAction("grid_add_row", added);
+      const rc = await gridCellRect(page, 0, GRID_COL.articolo);
+      const newRow = Math.max(0, (rc?.rowCount || 1) - 1);
+      const art = await gridSelectArticolo(page, newRow, "MAN");
+      logAction("grid_articolo", { row: newRow, code: "MAN", ...art });
+      let qta = null;
+      if (art.ok) {
+        qta = await gridSetCell(page, newRow, GRID_COL.qta, manHours);
+        logAction("grid_qta", { row: newRow, value: manHours, ...qta });
+      }
+      const after = await gridDumpRow(page, newRow);
+      logAction("grid_row_after", after);
+      logAction("grid_snapshot_after_man", await snapshotWorkGrid(page));
+      out.manodopera = {
+        expected: true,
+        reparto: String(manSection?.reparto || "").trim(),
+        added: added.ok,
+        articolo: art.ok,
+        qta: Boolean(qta?.ok),
+        readback: after,
+      };
     }
-    const after = await gridDumpRow(page, newRow);
-    logAction("grid_row_after", after);
-    logAction("grid_snapshot_after_man", await snapshotWorkGrid(page));
-    out.manodopera = { added: added.ok, articolo: art.ok, qta: Boolean(qta?.ok), readback: after };
   }
 
-  // Descrizioni libere + ricambi come righe descrittive (i nomi non sono codici catalogo).
-  const descrLines = [];
-  for (const d of (officina?.descrizioni || [])) {
-    const t = String(d || "").trim();
-    if (t) descrLines.push({ kind: "descrizione", text: t });
-  }
-  for (const r of (officina?.ricambi || [])) {
-    const name = r?.name || r?.nome;
-    const qty = r?.quantity || r?.quantita;
-    if (name) descrLines.push({ kind: "ricambio", text: `${String(name).trim()}${qty ? ` x ${String(qty).trim()}` : ""}` });
-  }
+  // Descrizioni libere + dati carrozzeria/ricambi come righe descrittive.
+  const descrLines = buildWorkGridDescriptionLines(job);
   out.righe = [];
+  let addedDescrRows = 0;
   for (const line of descrLines) {
+    if (gridRowsIncludeText(existingRows, line.text)) {
+      logAction("grid_desc_skip_existing", { kind: line.kind, text: line.text.slice(0, 60) });
+      out.righe.push({ ...line, typed: false, written: true, existing: true });
+      continue;
+    }
     const added = await gridAddRow(page, true);
+    out.changed = out.changed || Boolean(added.ok);
+    addedDescrRows += 1;
     await page.waitForTimeout(150).catch(() => {}); // gridAddRow ha gia' la sua attesa interna
     const tipo = await gridSetLastRowTipo(page, "D");
     logAction("grid_tipo", {
@@ -3408,7 +3529,7 @@ async function writeWorkGrid(page, job, args = {}) {
   // avviene al gridAddRow SUCCESSIVO. L'ultima riga digitata non ha un "dopo",
   // quindi aggiungo una riga civetta per forzarne il commit (poi resta vuota in coda,
   // come la riga-aggiungi che ogni griglia ha gia').
-  if (descrLines.length) {
+  if (addedDescrRows) {
     await gridAddRow(page, true).catch(() => {});
     await page.waitForTimeout(450).catch(() => {});
   }
@@ -3438,7 +3559,7 @@ async function writeWorkGrid(page, job, args = {}) {
 
   // SALVA il documento: senza questo le righe restano solo client-side e si perdono
   // (su YAP "Preventivi" risultava vuoto). Il bottone Salva che si disabilita conferma.
-  out.saved = await saveWorkDocument(page, args);
+  out.saved = out.changed ? await saveWorkDocument(page, args) : { ok: true, reason: "already_written", disabled: true };
   logAction("grid_snapshot_after_save", { saved: out.saved?.ok || false, ...(await snapshotWorkGrid(page)) });
   return out;
 }
@@ -3852,24 +3973,33 @@ async function writePracticeAndOdl(page, job, args) {
         if (gridResult && typeof gridResult === "object") gridResult.docKind = docKind;
         writeReport.gridResult = gridResult;
         const manOk = Boolean(gridResult?.manodopera?.articolo);
+        const manExpected = Boolean(gridResult?.manodopera?.expected);
+        const expectedRows = (gridResult?.righe || []).length;
+        const persistedRows = (gridResult?.righe || []).filter((r) => r.written).length;
+        const docSaved = Boolean(gridResult?.saved?.ok);
+        const gridOk = Boolean(gridResult?.ok) && docSaved && (!manExpected || manOk) && persistedRows === expectedRows;
         logAction("grid_flow_result", {
           docKind,
-          ok: Boolean(gridResult?.ok),
+          ok: gridOk,
           reason: gridResult?.reason || gridResult?.error || null,
+          manodoperaExpected: manExpected,
           manodopera: manOk,
-          descrizioniPersisted: (gridResult?.righe || []).filter((r) => r.written).length,
-          descrizioniExpected: (gridResult?.righe || []).length,
-          saved: Boolean(gridResult?.saved?.ok),
+          descrizioniPersisted: persistedRows,
+          descrizioniExpected: expectedRows,
+          saved: docSaved,
         });
-        if (manOk) { writeReport.openedOdl = true; writeReport.odl.success = true; writeReport.odl.error = null; }
-        writeReport.ok = manOk;
+        if (gridOk) { writeReport.openedOdl = true; writeReport.odl.success = true; writeReport.odl.error = null; }
+        writeReport.ok = gridOk;
         writeReport.workspaceState = workspaceState;
         // Campi ONESTI del documento (da gridResult), prefisso per tipo (preventivo/odl).
-        const pf = [{
-          field_id: `${docKind}.manodopera`, expected: "MAN",
-          found: manOk ? "MAN" : null, status: manOk ? "written" : "missing",
-          hint: `${docLabel} > riga MANODOPERA (MAN).`,
-        }];
+        const pf = [];
+        if (manExpected) {
+          pf.push({
+            field_id: `${docKind}.manodopera`, expected: "MAN",
+            found: manOk ? "MAN" : null, status: manOk ? "written" : "missing",
+            hint: `${docLabel} > riga MANODOPERA (MAN).`,
+          });
+        }
         for (const r of (gridResult?.righe || [])) {
           pf.push({
             field_id: `${docKind}.${r.kind}`, expected: r.text,
@@ -3877,14 +4007,13 @@ async function writePracticeAndOdl(page, job, args) {
             hint: `${docLabel} > righe descrittive (Tipo D).`,
           });
         }
-        const docSaved = Boolean(gridResult?.saved?.ok);
         pf.push({
           field_id: `${docKind}.salvataggio`, expected: "documento salvato",
           found: docSaved ? "salvato" : null, status: docSaved ? "written" : "missing",
           hint: `${docLabel} > pulsante Salva.`,
         });
         writeReport.fields = pf;
-        logPhase("grid_write", gridResult?.ok ? "done" : "failed", { docKind, manodopera: manOk });
+        logPhase("grid_write", gridOk ? "done" : "failed", { docKind, manodoperaExpected: manExpected, manodopera: manOk, rows: `${persistedRows}/${expectedRows}` });
         _detachRpcTrace();
         return writeReport;
       }
@@ -4846,10 +4975,12 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
     const g = wr.gridResult;
     // Prefisso onesto in base al tipo di documento (preventivo o ODL): stessa griglia.
     const dk = g.docKind === "odl" ? "odl" : "preventivo";
-    if (g.manodopera?.articolo) {
-      present.push({ field: `${dk}.manodopera`, expected: `MAN (${g.manodopera?.readback?.qta || "ore"})` });
-    } else {
-      missing.push({ field: `${dk}.manodopera`, expected: "riga manodopera (MAN)" });
+    if (g.manodopera?.expected) {
+      if (g.manodopera?.articolo) {
+        present.push({ field: `${dk}.manodopera`, expected: `MAN (${g.manodopera?.readback?.qta || "ore"})` });
+      } else {
+        missing.push({ field: `${dk}.manodopera`, expected: "riga manodopera (MAN)" });
+      }
     }
     for (const r of (g.righe || [])) {
       if (r.written) present.push({ field: `${dk}.${r.kind}`, expected: r.text });
@@ -5880,6 +6011,7 @@ export {
   buildOdlNeedles,
   buildOdlSummaryText,
   buildSectionSummary,
+  buildWorkGridDescriptionLines,
   extractTrailingJsonBlock,
   formatMacNeedle,
   formatManNeedle,

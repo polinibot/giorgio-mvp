@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildFieldWriteReport,
   buildOdlNeedles,
+  buildWorkGridDescriptionLines,
   extractTrailingJsonBlock,
   formatMacNeedle,
   formatManNeedle,
@@ -107,6 +108,43 @@ test("preventivo work contexts use preventivi page", () => {
   assert.equal(plan.odl.pageLabel, "Preventivi");
   assert.equal(plan.odl.yapMenu[0], "Preventivi");
   assert.deepEqual(plan.agenda.delegatedToYap, ["pratica", "odl_base"]);
+});
+
+test("carrozzeria preventivo grid lines include MAC materials waste and parts", () => {
+  const lines = buildWorkGridDescriptionLines({
+    sections: [{
+      reparto: "carrozzeria",
+      descrizioni: ["Ripristino paraurti"],
+      ore_mac: 0.8,
+      materiali_euro: 333.7,
+      smaltimento_applica: true,
+      smaltimento_percentuale: 2,
+      ricambi: [{ name: "Vernice metallizzata", quantity: 1 }],
+    }],
+  });
+
+  assert.deepEqual(lines, [
+    { kind: "descrizione", reparto: "carrozzeria", text: "Ripristino paraurti" },
+    { kind: "mac", reparto: "carrozzeria", text: "MAC: 0.8 h" },
+    { kind: "materiali", reparto: "carrozzeria", text: "Materiali: 333.7" },
+    { kind: "smaltimento", reparto: "carrozzeria", text: "Smaltimento: 2%" },
+    { kind: "ricambio", reparto: "carrozzeria", text: "Vernice metallizzata x 1" },
+  ]);
+});
+
+test("mixed officina and carrozzeria grid lines keep reparto context", () => {
+  const lines = buildWorkGridDescriptionLines({
+    sections: [
+      { reparto: "carrozzeria", descrizioni: ["Lucidatura"] },
+      { reparto: "officina", descrizioni: ["Tagliando"], ricambi: [{ name: "Filtro olio", quantity: 1 }] },
+    ],
+  });
+
+  assert.deepEqual(lines.map((line) => line.text), [
+    "Officina - Tagliando",
+    "Officina - Filtro olio x 1",
+    "Carrozzeria - Lucidatura",
+  ]);
 });
 
 test("parsePraticaHashPayload handles encoded pratica hashes", () => {

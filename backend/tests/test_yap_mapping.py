@@ -74,11 +74,11 @@ def test_preview_uses_preventivi_page_for_work_preview():
 
 def test_preview_normalizes_time_to_yap_slot():
     m = _mapping(["officina"], "AB123CD", [{"reparto": "officina", "descrizioni": ["Controllo"]}])
-    m["agenda"]["ora"] = "07:15"
+    m["agenda"]["ora"] = "09:24"
     preview = build_yap_preview(m)
-    assert preview["proposedYap"]["popup"]["dalle"] == "07.20"
-    assert preview["proposedYap"]["popup"]["alle"] == "07.40"
-    assert to_yap_time("07:15") == "07.20"
+    assert preview["proposedYap"]["popup"]["dalle"] == "09.20"
+    assert preview["proposedYap"]["popup"]["alle"] == "09.40"
+    assert to_yap_time("09:24") == "09.20"
 
 
 def test_cosa_priority_officina_over_revisione():

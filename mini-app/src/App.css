@@ -401,6 +401,11 @@ h2 {
   box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
 }
 
+.sync-dot-warning {
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.4);
+}
+
 .sync-dot-draft {
   background: #fbbf24;
   box-shadow: 0 0 6px rgba(251, 191, 36, 0.4);
@@ -497,6 +502,12 @@ h2 {
   color: #f87171;
   background: rgba(248, 113, 113, 0.12);
   border-color: rgba(248, 113, 113, 0.35);
+}
+
+.sync-pill-warning {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.35);
 }
 
 .sync-pill-draft {
@@ -981,6 +992,12 @@ h2 {
   background: rgba(248, 113, 113, 0.1);
   color: #f87171;
   border: 1px solid rgba(248, 113, 113, 0.25);
+}
+
+.detail-sync-toggle.partial-synced {
+  background: rgba(251, 191, 36, 0.1);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.25);
 }
 
 /* --- Detail sections --- */

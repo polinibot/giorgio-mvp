@@ -7,6 +7,8 @@ import re
 
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 _DEFAULT_SLOT_MINUTES = 20
+_DEFAULT_VISIBLE_START = "08:00"
+_DEFAULT_VISIBLE_END = "18:00"
 
 
 def get_yap_slot_minutes() -> int:
@@ -18,10 +20,37 @@ def get_yap_slot_minutes() -> int:
     return value if value > 0 else _DEFAULT_SLOT_MINUTES
 
 
-def validate_appointment_time(value: str) -> str:
+def _get_visible_time(env_name: str, default: str) -> str:
+    raw = os.getenv(env_name, default).strip()
+    return raw if _TIME_RE.match(raw) else default
+
+
+def get_yap_visible_start_time() -> str:
+    return _get_visible_time("YAP_VISIBLE_START_TIME", _DEFAULT_VISIBLE_START)
+
+
+def get_yap_visible_end_time() -> str:
+    return _get_visible_time("YAP_VISIBLE_END_TIME", _DEFAULT_VISIBLE_END)
+
+
+def _time_to_minutes(value: str) -> int:
+    return int(value[:2]) * 60 + int(value[3:5])
+
+
+def validate_appointment_time(value: str, slot_minutes: int | None = None) -> str:
     raw = (value or "").strip()
     if not _TIME_RE.match(raw):
         raise ValueError("Orario non valido: usa formato HH:MM (es. 09:24)")
+    step = slot_minutes or get_yap_slot_minutes()
+    if step <= 0:
+        step = _DEFAULT_SLOT_MINUTES
+    rounded_minutes = _round_minutes(_time_to_minutes(raw), step)
+    start_minutes = _time_to_minutes(get_yap_visible_start_time())
+    end_minutes = _time_to_minutes(get_yap_visible_end_time())
+    if rounded_minutes < start_minutes or rounded_minutes > end_minutes:
+        raise ValueError(
+            f"Orario fuori fascia YAP: usa un orario tra {get_yap_visible_start_time()} e {get_yap_visible_end_time()}"
+        )
     return raw
 
 
@@ -51,9 +80,9 @@ def _format_minutes(total_minutes: int) -> str:
 
 
 def normalize_appointment_time(value: str, slot_minutes: int | None = None) -> str:
-    raw = validate_appointment_time(value)
-    minutes = int(raw[:2]) * 60 + int(raw[3:5])
     step = slot_minutes or get_yap_slot_minutes()
     if step <= 0:
         step = _DEFAULT_SLOT_MINUTES
+    raw = validate_appointment_time(value, step)
+    minutes = _time_to_minutes(raw)
     return _format_minutes(_round_minutes(minutes, step))

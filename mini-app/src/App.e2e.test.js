@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { createRoot } from 'react-dom/client';
 import axios from 'axios';
 import App from './App';
@@ -330,6 +330,21 @@ afterEach(async () => {
 });
 
 describe('Mini App user-simulation suite', () => {
+  test('limits appointment time choices to the YAP visible range', async () => {
+    mount('?demo=complete');
+
+    await waitFor(() => document.querySelector('form'));
+
+    const select = getFormInput('appointment_time');
+    const values = Array.from(select.querySelectorAll('option')).map((option) => option.value).filter(Boolean);
+
+    expect(values[0]).toBe('08:00');
+    expect(values[values.length - 1]).toBe('18:00');
+    expect(values).not.toContain('00:40');
+    expect(values).not.toContain('07:55');
+    expect(values).toContain('09:30');
+  });
+
   test('opens a fully prefilled demo form with one URL', async () => {
     mount('?demo=complete');
 
@@ -571,6 +586,157 @@ describe('Mini App user-simulation suite', () => {
     expect(document.body.textContent).not.toContain('Diversi (0)');
   });
 
+  test('shows sync_failed in red even when the cached synced flag is stale', async () => {
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 0 } } });
+      }
+      if (url.includes('/practices/1/yap-mapping-preview')) {
+        return Promise.resolve({ data: { success: true, data: { proposedYap: { fieldMapping: {} }, confidence: {} } } });
+      }
+      if (url.includes('/api/practices/1')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 1,
+                status: 'confirmed',
+                plate_confirmed: 'AB123CD',
+                phone: '3331112222',
+                customer_name: 'Mario Rossi',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-11-10T09:00:00.000Z',
+                appointment_time: '09:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                synced: true,
+                management_sync_status: 'sync_failed',
+                management_audit_result: {
+                  status: 'sync_failed',
+                  message: 'Errore di rete. Controlla la connessione internet e riprova.',
+                },
+              },
+              sections: [],
+              parts: [],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [{
+              id: 1,
+              plate: 'AB123CD',
+              customer_name: 'Mario Rossi',
+              contexts: ['officina'],
+              synced: true,
+              management_sync_status: 'sync_failed',
+              appointment_date: '2026-11-10T09:00:00.000Z',
+              created_at: '2026-11-10T09:00:00.000Z',
+            }],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    const card = document.querySelector('.practice-card');
+    expect(card.querySelector('.sync-pill').className).toContain('sync-pill-red');
+    clickElement(card);
+
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+    const toggle = document.querySelector('.detail-sync-toggle');
+    expect(toggle.className).toContain('not-synced');
+    expect(toggle.querySelector('.sync-dot').className).toContain('sync-dot-red');
+    expect(document.body.textContent).toContain('Sync YAP fallita');
+  });
+
+  test('shows partial YAP state as warning instead of green success', async () => {
+    const partialAudit = {
+      status: 'partial_synced',
+      message: 'Appuntamento scritto su YAP. Verifica automatica parziale.',
+      present: [{ field: 'agenda', expected: 'appuntamento salvato in agenda' }],
+      missing: [{ field: 'odl.ricambio', expected: 'Filtro olio' }],
+      mismatch: [],
+    };
+
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 1 } } });
+      }
+      if (url.includes('/practices/1/yap-mapping-preview')) {
+        return Promise.resolve({ data: { success: true, data: { proposedYap: { fieldMapping: {} }, confidence: {} } } });
+      }
+      if (url.includes('/api/practices/1')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 1,
+                status: 'confirmed',
+                plate_confirmed: 'AB123CD',
+                phone: '3331112222',
+                customer_name: 'Mario Rossi',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-11-10T09:00:00.000Z',
+                appointment_time: '09:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                synced: false,
+                management_sync_status: 'partial_synced',
+                management_audit_result: partialAudit,
+              },
+              sections: [],
+              parts: [],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [{
+              id: 1,
+              plate: 'AB123CD',
+              customer_name: 'Mario Rossi',
+              contexts: ['officina'],
+              synced: false,
+              management_sync_status: 'partial_synced',
+              appointment_date: '2026-11-10T09:00:00.000Z',
+              created_at: '2026-11-10T09:00:00.000Z',
+            }],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    const card = document.querySelector('.practice-card');
+    expect(card.querySelector('.sync-pill').className).toContain('sync-pill-warning');
+    clickElement(card);
+
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+    const toggle = document.querySelector('.detail-sync-toggle');
+    expect(toggle.className).toContain('partial-synced');
+    expect(toggle.querySelector('.sync-dot').className).toContain('sync-dot-warning');
+    expect(document.body.textContent).toContain('Parziale');
+  });
+
   test('shows agenda-written YAP state without raw audit or write-report codes', async () => {
     axios.post.mockImplementation((url) => {
       if (String(url).includes('/yap/sync')) {
@@ -649,6 +815,20 @@ describe('Mini App user-simulation suite', () => {
                 contexts: 'officina',
                 synced: false,
                 management_sync_status: 'sync_failed',
+                management_audit_result: {
+                  status: 'sync_failed',
+                  technical_failure: true,
+                  worker_phases: [
+                    { phase: 'save_attempt', status: 'try_3', elapsed_ms: 65742 },
+                    { phase: 'save_result', status: 'failed', elapsed_ms: 84162 },
+                  ],
+                  runner: {
+                    script: 'yap-worker.mjs',
+                    finished_at: '2026-06-03T15:42:05.362758+00:00',
+                    timeout_seconds: 210,
+                  },
+                  stderr_tail: '{"event":"yap:phase","phase":"save_result","status":"failed"}',
+                },
               },
               sections: [],
               parts: [],
@@ -682,7 +862,7 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
     clickElement(document.querySelector('.practice-card'));
     await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
-    clickElement(getButton('Sincronizza con YAP'));
+    clickElement(getButton('Riprova sync YAP') || getButton('Sincronizza con YAP'));
 
     await waitFor(() => document.body.textContent.includes('YAP agenda scritta'));
     expect(document.body.textContent).toContain('Tempo 27s');
@@ -766,6 +946,20 @@ describe('Mini App user-simulation suite', () => {
                 contexts: 'officina',
                 synced: false,
                 management_sync_status: 'sync_failed',
+                management_audit_result: {
+                  status: 'sync_failed',
+                  technical_failure: true,
+                  worker_phases: [
+                    { phase: 'save_attempt', status: 'try_3', elapsed_ms: 65742 },
+                    { phase: 'save_result', status: 'failed', elapsed_ms: 84162 },
+                  ],
+                  runner: {
+                    script: 'yap-worker.mjs',
+                    finished_at: '2026-06-03T15:42:05.362758+00:00',
+                    timeout_seconds: 210,
+                  },
+                  stderr_tail: '{"event":"yap:phase","phase":"save_result","status":"failed"}',
+                },
               },
               sections: [],
               parts: [],
@@ -799,7 +993,7 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
     clickElement(document.querySelector('.practice-card'));
     await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
-    clickElement(getButton('Sincronizza con YAP'));
+    clickElement(getButton('Riprova sync YAP') || getButton('Sincronizza con YAP'));
 
     await waitFor(() => document.body.textContent.includes('YAP agenda scritta'));
     expect(document.body.textContent).toContain('Stato verifica completa in attesa');
@@ -854,6 +1048,20 @@ describe('Mini App user-simulation suite', () => {
                 contexts: 'officina',
                 synced: false,
                 management_sync_status: 'sync_failed',
+                management_audit_result: {
+                  status: 'sync_failed',
+                  technical_failure: true,
+                  worker_phases: [
+                    { phase: 'save_attempt', status: 'try_3', elapsed_ms: 65742 },
+                    { phase: 'save_result', status: 'failed', elapsed_ms: 84162 },
+                  ],
+                  runner: {
+                    script: 'yap-worker.mjs',
+                    finished_at: '2026-06-03T15:42:05.362758+00:00',
+                    timeout_seconds: 210,
+                  },
+                  stderr_tail: '{"event":"yap:phase","phase":"save_result","status":"failed"}',
+                },
               },
               sections: [],
               parts: [],
@@ -887,7 +1095,7 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
     clickElement(document.querySelector('.practice-card'));
     await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
-    clickElement(getButton('Sincronizza con YAP'));
+    clickElement(getButton('Riprova sync YAP') || getButton('Sincronizza con YAP'));
 
     await waitFor(() => document.body.textContent.includes('YAP agenda scritta'));
     // status_reason was whitespace-only — formatYapStatusReason returns '' — banner must not
@@ -996,13 +1204,297 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
     clickElement(document.querySelector('.practice-card'));
     await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
-    clickElement(getButton('Sincronizza con YAP'));
+    clickElement(getButton('Riprova sync YAP') || getButton('Sincronizza con YAP'));
 
     await waitFor(() => document.body.textContent.includes('Salvataggio YAP non confermato dopo 3 tentativi'));
     expect(document.body.textContent).toContain('Crash log YAP');
     expect(document.body.textContent).toContain('last_phase: save_result:failed');
     expect(document.body.textContent).toContain('script: yap-worker.mjs  timeout: 210s');
     expect(document.body.textContent).toContain('stderr:');
+  });
+
+  test('surfaces interrupted YAP sync responses as verification guidance instead of generic network error', async () => {
+    axios.post.mockImplementation((url) => {
+      if (String(url).includes('/yap/sync')) {
+        return Promise.reject({
+          code: 'ECONNABORTED',
+          message: 'timeout of 240000ms exceeded',
+          config: { url: '/api/practices/1/yap/sync' },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 1 } } });
+      }
+      if (url.includes('/practices/1/yap-mapping-preview')) {
+        return Promise.resolve({ data: { success: true, data: { proposedYap: { fieldMapping: {} }, confidence: {} } } });
+      }
+      if (url.includes('/api/practices/1')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 1,
+                status: 'confirmed',
+                plate_confirmed: 'AB123CD',
+                phone: '3331112222',
+                customer_name: 'Mario Rossi',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-11-10T09:00:00.000Z',
+                appointment_time: '09:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                synced: false,
+                management_sync_status: 'sync_failed',
+                management_audit_result: {
+                  status: 'sync_failed',
+                  technical_failure: true,
+                  worker_phases: [
+                    { phase: 'save_attempt', status: 'try_3', elapsed_ms: 65742 },
+                    { phase: 'save_result', status: 'failed', elapsed_ms: 84162 },
+                  ],
+                  runner: {
+                    script: 'yap-worker.mjs',
+                    finished_at: '2026-06-03T15:42:05.362758+00:00',
+                    timeout_seconds: 210,
+                  },
+                  stderr_tail: '{"event":"yap:phase","phase":"save_result","status":"failed"}',
+                },
+              },
+              sections: [],
+              parts: [],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [{
+              id: 1,
+              plate: 'AB123CD',
+              customer_name: 'Mario Rossi',
+              contexts: ['officina'],
+              synced: false,
+              management_sync_status: 'sync_failed',
+              appointment_date: '2026-11-10T09:00:00.000Z',
+              created_at: '2026-11-10T09:00:00.000Z',
+            }],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    clickElement(document.querySelector('.practice-card'));
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+    clickElement(getButton('Riprova sync YAP') || getButton('Sincronizza con YAP'));
+
+    await waitFor(() => document.body.textContent.includes('La richiesta di sync YAP si è interrotta prima della risposta.'));
+    expect(document.body.textContent).toContain('Verifica YAP');
+    expect(document.body.textContent).toContain('Crash log YAP');
+    expect(document.body.textContent).toContain('last_phase: save_result:failed');
+    expect(document.body.textContent).not.toContain('Errore di rete. Controlla la connessione internet e riprova.');
+  });
+
+  test('keeps persisted crash diagnostics visible when YAP audit response is interrupted', async () => {
+    axios.post.mockImplementation((url) => {
+      if (String(url).includes('/yap/audit')) {
+        return Promise.reject({
+          code: 'ECONNABORTED',
+          message: 'timeout of 275000ms exceeded',
+          config: { url: '/api/practices/1/yap/audit' },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 1 } } });
+      }
+      if (url.includes('/practices/1/yap-mapping-preview')) {
+        return Promise.resolve({ data: { success: true, data: { proposedYap: { fieldMapping: {} }, confidence: {} } } });
+      }
+      if (url.includes('/api/practices/1')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 1,
+                status: 'confirmed',
+                plate_confirmed: 'AB123CD',
+                phone: '3331112222',
+                customer_name: 'Mario Rossi',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-11-10T09:00:00.000Z',
+                appointment_time: '09:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                synced: false,
+                management_sync_status: 'sync_failed',
+                management_audit_result: {
+                  status: 'sync_failed',
+                  technical_failure: true,
+                  worker_phases: [
+                    { phase: 'save_attempt', status: 'try_3', elapsed_ms: 65742 },
+                    { phase: 'save_result', status: 'failed', elapsed_ms: 84162 },
+                  ],
+                  runner: {
+                    script: 'yap-worker.mjs',
+                    finished_at: '2026-06-03T15:42:05.362758+00:00',
+                    timeout_seconds: 210,
+                  },
+                  stderr_tail: '{"event":"yap:phase","phase":"save_result","status":"failed"}',
+                },
+              },
+              sections: [],
+              parts: [],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [{
+              id: 1,
+              plate: 'AB123CD',
+              customer_name: 'Mario Rossi',
+              contexts: ['officina'],
+              synced: false,
+              management_sync_status: 'sync_failed',
+              appointment_date: '2026-11-10T09:00:00.000Z',
+              created_at: '2026-11-10T09:00:00.000Z',
+            }],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    clickElement(document.querySelector('.practice-card'));
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+    clickElement(getButton('Verifica YAP'));
+
+    await waitFor(() => document.body.textContent.includes('La verifica YAP si è interrotta prima della risposta.'));
+    expect(document.body.textContent).toContain('Verifica YAP fallita');
+    expect(document.body.textContent).toContain('Crash log YAP');
+    expect(document.body.textContent).toContain('last_phase: save_result:failed');
+    expect(document.body.textContent).not.toContain('Errore di rete. Controlla la connessione internet e riprova.');
+  });
+
+  test('keeps persisted crash diagnostics visible when YAP delete response is interrupted', async () => {
+    axios.delete.mockImplementation((url) => {
+      if (String(url).includes('/yap/appointment')) {
+        return Promise.reject({
+          code: 'ECONNABORTED',
+          message: 'timeout of 240000ms exceeded',
+          config: { url: '/api/practices/1/yap/appointment' },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    axios.get.mockImplementation((url) => {
+      if (url.includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 1 } } });
+      }
+      if (url.includes('/practices/1/yap-mapping-preview')) {
+        return Promise.resolve({ data: { success: true, data: { proposedYap: { fieldMapping: {} }, confidence: {} } } });
+      }
+      if (url.includes('/api/practices/1')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              practice: {
+                id: 1,
+                status: 'confirmed',
+                plate_confirmed: 'AB123CD',
+                phone: '3331112222',
+                customer_name: 'Mario Rossi',
+                customer_type: 'privato',
+                billing_to_complete: false,
+                appointment_date: '2026-11-10T09:00:00.000Z',
+                appointment_time: '09:00',
+                practice_type: 'preventivo',
+                contexts: 'officina',
+                synced: false,
+                management_sync_status: 'partial_synced',
+                management_audit_result: {
+                  status: 'partial_synced',
+                  technical_failure: true,
+                  worker_phases: [
+                    { phase: 'save_attempt', status: 'try_3', elapsed_ms: 65742 },
+                    { phase: 'save_result', status: 'failed', elapsed_ms: 84162 },
+                  ],
+                  runner: {
+                    script: 'yap-worker.mjs',
+                    finished_at: '2026-06-03T15:42:05.362758+00:00',
+                    timeout_seconds: 210,
+                  },
+                  stderr_tail: '{"event":"yap:phase","phase":"save_result","status":"failed"}',
+                },
+              },
+              sections: [],
+              parts: [],
+              photos: [],
+            },
+          },
+        });
+      }
+      if (url.includes('/api/practices')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [{
+              id: 1,
+              plate: 'AB123CD',
+              customer_name: 'Mario Rossi',
+              contexts: ['officina'],
+              synced: false,
+              management_sync_status: 'partial_synced',
+              appointment_date: '2026-11-10T09:00:00.000Z',
+              created_at: '2026-11-10T09:00:00.000Z',
+            }],
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/');
+
+    await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
+    clickElement(document.querySelector('.practice-card'));
+    await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
+    clickElement(getButton('Dettagli YAP'));
+    await waitFor(() => document.body.textContent.includes('Automazione YAP'));
+    clickElement(getButton('Elimina da YAP'));
+
+    await waitFor(() => document.body.textContent.includes('La richiesta di eliminazione YAP si è interrotta prima della risposta.'));
+    expect(document.body.textContent).toContain('Eliminazione YAP fallita');
+    expect(document.body.textContent).toContain('Crash log YAP');
+    expect(document.body.textContent).toContain('last_phase: save_result:failed');
+    expect(document.body.textContent).not.toContain('Errore di rete. Controlla la connessione internet e riprova.');
   });
 
   test('empty audit object in sync response does not produce partial_synced status', async () => {
@@ -1069,7 +1561,7 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
     clickElement(document.querySelector('.practice-card'));
     await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
-    clickElement(getButton('Sincronizza con YAP'));
+    clickElement(getButton('Riprova sync YAP') || getButton('Sincronizza con YAP'));
 
     await waitFor(() => document.body.textContent.includes('YAP agenda scritta'));
     expect(document.body.textContent).not.toContain('YAP parziale');
@@ -1144,7 +1636,7 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.querySelectorAll('.practice-card').length === 1);
     clickElement(document.querySelector('.practice-card'));
     await waitFor(() => document.body.textContent.includes('Stato sincronizzazione'));
-    clickElement(getButton('Sincronizza con YAP'));
+    clickElement(getButton('Riprova sync YAP') || getButton('Sincronizza con YAP'));
 
     await waitFor(() => document.body.textContent.includes('YAP agenda scritta'));
     expect(document.body.textContent).not.toMatch(/0\/\d+ fasi completate/);
