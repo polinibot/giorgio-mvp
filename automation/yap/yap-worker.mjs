@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09c-cosa-fallback-vehicle";
+const WORKER_BUILD = "2026-06-09d-vehicle-toggle-first";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1894,9 +1894,65 @@ async function readAppointmentVehicleText(page) {
   }).catch(() => null);
 }
 
+async function locateAppointmentVehicleToggle(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
+      .find((p) => isVisible(p) && /dettagli appuntamento/i.test(p.textContent || ""));
+    if (!popup) return null;
+
+    const labelFor = (input) => {
+      let node = input;
+      for (let i = 0; i < 6 && node && node !== popup; i += 1) {
+        node = node.parentElement;
+        if (!node) break;
+        const own = [...node.childNodes]
+          .filter((n) => n.nodeType === 3)
+          .map((n) => n.textContent)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+        if (own && own.length <= 40) return own;
+      }
+      return "";
+    };
+
+    const textBlocks = [...popup.querySelectorAll("div, td, span, a, button, label")]
+      .filter(isVisible)
+      .map((el) => {
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const rect = el.getBoundingClientRect();
+        return { el, text, rect, label: labelFor(el), area: rect.width * rect.height };
+      })
+      .filter((item) => item.text && /veicolo|nessun veicolo selezionato/.test(item.text));
+
+    const ordered = [...textBlocks].sort((a, b) => a.area - b.area || a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+    const target = ordered.find((item) => /nessun veicolo selezionato/.test(item.text))
+      || ordered.find((item) => item.text === "veicolo")
+      || ordered[0];
+    if (!target) return null;
+    return {
+      x: target.rect.x + (target.rect.width / 2),
+      y: target.rect.y + (target.rect.height / 2),
+      strategy: target.label ? `label:${target.label}` : `text:${target.text.slice(0, 40)}`,
+    };
+  }).catch(() => null);
+}
+
 async function selectVehicleByPlate(page, plate) {
   if (!plate) return { found: false, reason: "no_plate" };
   const cleanPlate = String(plate).trim().toUpperCase();
+
+  const vehicleToggle = await locateAppointmentVehicleToggle(page).catch(() => null);
+  if (vehicleToggle) {
+    await page.mouse.click(vehicleToggle.x, vehicleToggle.y).catch(() => {});
+    await page.waitForTimeout(180).catch(() => {});
+  }
 
   // Step 1: individua il campo Cosa nel popup tramite il contesto del DOM.
   // Nel popup compatto il veicolo non ha un input dedicato: si usa il campo Cosa.
@@ -1940,7 +1996,8 @@ async function selectVehicleByPlate(page, plate) {
         readOnly: Boolean(input.readOnly),
       };
     });
-    const target = inputs.find((el) => /cosa/.test(el.label))
+    const target = inputs.find((el) => /veicolo/.test(el.label))
+      || inputs.find((el) => /cosa/.test(el.label))
       || inputs.find((el) => el.textTransform === "uppercase" && el.width > 80 && !el.readOnly && el.maxlength !== "25")
       || inputs.find((el) => el.width > 80 && !el.readOnly);
     if (!target) return null;
@@ -2009,6 +2066,7 @@ async function selectVehicleByPlate(page, plate) {
   return {
     found: true,
     strategy: vehicleInputCoords.strategy,
+    toggle: vehicleToggle ? vehicleToggle.strategy : null,
     selected,
     confirmed,
     vehicleText,
@@ -4295,7 +4353,7 @@ async function fillAppointmentPopup(page, job) {
     const vehicle = await selectVehicleByPlate(page, plate);
     vehicleState = vehicle.confirmed ? "linked" : (vehicle.found ? "failed" : "not_found");
     logAction("cosa_vehicle_pick", { plate, ...vehicle, vehicleState });
-    if (!vehicle.confirmed) {
+    if (!vehicle.confirmed && !vehicle.found) {
       await fillVisibleInput(page, cosaInput.index, cosaValue).catch(() => {});
       logAction("cosa_vehicle_fallback", {
         plate,
