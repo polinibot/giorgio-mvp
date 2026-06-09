@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09i-vehicle-row-direct-hit";
+const WORKER_BUILD = "2026-06-09j-vehicle-popup-direct-hit";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1945,145 +1945,66 @@ async function locateAppointmentVehicleControls(page) {
 
 async function chooseVehicleFromSearchOverlay(page, plate) {
   const cleanPlate = String(plate || "").trim().toUpperCase();
-  let overlayFound = false;
-  for (let i = 0; i < 8 && !overlayFound; i += 1) {
-    overlayFound = await hasVehicleSearchOverlay(page);
-    if (!overlayFound) await page.waitForTimeout(180).catch(() => {});
-  }
-  if (!overlayFound) return { found: false, reason: "vehicle_overlay_not_found" };
-
   const rowHit = await safeEvaluate(page, (wantedPlate) => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
       const s = window.getComputedStyle(el);
-      return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+      return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
     };
     const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
     const wanted = norm(wantedPlate);
-    const rows = [...document.querySelectorAll("tr")]
-      .filter(isVisible)
-      .map((el) => {
-        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-        const r = el.getBoundingClientRect();
-        return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
-      })
-      .filter((item) => item.text && item.text.length <= 220);
-    const exact = rows.find((item) => norm(item.text).includes(wanted));
-    if (!exact) return null;
-    return exact;
+    const popups = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup, [role='dialog']")]
+      .filter(isVisible);
+    for (const popup of popups) {
+      const rows = [...popup.querySelectorAll("tr")]
+        .filter(isVisible)
+        .map((el) => {
+          const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+          const r = el.getBoundingClientRect();
+          return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
+        })
+        .filter((item) => item.text && item.text.length <= 240);
+      const exact = rows.find((item) => norm(item.text).includes(wanted));
+      if (exact) return exact;
+    }
+    return null;
   }, cleanPlate).catch(() => null);
 
   if (rowHit) {
-    await page.mouse.click(rowHit.x, rowHit.y).catch(() => {});
-    await page.waitForTimeout(250).catch(() => {});
+    await safeEvaluate(page, ({ x, y }) => {
+      const el = document.elementFromPoint(x, y);
+      const row = el?.closest?.("tr") || el;
+      if (!row) return false;
+      const r = row.getBoundingClientRect();
+      const cx = r.x + (r.width / 2);
+      const cy = r.y + (r.height / 2);
+      for (const type of ["mousedown", "mouseup", "click"]) {
+        row.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 }));
+      }
+      try { row.click(); } catch (_e) {}
+      return true;
+    }, { x: rowHit.x, y: rowHit.y }).catch(() => {});
+    await page.waitForTimeout(2800).catch(() => {});
     const popupVehicle = await readAppointmentVehicleText(page);
-    return {
-      found: true,
-      selected: true,
-      confirmed: Boolean(popupVehicle?.linked),
-      vehicleText: popupVehicle?.text || rowHit.text || null,
-    };
-  }
-
-  const inputTarget = await safeEvaluate(page, () => {
-    const isVisible = (el) => {
-      const r = el.getBoundingClientRect();
-      const s = window.getComputedStyle(el);
-      return r.width > 20 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
-    };
-    const overlay = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup, [role='dialog']")]
-      .filter(isVisible)
-      .find((p) => /ricerca autoveicolo|crea un nuovo veicolo dalla targa/i.test((p.textContent || "").replace(/\s+/g, " ")));
-    if (!overlay) return null;
-    const inputs = [...overlay.querySelectorAll("input[type='text'], input:not([type])")]
-      .filter(isVisible)
-      .map((input) => {
-        const r = input.getBoundingClientRect();
-        return {
-          input,
-          x: r.x + (r.width / 2),
-          y: r.y + (r.height / 2),
-          width: r.width,
-          value: (input.value || "").trim(),
-          cls: String(input.className || ""),
-        };
-      })
-      .filter((item) => item.width > 50);
-    const target = inputs.find((el) => /targa|veicolo|search|cerca|ricerca/i.test(el.cls))
-      || inputs.find((el) => el.width > 180)
-      || inputs[0];
-    if (!target) return null;
-    return { x: target.x, y: target.y, width: target.width };
-  }).catch(() => null);
-
-  if (!inputTarget) return { found: false, reason: "vehicle_overlay_input_not_found" };
-
-  await page.mouse.click(inputTarget.x, inputTarget.y).catch(() => {});
-  await page.waitForTimeout(120).catch(() => {});
-  await page.keyboard.press("Control+a").catch(() => {});
-  await page.keyboard.press("Delete").catch(() => {});
-  await page.keyboard.type(cleanPlate, { delay: 50 }).catch(() => {});
-  await page.waitForTimeout(700).catch(() => {});
-
-  let selected = false;
-  let matchedText = null;
-  for (let poll = 0; poll < 10 && !selected; poll += 1) {
-    selected = await safeEvaluate(page, (wantedPlate) => {
+    const popupStillOpen = await safeEvaluate(page, () => {
       const isVisible = (el) => {
         const r = el.getBoundingClientRect();
         const s = window.getComputedStyle(el);
         return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
       };
-      const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
-      const wanted = norm(wantedPlate);
-      const overlay = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup, [role='dialog']")]
+      return [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
         .filter(isVisible)
-        .find((p) => /ricerca autoveicolo|crea un nuovo veicolo dalla targa/i.test((p.textContent || "").replace(/\s+/g, " ")));
-      if (!overlay) return false;
-      const rows = [...overlay.querySelectorAll("tr")]
-        .filter(isVisible)
-        .map((el) => {
-          const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-          const r = el.getBoundingClientRect();
-          return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
-        })
-        .filter((item) => item.text && item.text.length <= 180);
-      const rowHit = rows.find((item) => norm(item.text).includes(wanted));
-      const createRow = rows.find((item) => /crea un nuovo veicolo dalla targa/i.test(item.text));
-      const otherRows = rows.filter((item) => item !== rowHit && item !== createRow);
-      const fallback = [...overlay.querySelectorAll("td, div, span, a, button, li")]
-        .filter(isVisible)
-        .map((el) => {
-          const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-          const r = el.getBoundingClientRect();
-          return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
-        })
-        .filter((item) => item.text && item.text.length <= 180);
-      const exactPlate = fallback.find((item) => norm(item.text).includes(wanted));
-      const action = rowHit || createRow || exactPlate || otherRows[0] || fallback[0];
-      if (!action) return false;
-      action.el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-      action.el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-      action.el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-      return true;
-    }, cleanPlate).catch(() => false);
-    if (!selected) {
-      await page.keyboard.press("Enter").catch(() => {});
-    }
-    await page.waitForTimeout(300).catch(() => {});
-    const popupVehicle = await readAppointmentVehicleText(page);
-    matchedText = popupVehicle?.text || matchedText;
-    if (popupVehicle?.linked) break;
+        .some((p) => /nessun veicolo selezionato/i.test((p.textContent || "").replace(/\s+/g, " ")));
+    }).catch(() => false);
+    return {
+      found: true,
+      selected: true,
+      confirmed: !popupStillOpen || Boolean(popupVehicle?.linked),
+      vehicleText: popupVehicle?.text || rowHit.text || null,
+    };
   }
 
-  const finalVehicle = await readAppointmentVehicleText(page).catch(() => null);
-
-  return {
-    found: true,
-    selected,
-    confirmed: Boolean(finalVehicle?.linked),
-    vehicleText: matchedText,
-  };
+  return { found: false, reason: "vehicle_row_not_found" };
 }
 
 async function selectVehicleByPlate(page, plate, { skipInputFallback = false } = {}) {
