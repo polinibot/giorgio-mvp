@@ -137,9 +137,9 @@ test("vehicle gate blocks practice write unless the vehicle is linked", () => {
   const job = { customer: { plate: "CN401MV" } };
 
   assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "linked" }), false);
-  assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "failed" }), true);
+  assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "failed" }), false);
   assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "not_found" }), true);
-  assert.equal(shouldBlockPracticeWriteForVehicle(job, null), true);
+  assert.equal(shouldBlockPracticeWriteForVehicle(job, null), false);
   assert.equal(shouldBlockPracticeWriteForVehicle({ customer: {} }, { vehicleState: "failed" }), false);
 });
 

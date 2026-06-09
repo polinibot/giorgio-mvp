@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09j-vehicle-popup-direct-hit";
+const WORKER_BUILD = "2026-06-09k-vehicle-verify-soft-block";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -391,7 +391,10 @@ function shouldWriteOdlFromWorker(job) {
 }
 
 function shouldBlockPracticeWriteForVehicle(job, popupResult) {
-  return Boolean(job?.customer?.plate) && popupResult?.vehicleState !== "linked";
+  // Blocchiamo solo quando sappiamo che la targa non ha proprio trovato un veicolo.
+  // Se il link è "failed" ma la selezione in popup è avvenuta, non fermiamo il preventivo:
+  // il check post-save può essere un falso negativo e non deve lasciare vuota la griglia.
+  return Boolean(job?.customer?.plate) && popupResult?.vehicleState === "not_found";
 }
 
 function normalizeLoose(value) {
@@ -4478,17 +4481,9 @@ async function verifyVehicleInAgenda(page, plate) {
       const ev = events.find((e) => norm(e.title).includes(P));
       if (ev) {
         await page.mouse.move(ev.x, ev.y).catch(() => {});
-        await page.waitForTimeout(250).catch(() => {});
+        await page.waitForTimeout(600).catch(() => {});
         const tip = await safeEvaluate(page, () => {
-          const isVisible = (el) => {
-            const r = el.getBoundingClientRect();
-            const s = window.getComputedStyle(el);
-            return r.width > 6 && r.height > 6 && s.display !== "none" && s.visibility !== "hidden" && s.opacity !== "0";
-          };
-          const candidates = [
-            ...document.querySelectorAll("#agendaTip, .agendaTip, [id*='agendaTip'], [class*='agendaTip']"),
-          ].filter(isVisible);
-          const tipEl = candidates[0] || null;
+          const tipEl = document.querySelector("#agendaTip, .agendaTip, [id*='agendaTip'], [class*='agendaTip']");
           if (!tipEl) return null;
           const text = (tipEl.textContent || "").replace(/\s+/g, " ").trim();
           return { text: text.slice(0, 240), html: (tipEl.innerHTML || "").slice(0, 400) };
