@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09h-vehicle-row-click";
+const WORKER_BUILD = "2026-06-09i-vehicle-row-direct-hit";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1951,6 +1951,39 @@ async function chooseVehicleFromSearchOverlay(page, plate) {
     if (!overlayFound) await page.waitForTimeout(180).catch(() => {});
   }
   if (!overlayFound) return { found: false, reason: "vehicle_overlay_not_found" };
+
+  const rowHit = await safeEvaluate(page, (wantedPlate) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
+    const wanted = norm(wantedPlate);
+    const rows = [...document.querySelectorAll("tr")]
+      .filter(isVisible)
+      .map((el) => {
+        const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+        const r = el.getBoundingClientRect();
+        return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
+      })
+      .filter((item) => item.text && item.text.length <= 220);
+    const exact = rows.find((item) => norm(item.text).includes(wanted));
+    if (!exact) return null;
+    return exact;
+  }, cleanPlate).catch(() => null);
+
+  if (rowHit) {
+    await page.mouse.click(rowHit.x, rowHit.y).catch(() => {});
+    await page.waitForTimeout(250).catch(() => {});
+    const popupVehicle = await readAppointmentVehicleText(page);
+    return {
+      found: true,
+      selected: true,
+      confirmed: Boolean(popupVehicle?.linked),
+      vehicleText: popupVehicle?.text || rowHit.text || null,
+    };
+  }
 
   const inputTarget = await safeEvaluate(page, () => {
     const isVisible = (el) => {
