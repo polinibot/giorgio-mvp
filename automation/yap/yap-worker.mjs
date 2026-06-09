@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09n-vehicle-trigger-candidates";
+const WORKER_BUILD = "2026-06-09o-block-save-without-vehicle";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -391,10 +391,11 @@ function shouldWriteOdlFromWorker(job) {
 }
 
 function shouldBlockPracticeWriteForVehicle(job, popupResult) {
-  // Blocchiamo solo quando sappiamo che la targa non ha proprio trovato un veicolo.
-  // Se il link è "failed" ma la selezione in popup è avvenuta, non fermiamo il preventivo:
-  // il check post-save può essere un falso negativo e non deve lasciare vuota la griglia.
-  return Boolean(job?.customer?.plate) && popupResult?.vehicleState === "not_found";
+  return Boolean(job?.customer?.plate) && popupResult?.vehicleState !== "linked";
+}
+
+function shouldBlockAppointmentSaveForVehicle(job, popupResult) {
+  return Boolean(job?.customer?.plate) && popupResult?.vehicleState !== "linked";
 }
 
 function normalizeLoose(value) {
@@ -5374,6 +5375,9 @@ async function runYapAutomation(job, args) {
       let popupResult = null;
       try {
         popupResult = await fillAppointmentPopup(page, job);
+        if (shouldBlockAppointmentSaveForVehicle(job, popupResult)) {
+          throw new Error(`Veicolo non agganciato: salvataggio popup bloccato (${popupResult?.vehicleState || "unknown"})`);
+        }
         const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 4 });
         putResponse = popupSave.putResponse;
         saveAttemptsUsed = popupSave.saveAttemptsUsed;
@@ -5471,6 +5475,22 @@ async function runYapAutomation(job, args) {
       if (args.debug) {
         console.warn(`Popup refill retry riuscito: ${firstError.message}`);
       }
+    }
+    if (shouldBlockAppointmentSaveForVehicle(job, popupResult)) {
+      await page.keyboard.press("Escape").catch(() => {});
+      await page.waitForTimeout(160).catch(() => {});
+      return {
+        saved: false,
+        mode: "commit-blocked-vehicle",
+        status: "blocked_vehicle_not_linked",
+        inline_audit: {
+          verified: false,
+          present: [],
+          missing: [{ field: "veicolo", expected: `veicolo agganciato (${job.customer?.plate || ""})`, found: popupResult?.vehicleState || "unknown" }],
+          error: "Veicolo non agganciato: salvataggio appuntamento bloccato.",
+        },
+        message: "Salvataggio bloccato: veicolo non agganciato su YAP.",
+      };
     }
 
     const suffix = `${job.practiceId || "payload"}-${Date.now()}`;
@@ -5749,5 +5769,6 @@ export {
   hasVerifiedOdlWorkspace,
   normalizeLoose,
   parsePraticaHashPayload,
+  shouldBlockAppointmentSaveForVehicle,
   shouldBlockPracticeWriteForVehicle,
 };

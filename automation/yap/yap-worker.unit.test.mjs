@@ -9,6 +9,7 @@ import {
   formatManNeedle,
   hasVerifiedOdlWorkspace,
   parsePraticaHashPayload,
+  shouldBlockAppointmentSaveForVehicle,
   shouldBlockPracticeWriteForVehicle,
 } from "./yap-worker.mjs";
 import {
@@ -137,10 +138,20 @@ test("vehicle gate blocks practice write unless the vehicle is linked", () => {
   const job = { customer: { plate: "CN401MV" } };
 
   assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "linked" }), false);
-  assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "failed" }), false);
+  assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "failed" }), true);
   assert.equal(shouldBlockPracticeWriteForVehicle(job, { vehicleState: "not_found" }), true);
-  assert.equal(shouldBlockPracticeWriteForVehicle(job, null), false);
+  assert.equal(shouldBlockPracticeWriteForVehicle(job, null), true);
   assert.equal(shouldBlockPracticeWriteForVehicle({ customer: {} }, { vehicleState: "failed" }), false);
+});
+
+test("vehicle gate blocks appointment save unless the vehicle is linked", () => {
+  const job = { customer: { plate: "CN401MV" } };
+
+  assert.equal(shouldBlockAppointmentSaveForVehicle(job, { vehicleState: "linked" }), false);
+  assert.equal(shouldBlockAppointmentSaveForVehicle(job, { vehicleState: "failed" }), true);
+  assert.equal(shouldBlockAppointmentSaveForVehicle(job, { vehicleState: "not_found" }), true);
+  assert.equal(shouldBlockAppointmentSaveForVehicle(job, null), true);
+  assert.equal(shouldBlockAppointmentSaveForVehicle({ customer: {} }, { vehicleState: "failed" }), false);
 });
 
 test("extractTrailingJsonBlock finds the final JSON object in mixed output", () => {
