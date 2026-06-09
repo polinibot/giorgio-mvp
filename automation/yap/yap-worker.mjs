@@ -2886,6 +2886,15 @@ async function writeWorkGrid(page, job) {
     out.righe.push({ ...line, typed: Boolean(set.value && set.value.length > 0), written: false });
   }
 
+  // FLUSH ultima riga: una riga GWT si committa quando perde il focus, cosa che
+  // avviene al gridAddRow SUCCESSIVO. L'ultima riga digitata non ha un "dopo",
+  // quindi aggiungo una riga civetta per forzarne il commit (poi resta vuota in coda,
+  // come la riga-aggiungi che ogni griglia ha gia').
+  if (descrLines.length) {
+    await gridAddRow(page, true).catch(() => {});
+    await page.waitForTimeout(450).catch(() => {});
+  }
+
   // VERIFICA FINALE ONESTA: rileggo TUTTE le righe della griglia una volta sola.
   // Includo textContent + i valori degli <input> (le celle editabili non mettono il
   // valore in textContent). out.righe[].written = il testo c'e' DAVVERO nella griglia.
@@ -4028,75 +4037,112 @@ async function fillAppointmentPopup(page, job) {
 
   if (plate) {
     await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
-    let resolved = false;
+
+    // Veicolo agganciato == "Nessun veicolo selezionato" sparisce dal popup.
+    const isCommitted = () => safeEvaluate(page, () => {
+      const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+        .find((p) => /dettagli appuntamento/i.test(p.textContent || ""));
+      if (!popup) return false;
+      return !/nessun veicolo selezionato/i.test(popup.textContent || "");
+    }).catch(() => false);
+    const waitCommitted = async (tries, ms) => {
+      for (let i = 0; i < tries; i += 1) {
+        if (await isCommitted()) return true;
+        await page.waitForTimeout(ms).catch(() => {});
+      }
+      return false;
+    };
+    // Trova la RIGA-suggerimento (CellList GWT) con la targa, fuori dall'agenda di sfondo.
+    const findSuggestion = () => safeEvaluate(page, (targetPlate) => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      const P = String(targetPlate || "").toUpperCase();
+      const panels = [...document.querySelectorAll(
+        ".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel, [role='listbox']",
+      )].filter(isVisible);
+      if (panels.some((p) => /nessun risultato/i.test(p.textContent || ""))) return { state: "not_found" };
+      let el = null;
+      for (const sel of ["[__gwt_cell]", "tr[__gwt_row]", "[role='option']", ".gwt-MenuItem"]) {
+        const m = [...document.querySelectorAll(sel)]
+          .filter(isVisible)
+          .filter((e) => (e.textContent || "").toUpperCase().includes(P))
+          .filter((e) => e.getBoundingClientRect().height < 140)
+          .filter((e) => !e.closest(".fc-time-grid, .fc-view-container")); // no agenda di sfondo
+        if (m.length) { el = m[0]; break; }
+      }
+      if (el) {
+        const r = el.getBoundingClientRect();
+        return {
+          state: "match",
+          x: r.x + Math.min(r.width / 2, 120),
+          y: r.y + (r.height / 2),
+          label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 50),
+        };
+      }
+      const sawContent = panels.some((p) => (p.textContent || "").trim().length > 0);
+      return { state: "pending", sawContent };
+    }, plate).catch(() => ({ state: "pending" }));
+
+    // 1) Attendi la tendina (lookup server ~1-2s).
+    let sug = { state: "pending" };
     let sawPopup = false;
-    for (let i = 0; i < 14 && !resolved; i += 1) {
-      const probe = await safeEvaluate(page, (targetPlate) => {
+    for (let i = 0; i < 16; i += 1) {
+      sug = await findSuggestion();
+      if (sug.state === "match" || sug.state === "not_found") break;
+      if (sug.sawContent) sawPopup = true;
+      await page.waitForTimeout(220).catch(() => {});
+    }
+
+    // 2) Selezione: ogni strategia e' VERIFICATA dal commit reale.
+    let committed = false;
+    const tried = [];
+    if (sug.state === "not_found") {
+      vehicleState = "not_found";
+    } else if (sug.state === "match") {
+      await page.mouse.click(sug.x, sug.y).catch(() => {});
+      committed = await waitCommitted(10, 200); tried.push({ how: "click", committed });
+      if (!committed) { // SuggestBox GWT: ArrowDown + Enter
+        await page.keyboard.press("ArrowDown").catch(() => {});
+        await page.waitForTimeout(120).catch(() => {});
+        await page.keyboard.press("Enter").catch(() => {});
+        committed = await waitCommitted(6, 200); tried.push({ how: "arrowdown_enter", committed });
+      }
+      if (!committed) { // alcune CellList selezionano su doppio clic
+        const again = await findSuggestion();
+        if (again.state === "match") {
+          await page.mouse.dblclick(again.x, again.y).catch(() => {});
+          committed = await waitCommitted(6, 200); tried.push({ how: "dblclick", committed });
+        }
+      }
+      vehicleState = committed ? "linked" : "failed";
+    } else {
+      vehicleState = sawPopup ? "failed" : "not_found";
+    }
+
+    // Diagnostico onesto quando NON agganciato: cosa c'era a schermo e cosa ho provato.
+    if (vehicleState !== "linked") {
+      const dump = await safeEvaluate(page, (targetPlate) => {
         const isVisible = (el) => {
           const r = el.getBoundingClientRect();
           const s = window.getComputedStyle(el);
           return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
         };
         const P = String(targetPlate || "").toUpperCase();
-        // "Nessun risultato trovato." -> targa non in anagrafica.
-        const panels = [...document.querySelectorAll(
-          ".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel, [role='listbox']",
-        )].filter(isVisible);
-        if (panels.some((p) => /nessun risultato/i.test(p.textContent || ""))) return { state: "not_found" };
-        // La tendina veicolo e' una CellList GWT: la RIGA cliccabile e' il
-        // div[__gwt_cell] / tr[__gwt_row] / [role=option], NON lo <span> foglia con la
-        // targa. Cliccare la foglia non seleziona il suggerimento.
-        let el = null;
-        for (const sel of ["[__gwt_cell]", "tr[__gwt_row]", "[role='option']", ".gwt-MenuItem"]) {
-          const m = [...document.querySelectorAll(sel)]
-            .filter(isVisible)
-            .filter((e) => (e.textContent || "").toUpperCase().includes(P))
-            .filter((e) => e.getBoundingClientRect().height < 140); // esclude wrapper enormi
-          if (m.length) { el = m[0]; break; }
-        }
-        if (el) {
-          const r = el.getBoundingClientRect();
-          return {
-            state: "match",
-            x: r.x + Math.min(r.width / 2, 120),
-            y: r.y + (r.height / 2),
-            label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 50),
-          };
-        }
-        const sawContent = panels.some((p) => (p.textContent || "").trim().length > 0);
-        return { state: "pending", sawContent };
-      }, plate).catch(() => ({ state: "pending" }));
-      if (probe.state === "match") {
-        await page.mouse.click(probe.x, probe.y).catch(() => {});
-        vehicleState = "linked";
-        resolved = true;
-      } else if (probe.state === "not_found") {
-        vehicleState = "not_found";
-        resolved = true;
-      } else {
-        if (probe.sawContent) sawPopup = true;
-        await page.waitForTimeout(250).catch(() => {});
-      }
+        const cells = [...document.querySelectorAll("[__gwt_cell], tr[__gwt_row], [role='option']")]
+          .filter(isVisible)
+          .filter((e) => !e.closest(".fc-time-grid, .fc-view-container"))
+          .map((e) => ({ cls: (e.className || "").slice(0, 14), h: Math.round(e.getBoundingClientRect().height), txt: (e.textContent || "").replace(/\s+/g, " ").trim().slice(0, 38) }))
+          .filter((c) => c.txt);
+        const popups = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel, [role='listbox']")]
+          .filter(isVisible).map((p) => (p.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60));
+        return { plateCells: cells.filter((c) => c.txt.toUpperCase().includes(P)).slice(0, 6), popups: popups.slice(0, 6) };
+      }, plate).catch(() => null);
+      logAction("vehicle_probe", { state: vehicleState, lastSug: sug.state, label: sug.label || null, tried, dump });
     }
-    if (!resolved) vehicleState = sawPopup ? "failed" : "not_found";
-    // Attendi il COMMIT del veicolo: "Nessun veicolo selezionato" deve sparire.
-    // ONESTO: se dopo il click il veicolo NON viene agganciato, lo stato diventa
-    // "failed" (non resta "linked" mentendo).
-    if (vehicleState === "linked") {
-      let committed = false;
-      for (let i = 0; i < 18; i += 1) {
-        committed = await safeEvaluate(page, () => {
-          const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
-            .find((p) => /dettagli appuntamento/i.test(p.textContent || ""));
-          if (!popup) return false;
-          return !/nessun veicolo selezionato/i.test(popup.textContent || "");
-        }).catch(() => false);
-        if (committed) break;
-        await page.waitForTimeout(200).catch(() => {});
-      }
-      if (!committed) vehicleState = "failed";
-      logAction("vehicle_commit", { committed, plate });
-    }
+    logAction("vehicle_commit", { committed, plate, state: vehicleState });
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
