@@ -4037,23 +4037,33 @@ async function fillAppointmentPopup(page, job) {
           const s = window.getComputedStyle(el);
           return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
         };
-        const pops = [...document.querySelectorAll(".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
-          .filter(isVisible)
-          .filter((p) => !/dettagli appuntamento/i.test(p.textContent || ""));
-        let sawContent = false;
-        for (const pop of pops) {
-          const txt = (pop.textContent || "").trim();
-          if (!txt) continue;
-          sawContent = true;
-          if (/nessun risultato/i.test(txt)) return { state: "not_found" };
-          const items = [...pop.querySelectorAll("td, div, span, li, tr, [role='option']")]
+        const P = String(targetPlate || "").toUpperCase();
+        // "Nessun risultato trovato." -> targa non in anagrafica.
+        const panels = [...document.querySelectorAll(
+          ".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel, [role='listbox']",
+        )].filter(isVisible);
+        if (panels.some((p) => /nessun risultato/i.test(p.textContent || ""))) return { state: "not_found" };
+        // La tendina veicolo e' una CellList GWT: la RIGA cliccabile e' il
+        // div[__gwt_cell] / tr[__gwt_row] / [role=option], NON lo <span> foglia con la
+        // targa. Cliccare la foglia non seleziona il suggerimento.
+        let el = null;
+        for (const sel of ["[__gwt_cell]", "tr[__gwt_row]", "[role='option']", ".gwt-MenuItem"]) {
+          const m = [...document.querySelectorAll(sel)]
             .filter(isVisible)
-            .filter((el) => el.children.length === 0 && el.textContent.toUpperCase().includes(targetPlate));
-          if (items.length > 0) {
-            const r = items[0].getBoundingClientRect();
-            return { state: "match", x: r.x + (r.width / 2), y: r.y + (r.height / 2), label: (items[0].textContent || "").trim().slice(0, 40) };
-          }
+            .filter((e) => (e.textContent || "").toUpperCase().includes(P))
+            .filter((e) => e.getBoundingClientRect().height < 140); // esclude wrapper enormi
+          if (m.length) { el = m[0]; break; }
         }
+        if (el) {
+          const r = el.getBoundingClientRect();
+          return {
+            state: "match",
+            x: r.x + Math.min(r.width / 2, 120),
+            y: r.y + (r.height / 2),
+            label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 50),
+          };
+        }
+        const sawContent = panels.some((p) => (p.textContent || "").trim().length > 0);
         return { state: "pending", sawContent };
       }, plate).catch(() => ({ state: "pending" }));
       if (probe.state === "match") {
@@ -4070,9 +4080,12 @@ async function fillAppointmentPopup(page, job) {
     }
     if (!resolved) vehicleState = sawPopup ? "failed" : "not_found";
     // Attendi il COMMIT del veicolo: "Nessun veicolo selezionato" deve sparire.
+    // ONESTO: se dopo il click il veicolo NON viene agganciato, lo stato diventa
+    // "failed" (non resta "linked" mentendo).
     if (vehicleState === "linked") {
-      for (let i = 0; i < 15; i += 1) {
-        const committed = await safeEvaluate(page, () => {
+      let committed = false;
+      for (let i = 0; i < 18; i += 1) {
+        committed = await safeEvaluate(page, () => {
           const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
             .find((p) => /dettagli appuntamento/i.test(p.textContent || ""));
           if (!popup) return false;
@@ -4081,6 +4094,8 @@ async function fillAppointmentPopup(page, job) {
         if (committed) break;
         await page.waitForTimeout(200).catch(() => {});
       }
+      if (!committed) vehicleState = "failed";
+      logAction("vehicle_commit", { committed, plate });
     }
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
