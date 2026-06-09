@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09k-vehicle-verify-soft-block";
+const WORKER_BUILD = "2026-06-09l-preventivi-debug";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -3181,6 +3181,56 @@ async function saveWorkDocument(page, args = {}) {
   return { ok, becameDisabled, notif, rpc };
 }
 
+async function snapshotWorkGrid(page) {
+  return safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+    const topTabs = [...document.querySelectorAll(".gwt-TabLayoutPanelTab, [role='tab'], button, a, span, div, td")]
+      .filter(isVisible)
+      .filter((el) => el.getBoundingClientRect().y < 150)
+      .map((el) => ({
+        text: normalize(el.textContent || "").slice(0, 40),
+        selected: /selected|active/i.test(String(el.className || "")) || el.getAttribute("aria-selected") === "true",
+      }))
+      .filter((item) => item.text)
+      .slice(0, 20);
+    const gridHeaders = [...document.querySelectorAll("th, td[yapcolumnid]")]
+      .filter(isVisible)
+      .map((el) => normalize(el.textContent || el.getAttribute("yapcolumnid") || ""))
+      .filter(Boolean)
+      .slice(0, 20);
+    const rows = [...document.querySelectorAll("tr")]
+      .filter((tr) => tr.querySelector("td[yapcolumnid]"))
+      .map((tr) => {
+        let hay = tr.textContent || "";
+        for (const inp of tr.querySelectorAll("input")) hay += ` ${inp.value || ""}`;
+        return normalize(hay).slice(0, 120);
+      })
+      .filter(Boolean)
+      .slice(0, 12);
+    const buttons = [...document.querySelectorAll("button, a, [role='button']")]
+      .filter(isVisible)
+      .map((el) => normalize(el.textContent || el.getAttribute("title") || el.getAttribute("aria-label") || ""))
+      .filter(Boolean)
+      .slice(0, 20);
+    return {
+      hash: String(location.hash || "").slice(0, 180),
+      topTabs,
+      gridHeaders,
+      rowCount: rows.length,
+      rows,
+      buttons,
+      hasAddFirstRow: buttons.some((text) => /aggiungi prima riga/i.test(text)),
+      hasSalva: buttons.some((text) => /^salva$/i.test(text) || /salva/i.test(text)),
+      bodyPreview: normalize(document.body?.innerText || "").slice(0, 260),
+    };
+  }).catch(() => ({ error: true }));
+}
+
 // Orchestratore: scrive le righe del documento (Preventivo/ODL). Per ora: MANODOPERA.
 async function writeWorkGrid(page, job, args = {}) {
   const sections = job.sections || [];
@@ -3202,6 +3252,7 @@ async function writeWorkGrid(page, job, args = {}) {
   }
   logAction("grid_check", { onGrid, manHours: manHours ?? null });
   if (!onGrid) return { ok: false, reason: "not_on_grid" };
+  logAction("grid_snapshot_before", await snapshotWorkGrid(page));
 
   const out = { ok: true, manodopera: null };
   if (manHours != null) {
@@ -3221,6 +3272,7 @@ async function writeWorkGrid(page, job, args = {}) {
     }
     const after = await gridDumpRow(page, newRow);
     logAction("grid_row_after", after);
+    logAction("grid_snapshot_after_man", await snapshotWorkGrid(page));
     out.manodopera = { added: added.ok, articolo: art.ok, qta: Boolean(qta?.ok), readback: after };
   }
 
@@ -3298,10 +3350,12 @@ async function writeWorkGrid(page, job, args = {}) {
     expected: out.righe.length,
     sample: finalRows.slice(0, 14),
   });
+  logAction("grid_snapshot_before_save", await snapshotWorkGrid(page));
 
   // SALVA il documento: senza questo le righe restano solo client-side e si perdono
   // (su YAP "Preventivi" risultava vuoto). Il bottone Salva che si disabilita conferma.
   out.saved = await saveWorkDocument(page, args);
+  logAction("grid_snapshot_after_save", { saved: out.saved?.ok || false, ...(await snapshotWorkGrid(page)) });
   return out;
 }
 
@@ -3694,9 +3748,23 @@ async function writePracticeAndOdl(page, job, args) {
       // instrumentato. Separato dal flusso ODL keyword-based; al termine RITORNA SUBITO
       // (salta sezioni keyword + verify ODL: inutili e lentissimi per il preventivo).
       if (workPageEnum === "PREVENTIVO") {
+        logAction("preventivo_entry", {
+          workspaceState,
+          url: page.url().slice(0, 180),
+          pageEnumAfterRoute: writeReport.pageEnumAfterRoute,
+        });
+        logAction("preventivo_snapshot_entry", await snapshotWorkGrid(page));
         const gridResult = await writeWorkGrid(page, job, args).catch((e) => ({ ok: false, error: e?.message }));
         writeReport.gridResult = gridResult;
         const manOk = Boolean(gridResult?.manodopera?.articolo);
+        logAction("preventivo_result", {
+          ok: Boolean(gridResult?.ok),
+          reason: gridResult?.reason || gridResult?.error || null,
+          manodopera: manOk,
+          descrizioniPersisted: (gridResult?.righe || []).filter((r) => r.written).length,
+          descrizioniExpected: (gridResult?.righe || []).length,
+          saved: Boolean(gridResult?.saved?.ok),
+        });
         if (manOk) { writeReport.openedOdl = true; writeReport.odl.success = true; writeReport.odl.error = null; }
         writeReport.ok = manOk;
         writeReport.workspaceState = workspaceState;
