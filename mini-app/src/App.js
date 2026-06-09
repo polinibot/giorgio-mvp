@@ -467,7 +467,9 @@ function buildYapChecklist({ audit, result, practiceType }) {
   const agendaState = getYapAuditChecklistState(audit, [/^agenda$/i, 'appuntamento salvato in agenda']);
   const vehicleState = getYapAuditChecklistState(audit, [/^veicolo$/i, 'veicolo agganciato']);
   const tagState = getYapAuditChecklistState(audit, [/^tag$/i, 'tag: ']);
-  const preventivoSaveState = getYapAuditChecklistState(audit, [/^preventivo\.salvataggio$/i, 'documento salvato']);
+  // NB: niente matcher-stringa 'documento salvato' qui: e' condiviso con odl.salvataggio
+  // e faceva vincere il ramo Preventivo anche sulle pratiche ODL. Solo il campo esatto.
+  const preventivoSaveState = getYapAuditChecklistState(audit, [/^preventivo\.salvataggio$/i]);
   const preventivoManState = getYapAuditChecklistState(audit, [/^preventivo\.manodopera$/i, 'riga manodopera']);
   const preventivoDescriptionState = getYapAuditChecklistState(audit, [/^preventivo\.descrizione$/i]);
   const preventivoPartsState = getYapAuditChecklistState(audit, [/^preventivo\.ricambio$/i, /^preventivo\.ricambi$/i]);
