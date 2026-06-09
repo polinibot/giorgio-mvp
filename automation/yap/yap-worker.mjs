@@ -4124,9 +4124,7 @@ async function fillAppointmentPopup(page, job) {
       return { state: "pending", sawContent };
     }, plate).catch(() => ({ state: "pending" }));
 
-    // Attendi la tendina (lookup server ~1-2s) e clicca UNA SOLA volta il suggerimento.
-    // NIENTE escalation tastiera/doppio-clic: rischierebbe di sganciare un veicolo gia'
-    // agganciato. La conferma VERA arriva dopo il salvataggio, dall'evento in agenda.
+    // Attendi la tendina (lookup server ~1-2s).
     let sug = { state: "pending" };
     let sawPopup = false;
     for (let i = 0; i < 16; i += 1) {
@@ -4136,15 +4134,40 @@ async function fillAppointmentPopup(page, job) {
       await page.waitForTimeout(220).catch(() => {});
     }
     if (sug.state === "match") {
+      // Selezione robusta: il SINGOLO click spesso NON aggancia (CellList GWT). C'e' UN
+      // SOLO suggerimento (la targa), quindi escalare e' SICURO: non puoi scegliere il
+      // veicolo sbagliato. Provo click -> ArrowDown+Enter -> doppio-clic, fermandomi
+      // appena la tendina sparisce (= suggerimento selezionato). Verita' = agenda post-save.
+      const suggestionGone = async () => (await findSuggestion()).state !== "match";
+      const steps = [];
       await page.mouse.click(sug.x, sug.y).catch(() => {});
-      await page.waitForTimeout(700).catch(() => {}); // re-render veicolo
+      await page.waitForTimeout(320).catch(() => {});
+      steps.push({ how: "click", gone: await suggestionGone() });
+      if (!steps[steps.length - 1].gone) {
+        await page.keyboard.press("ArrowDown").catch(() => {});
+        await page.waitForTimeout(140).catch(() => {});
+        await page.keyboard.press("Enter").catch(() => {});
+        await page.waitForTimeout(320).catch(() => {});
+        steps.push({ how: "arrowdown_enter", gone: await suggestionGone() });
+      }
+      if (!steps[steps.length - 1].gone) {
+        const again = await findSuggestion();
+        if (again.state === "match") {
+          await page.mouse.dblclick(again.x, again.y).catch(() => {});
+          await page.waitForTimeout(320).catch(() => {});
+        }
+        steps.push({ how: "dblclick", gone: await suggestionGone() });
+      }
+      await page.waitForTimeout(500).catch(() => {}); // re-render veicolo
       vehicleState = "linked"; // tentativo: confermato/corretto dall'agenda post-save
+      logAction("cosa_vehicle_pick", { plate, label: sug.label || null, steps });
     } else if (sug.state === "not_found") {
       vehicleState = "not_found";
+      logAction("cosa_vehicle_pick", { plate, sug: "not_found" });
     } else {
       vehicleState = sawPopup ? "failed" : "not_found";
+      logAction("cosa_vehicle_pick", { plate, sug: sug.state, vehicleState });
     }
-    logAction("cosa_vehicle_pick", { plate, sug: sug.state, label: sug.label || null, vehicleState });
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
@@ -4187,18 +4210,28 @@ async function verifyVehicleInAgenda(page, plate) {
   const norm = (s) => String(s || "").toUpperCase().replace(/\s+/g, "");
   const P = norm(plate);
   if (!P) return { linked: false, found: false };
-  try {
-    const events = await scanVisibleAgendaEvents(page); // [{time, title, repartoClass}]
-    const ev = events.find((e) => norm(e.title).includes(P));
-    if (!ev) return { linked: false, found: false };
-    const title = norm(ev.title);
-    // testo dopo la prima occorrenza della targa, ridotto alle sole lettere
-    const afterPlate = title.split(P).slice(1).join(" ").replace(/[^A-Z]/g, "");
-    const linked = /[A-Z]{3,}/.test(afterPlate); // una parola (marca/nome) dopo la targa
-    return { linked, found: true, title: String(ev.title || "").slice(0, 90), reparto: ev.repartoClass || "" };
-  } catch (e) {
-    return { linked: false, found: false, error: String(e?.message || "").slice(0, 80) };
+  let last = { linked: false, found: false };
+  // Polling breve: il re-render dell'evento puo' arrivare con un attimo di ritardo.
+  // Se in QUALSIASI scan risulta agganciato -> agganciato (no falsi negativi da timing).
+  for (let i = 0; i < 4; i += 1) {
+    try {
+      const events = await scanVisibleAgendaEvents(page); // [{time, title, repartoClass}]
+      const ev = events.find((e) => norm(e.title).includes(P));
+      if (ev) {
+        const title = norm(ev.title);
+        const afterPlate = title.split(P).slice(1).join(" ").replace(/[^A-Z]/g, "");
+        const linked = /[A-Z]{3,}/.test(afterPlate); // marca/nome dopo la targa
+        last = { linked, found: true, title: String(ev.title || "").slice(0, 90), reparto: ev.repartoClass || "", scans: i + 1 };
+        if (linked) return last;
+      } else if (!last.found) {
+        last = { linked: false, found: false, scans: i + 1 };
+      }
+    } catch (e) {
+      last = { linked: false, found: false, error: String(e?.message || "").slice(0, 80), scans: i + 1 };
+    }
+    await page.waitForTimeout(450).catch(() => {});
   }
+  return last;
 }
 
 // Audit inline: verifica i dati appena salvati senza aprire nuovo browser
@@ -5062,7 +5095,20 @@ async function runYapAutomation(job, args) {
       await page.screenshot({ path: afterSavePath, fullPage: true });
     }
     let managementWrite = null;
-    if (shouldWriteOdlFromWorker(job)) {
+    // PREREQUISITO: senza veicolo agganciato NON si entra in gestione pratica, quindi
+    // niente preventivo/ODL. Se la targa c'era ma l'aggancio e' fallito, salto la
+    // scrittura (inutile + lenta) e lo segnalo onestamente.
+    const vehicleBlocksPractice = Boolean(job.customer?.plate) && popupResult?.vehicleState === "failed";
+    if (shouldWriteOdlFromWorker(job) && vehicleBlocksPractice) {
+      logPhase("odl", "skipped_no_vehicle", { plate: job.customer?.plate });
+      managementWrite = {
+        attempted: false,
+        ok: false,
+        skipped: true,
+        reason: "vehicle_not_linked",
+        error: "Veicolo non agganciato: impossibile aprire la gestione pratica.",
+      };
+    } else if (shouldWriteOdlFromWorker(job)) {
       logPhase("odl", "starting");
       managementWrite = await writePracticeAndOdl(page, job, args).catch((error) => ({
         attempted: true,
