@@ -1810,8 +1810,9 @@ async function openOdlByRoute(page, currentUrl, pageEnum = "ODL") {
       IdCompanyFolder: parsed.idCompanyFolder,
       Page: pageEnum,
       PageEnum: pageEnum,
-      // Il marcatempo ODL non si applica alla pagina Preventivo.
-      ShowOdlMarcatempo: pageEnum !== "PREVENTIVO",
+      // Vogliamo SEMPRE la griglia documento (Righe), mai la vista marcatempo: false
+      // sia per Preventivo che per ODL (scriviamo noi le righe nella stessa tabella).
+      ShowOdlMarcatempo: false,
     };
     const token = JSON.stringify(nextPayload);
     await page.evaluate((t) => {
@@ -1851,8 +1852,9 @@ async function openOdlByFullReload(page, currentUrl, pageEnum = "ODL") {
       IdCompanyFolder: parsed.idCompanyFolder,
       Page: pageEnum,
       PageEnum: pageEnum,
-      // Il marcatempo ODL non si applica alla pagina Preventivo.
-      ShowOdlMarcatempo: pageEnum !== "PREVENTIVO",
+      // Vogliamo SEMPRE la griglia documento (Righe), mai la vista marcatempo: false
+      // sia per Preventivo che per ODL (scriviamo noi le righe nella stessa tabella).
+      ShowOdlMarcatempo: false,
     };
     const baseUrl = new URL(currentUrl || page.url());
     baseUrl.hash = `!pratica|${JSON.stringify(nextPayload)}`;
@@ -3647,12 +3649,15 @@ async function writePracticeAndOdl(page, job, args) {
   // F2-ter: pausa per automatismi YAP (creazione ODL in background) - adaptive, env-tunable.
   // Poll più frequente => early-exit più rapido quando l'ODL è pronto; budget ridotto perché
   // gli step ODL successivi hanno comunque i propri retry di readiness (waitForOdlWorkspaceReady).
-  // Per il PREVENTIVO NON aspettiamo gli automatismi ODL (creano l'ODL, non il preventivo):
-  // quell'attesa bruciava ~77s a vuoto. Navighiamo subito alla pagina Preventivo e scriviamo.
-  const isPreventivoFlow = String(job?.appointment?.type || "").trim().toLowerCase() === "preventivo";
-  logPhase("automatismi_wait", isPreventivoFlow ? "skipped_preventivo" : "starting", { state: await getPracticeWorkspaceState(page) });
+  // Per PREVENTIVO e ORDINE DI LAVORO NON aspettiamo gli automatismi: scriviamo NOI le
+  // righe (route diretta a Page=PREVENTIVO/ODL + griglia). L'attesa automatismi bruciava
+  // ~77s a vuoto E faceva SCADERE LA SESSIONE (la pagina tornava al login -> ODL non
+  // trovato). Stesso flusso griglia per entrambi: cambia solo pagina e tag.
+  const _practiceType = String(job?.appointment?.type || "").trim().toLowerCase();
+  const isGridFlow = _practiceType === "preventivo" || _practiceType === "ordine_di_lavoro";
+  logPhase("automatismi_wait", isGridFlow ? "skipped_grid_flow" : "starting", { state: await getPracticeWorkspaceState(page) });
   let workspaceState = await getPracticeWorkspaceState(page);
-  if (!isPreventivoFlow) {
+  if (!isGridFlow) {
   let autoAttempts = 0;
   const autoPollMs = Number(process.env.YAP_AUTOMATISMI_POLL_MS) || 1000;
   // Budget aumentato a 30s (era 20s): su Railway headless/memoria limitata gli
@@ -3829,20 +3834,26 @@ async function writePracticeAndOdl(page, job, args) {
       const parsedAfterRoute = parsePraticaHashPayload(urlAfterRoute);
       writeReport.pageEnumAfterRoute = parsedAfterRoute.pageEnum ?? (parsedAfterRoute.ok ? "no_page_field" : parsedAfterRoute.reason);
       writeReport.debug.odl.pageEnumAfterRoute = writeReport.pageEnumAfterRoute;
-      // FLUSSO NUOVO — PREVENTIVO: scrivi le righe nella griglia documento (MANODOPERA per ora),
-      // instrumentato. Separato dal flusso ODL keyword-based; al termine RITORNA SUBITO
-      // (salta sezioni keyword + verify ODL: inutili e lentissimi per il preventivo).
-      if (workPageEnum === "PREVENTIVO") {
-        logAction("preventivo_entry", {
+      // FLUSSO GRIGLIA — PREVENTIVO e ORDINE DI LAVORO: scriviamo NOI le righe nella
+      // griglia documento (stessa tabella, cambia solo pagina/tag). Salta il vecchio
+      // flusso keyword ODL + l'attesa automatismi. Al termine RITORNA SUBITO.
+      if (workPageEnum === "PREVENTIVO" || workPageEnum === "ODL") {
+        const docKind = workPageEnum === "ODL" ? "odl" : "preventivo";
+        const docLabel = workPageEnum === "ODL" ? "Ordine di lavoro" : "Preventivo";
+        writeReport.workPage = workPageEnum;
+        logAction("grid_flow_entry", {
+          docKind,
           workspaceState,
           url: page.url().slice(0, 180),
           pageEnumAfterRoute: writeReport.pageEnumAfterRoute,
         });
-        logAction("preventivo_snapshot_entry", await snapshotWorkGrid(page));
+        logAction("grid_flow_snapshot_entry", await snapshotWorkGrid(page));
         const gridResult = await writeWorkGrid(page, job, args).catch((e) => ({ ok: false, error: e?.message }));
+        if (gridResult && typeof gridResult === "object") gridResult.docKind = docKind;
         writeReport.gridResult = gridResult;
         const manOk = Boolean(gridResult?.manodopera?.articolo);
-        logAction("preventivo_result", {
+        logAction("grid_flow_result", {
+          docKind,
           ok: Boolean(gridResult?.ok),
           reason: gridResult?.reason || gridResult?.error || null,
           manodopera: manOk,
@@ -3853,28 +3864,27 @@ async function writePracticeAndOdl(page, job, args) {
         if (manOk) { writeReport.openedOdl = true; writeReport.odl.success = true; writeReport.odl.error = null; }
         writeReport.ok = manOk;
         writeReport.workspaceState = workspaceState;
-        // Campi ONESTI del preventivo (da gridResult), non i legacy ODL/note.interne che
-        // risultavano sempre "missing" e sporcavano il report senza essere nell'audit.
+        // Campi ONESTI del documento (da gridResult), prefisso per tipo (preventivo/odl).
         const pf = [{
-          field_id: "preventivo.manodopera", expected: "MAN",
+          field_id: `${docKind}.manodopera`, expected: "MAN",
           found: manOk ? "MAN" : null, status: manOk ? "written" : "missing",
-          hint: "Preventivo > riga MANODOPERA (MAN).",
+          hint: `${docLabel} > riga MANODOPERA (MAN).`,
         }];
         for (const r of (gridResult?.righe || [])) {
           pf.push({
-            field_id: `preventivo.${r.kind}`, expected: r.text,
+            field_id: `${docKind}.${r.kind}`, expected: r.text,
             found: r.written ? r.text : null, status: r.written ? "written" : "missing",
-            hint: "Preventivo > righe descrittive (Tipo D).",
+            hint: `${docLabel} > righe descrittive (Tipo D).`,
           });
         }
         const docSaved = Boolean(gridResult?.saved?.ok);
         pf.push({
-          field_id: "preventivo.salvataggio", expected: "documento salvato",
+          field_id: `${docKind}.salvataggio`, expected: "documento salvato",
           found: docSaved ? "salvato" : null, status: docSaved ? "written" : "missing",
-          hint: "Preventivo > pulsante Salva.",
+          hint: `${docLabel} > pulsante Salva.`,
         });
         writeReport.fields = pf;
-        logPhase("grid_write", gridResult?.ok ? "done" : "failed", { manodopera: manOk });
+        logPhase("grid_write", gridResult?.ok ? "done" : "failed", { docKind, manodopera: manOk });
         _detachRpcTrace();
         return writeReport;
       }
@@ -4834,24 +4844,26 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
   // Preventivo). Niente note.interne (rimosse). Onesto: presente solo cio' che e' scritto.
   if (wr?.gridResult) {
     const g = wr.gridResult;
+    // Prefisso onesto in base al tipo di documento (preventivo o ODL): stessa griglia.
+    const dk = g.docKind === "odl" ? "odl" : "preventivo";
     if (g.manodopera?.articolo) {
-      present.push({ field: "preventivo.manodopera", expected: `MAN (${g.manodopera?.readback?.qta || "ore"})` });
+      present.push({ field: `${dk}.manodopera`, expected: `MAN (${g.manodopera?.readback?.qta || "ore"})` });
     } else {
-      missing.push({ field: "preventivo.manodopera", expected: "riga manodopera (MAN)" });
+      missing.push({ field: `${dk}.manodopera`, expected: "riga manodopera (MAN)" });
     }
     for (const r of (g.righe || [])) {
-      if (r.written) present.push({ field: `preventivo.${r.kind}`, expected: r.text });
-      else missing.push({ field: `preventivo.${r.kind}`, expected: r.text, found: "non scritto" });
+      if (r.written) present.push({ field: `${dk}.${r.kind}`, expected: r.text });
+      else missing.push({ field: `${dk}.${r.kind}`, expected: r.text, found: "non scritto" });
     }
     // Salvataggio del documento: senza, le righe NON persistono su YAP. Onesto.
-    if (g.saved?.ok) present.push({ field: "preventivo.salvataggio", expected: "documento salvato" });
-    else missing.push({ field: "preventivo.salvataggio", expected: "documento salvato", found: g.saved?.reason || "non salvato" });
+    if (g.saved?.ok) present.push({ field: `${dk}.salvataggio`, expected: "documento salvato" });
+    else missing.push({ field: `${dk}.salvataggio`, expected: "documento salvato", found: g.saved?.reason || "non salvato" });
     return {
       verified: missing.length === 0,
       present,
       missing,
       error: missing.length ? `Da ricontrollare: ${missing.map((m) => m.field).join(", ")}` : undefined,
-      summary: { present: present.length, missing: missing.length, fields: present.map((p) => p.field), source: "preventivo_grid" },
+      summary: { present: present.length, missing: missing.length, fields: present.map((p) => p.field), source: `${dk}_grid` },
     };
   }
 

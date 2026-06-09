@@ -472,6 +472,10 @@ function buildYapChecklist({ audit, result, practiceType }) {
   const preventivoDescriptionState = getYapAuditChecklistState(audit, [/^preventivo\.descrizione$/i]);
   const preventivoPartsState = getYapAuditChecklistState(audit, [/^preventivo\.ricambio$/i, /^preventivo\.ricambi$/i]);
   const odlState = getYapAuditChecklistState(audit, [/^odl$/i, 'scrittura odl']);
+  const odlSaveState = getYapAuditChecklistState(audit, [/^odl\.salvataggio$/i]);
+  const odlManState = getYapAuditChecklistState(audit, [/^odl\.manodopera$/i]);
+  const odlDescriptionState = getYapAuditChecklistState(audit, [/^odl\.descrizione$/i]);
+  const odlPartsState = getYapAuditChecklistState(audit, [/^odl\.ricambio$/i, /^odl\.ricambi$/i]);
   const status = String(result?.status || result?.practice?.management_sync_status || audit?.status || '').trim().toLowerCase();
 
   const agendaValue = agendaState.value != null
@@ -491,9 +495,12 @@ function buildYapChecklist({ audit, result, practiceType }) {
       { key: 'preventivo-descrizioni', label: 'Preventivo descrizioni', value: preventivoDescriptionState.value },
       { key: 'preventivo-ricambi', label: 'Preventivo ricambi', value: preventivoPartsState.value },
     );
-  } else if (normalizedPracticeType === 'ordine_di_lavoro' || odlState.seen) {
+  } else if (normalizedPracticeType === 'ordine_di_lavoro' || odlSaveState.seen || odlManState.seen || odlDescriptionState.seen || odlPartsState.seen || odlState.seen) {
     checklist.push(
-      { key: 'odl', label: 'ODL scritto', value: odlState.value },
+      { key: 'odl-salvato', label: 'ODL salvato', value: odlSaveState.seen ? odlSaveState.value : odlState.value },
+      { key: 'odl-man', label: 'ODL manodopera', value: odlManState.value },
+      { key: 'odl-descrizioni', label: 'ODL descrizioni', value: odlDescriptionState.value },
+      { key: 'odl-ricambi', label: 'ODL ricambi', value: odlPartsState.value },
     );
   }
 
