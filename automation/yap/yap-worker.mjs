@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09e-vehicle-overlay-anchors";
+const WORKER_BUILD = "2026-06-09f-cosa-prefill-no-plate";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -2059,7 +2059,7 @@ async function chooseVehicleFromSearchOverlay(page, plate) {
   };
 }
 
-async function selectVehicleByPlate(page, plate) {
+async function selectVehicleByPlate(page, plate, { skipInputFallback = false } = {}) {
   if (!plate) return { found: false, reason: "no_plate" };
   const cleanPlate = String(plate).trim().toUpperCase();
 
@@ -2105,6 +2105,18 @@ async function selectVehicleByPlate(page, plate) {
       confirmed: true,
       vehicleText: overlayAttempt.vehicleText || null,
       attempts: [{ attempt: 1, selected: true, confirmed: true, vehicleText: overlayAttempt.vehicleText || null }],
+    };
+  }
+
+  if (skipInputFallback) {
+    return {
+      found: Boolean(vehicleControls || overlayAttempt?.found),
+      strategy: vehicleControls?.strategy || overlayAttempt?.reason || "vehicle_overlay_attempted",
+      selected: Boolean(overlayAttempt?.selected),
+      confirmed: false,
+      vehicleText: overlayAttempt?.vehicleText || null,
+      attempts: overlayAttempt ? [{ attempt: 1, selected: Boolean(overlayAttempt.selected), confirmed: false, vehicleText: overlayAttempt.vehicleText || null }] : [],
+      reason: overlayAttempt?.reason || "vehicle_not_confirmed",
     };
   }
 
@@ -4469,6 +4481,7 @@ async function fillAppointmentPopup(page, job) {
   const endTime = addMinutes(job.appointment.time, job.appointment.duration);
   const notes = buildNotesForPopup(jobToMapping(job));
   const plate = String(job.customer?.plate || "").trim().toUpperCase();
+  const cosaWrittenValue = plate || cosaValue;
 
   // --- VEICOLO (per primo, sul campo Cosa) ---
   // ORDINE CRITICO: TAG e DATA/ORA prima, VEICOLO per ULTIMO.
@@ -4496,37 +4509,23 @@ async function fillAppointmentPopup(page, job) {
   // --- VEICOLO (per ULTIMO): scrivo la targa nel Cosa (tastiera reale -> autocomplete),
   // poi clicco il suggerimento per agganciare. Questo puo' far scattare l'auto-save. ---
   let vehicleState = "skipped"; // skipped|linked|not_found|failed
-  const cosaX = cosaInput.x + Math.min(cosaInput.width / 2, 60);
-  const cosaY = cosaInput.y + (cosaInput.height / 2);
-  await page.mouse.click(cosaX, cosaY).catch(() => {});
-  await page.waitForTimeout(120).catch(() => {});
-  await page.keyboard.press("Control+A").catch(() => {});
-  await page.keyboard.press("Delete").catch(() => {});
-
   if (plate) {
-    const vehicle = await selectVehicleByPlate(page, plate);
+    await fillVisibleInput(page, cosaInput.index, plate).catch(() => {});
+    const vehicle = await selectVehicleByPlate(page, plate, { skipInputFallback: true });
     vehicleState = vehicle.confirmed ? "linked" : (vehicle.found ? "failed" : "not_found");
-    logAction("cosa_vehicle_pick", { plate, ...vehicle, vehicleState });
-    if (!vehicle.confirmed && !vehicle.found) {
-      await fillVisibleInput(page, cosaInput.index, cosaValue).catch(() => {});
-      logAction("cosa_vehicle_fallback", {
-        plate,
-        cosaValue: cosaValue.slice(0, 40),
-        reason: vehicle.reason || (vehicle.found ? "vehicle_not_confirmed" : "vehicle_input_not_found"),
-      });
-    }
+    logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, ...vehicle, vehicleState });
   } else {
-    await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
+    await fillVisibleInput(page, cosaInput.index, cosaValue).catch(() => {});
   }
   const vehicleLinked = vehicleState === "linked";
-  logAction("cosa_vehicle", { plate, cosaValue, vehicleState });
+  logAction("cosa_vehicle", { plate, cosaValue, writtenValue: cosaWrittenValue, vehicleState });
 
   return {
     tagResult,
     vehicleState,
     vehicleLinked,
     plate,
-    cosa: cosaValue,
+    cosa: cosaWrittenValue,
   };
 }
 
