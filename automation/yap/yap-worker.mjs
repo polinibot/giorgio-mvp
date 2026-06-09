@@ -4533,7 +4533,6 @@ async function fillAppointmentPopup(page, job) {
   const plate = String(job.customer?.plate || "").trim().toUpperCase();
   const cosaWrittenValue = plate || cosaValue;
 
-  // --- VEICOLO (per primo, sul campo Cosa) ---
   // ORDINE CRITICO: TAG e DATA/ORA prima, VEICOLO per ULTIMO.
   // Quando il veicolo si aggancia, YAP considera l'appuntamento COMPLETO (veicolo+data+
   // ora) e lo AUTO-SALVA chiudendo il popup. Se il tag fosse scritto dopo il veicolo,
@@ -4556,18 +4555,91 @@ async function fillAppointmentPopup(page, job) {
     await fillVisibleInput(page, emptyAfterTimes[0].index, notes).catch(() => {});
   }
 
-  // --- VEICOLO (per ULTIMO): scrivo la targa nel Cosa (tastiera reale -> autocomplete),
-  // poi clicco il suggerimento per agganciare. Questo puo' far scattare l'auto-save. ---
+  // --- VEICOLO (per ULTIMO): targa nel Cosa con TASTIERA REALE.
+  // CRITICO: l'autocomplete GWT del veicolo si attiva SOLO con eventi tastiera veri,
+  // NON con `input.value=` (fillVisibleInput). Con value=+blur la tendina non compare
+  // (veicolo mai agganciato) e il blur fa auto-salvare YAP in anticipo -> doppioni.
   let vehicleState = "skipped"; // skipped|linked|not_found|failed
+  const cosaX = cosaInput.x + Math.min(cosaInput.width / 2, 60);
+  const cosaY = cosaInput.y + (cosaInput.height / 2);
+  await page.mouse.click(cosaX, cosaY).catch(() => {});
+  await page.waitForTimeout(120).catch(() => {});
+  await page.keyboard.press("Control+A").catch(() => {});
+  await page.keyboard.press("Delete").catch(() => {});
   if (plate) {
-    await fillVisibleInput(page, cosaInput.index, plate).catch(() => {});
-    const vehicle = await selectVehicleByPlate(page, plate, { skipInputFallback: true });
-    vehicleState = vehicle.confirmed ? "linked" : (vehicle.found ? "failed" : "not_found");
-    logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, ...vehicle, vehicleState });
+    await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
+
+    // Trova la RIGA-suggerimento (CellList GWT) con la targa, fuori dall'agenda di sfondo.
+    const findSuggestion = () => safeEvaluate(page, (targetPlate) => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      const P = String(targetPlate || "").toUpperCase();
+      const panels = [...document.querySelectorAll(
+        ".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel, [role='listbox']",
+      )].filter(isVisible);
+      if (panels.some((p) => /nessun risultato/i.test(p.textContent || ""))) return { state: "not_found" };
+      let el = null;
+      for (const sel of ["[__gwt_cell]", "tr[__gwt_row]", "[role='option']", ".gwt-MenuItem"]) {
+        const m = [...document.querySelectorAll(sel)]
+          .filter(isVisible)
+          .filter((e) => (e.textContent || "").toUpperCase().includes(P))
+          .filter((e) => e.getBoundingClientRect().height < 140)
+          .filter((e) => !e.closest(".fc-time-grid, .fc-view-container"));
+        if (m.length) { el = m[0]; break; }
+      }
+      if (el) {
+        const r = el.getBoundingClientRect();
+        return { state: "match", x: r.x + Math.min(r.width / 2, 120), y: r.y + (r.height / 2), label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 50) };
+      }
+      const sawContent = panels.some((p) => (p.textContent || "").trim().length > 0);
+      return { state: "pending", sawContent };
+    }, plate).catch(() => ({ state: "pending" }));
+
+    let sug = { state: "pending" };
+    let sawPopup = false;
+    for (let i = 0; i < 16; i += 1) {
+      sug = await findSuggestion();
+      if (sug.state === "match" || sug.state === "not_found") break;
+      if (sug.sawContent) sawPopup = true;
+      await page.waitForTimeout(220).catch(() => {});
+    }
+    const steps = [];
+    if (sug.state === "match") {
+      // Un solo suggerimento (la targa) => escalare e' sicuro. Mi fermo appena sparisce.
+      const gone = async () => (await findSuggestion()).state !== "match";
+      await page.mouse.click(sug.x, sug.y).catch(() => {});
+      await page.waitForTimeout(320).catch(() => {});
+      steps.push({ how: "click", gone: await gone() });
+      if (!steps[steps.length - 1].gone) {
+        await page.keyboard.press("ArrowDown").catch(() => {});
+        await page.waitForTimeout(140).catch(() => {});
+        await page.keyboard.press("Enter").catch(() => {});
+        await page.waitForTimeout(320).catch(() => {});
+        steps.push({ how: "arrowdown_enter", gone: await gone() });
+      }
+      if (!steps[steps.length - 1].gone) {
+        const again = await findSuggestion();
+        if (again.state === "match") { await page.mouse.dblclick(again.x, again.y).catch(() => {}); await page.waitForTimeout(320).catch(() => {}); }
+        steps.push({ how: "dblclick", gone: await gone() });
+      }
+      await page.waitForTimeout(500).catch(() => {});
+      vehicleState = "linked"; // tentativo: confermato/corretto dall'agenda post-save
+    } else if (sug.state === "not_found") {
+      vehicleState = "not_found";
+    } else {
+      vehicleState = sawPopup ? "failed" : "not_found";
+    }
+    logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, sug: sug.state, label: sug.label || null, steps, vehicleState });
   } else {
-    await fillVisibleInput(page, cosaInput.index, cosaValue).catch(() => {});
+    await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
-  if (yapTags.length) {
+  // Retry tag SOLO se il popup e' ancora aperto: dopo l'aggancio veicolo YAP puo'
+  // auto-salvare e chiudere il popup; ritentare a popup chiuso cliccherebbe sull'agenda.
+  const popupStillOpen = Boolean(await appointmentPopupRect(page).catch(() => null));
+  if (yapTags.length && popupStillOpen) {
     const missingTags = [];
     for (const tag of yapTags) {
       if (!(await isTagConfirmed(page, tag))) missingTags.push(tag);
@@ -5375,9 +5447,8 @@ async function runYapAutomation(job, args) {
       let popupResult = null;
       try {
         popupResult = await fillAppointmentPopup(page, job);
-        if (shouldBlockAppointmentSaveForVehicle(job, popupResult)) {
-          throw new Error(`Veicolo non agganciato: salvataggio popup bloccato (${popupResult?.vehicleState || "unknown"})`);
-        }
+        // Niente block sul salvataggio: l'appuntamento va salvato comunque. Il prerequisito
+        // veicolo vale solo per la pratica/preventivo (gestito a valle).
         const popupSave = await saveAppointmentPopup(page, { maxSaveAttempts: 4 });
         putResponse = popupSave.putResponse;
         saveAttemptsUsed = popupSave.saveAttemptsUsed;
@@ -5476,22 +5547,10 @@ async function runYapAutomation(job, args) {
         console.warn(`Popup refill retry riuscito: ${firstError.message}`);
       }
     }
-    if (shouldBlockAppointmentSaveForVehicle(job, popupResult)) {
-      await page.keyboard.press("Escape").catch(() => {});
-      await page.waitForTimeout(160).catch(() => {});
-      return {
-        saved: false,
-        mode: "commit-blocked-vehicle",
-        status: "blocked_vehicle_not_linked",
-        inline_audit: {
-          verified: false,
-          present: [],
-          missing: [{ field: "veicolo", expected: `veicolo agganciato (${job.customer?.plate || ""})`, found: popupResult?.vehicleState || "unknown" }],
-          error: "Veicolo non agganciato: salvataggio appuntamento bloccato.",
-        },
-        message: "Salvataggio bloccato: veicolo non agganciato su YAP.",
-      };
-    }
+    // NIENTE block sul salvataggio AGENDA: l'appuntamento (targa+data/ora+tag) va salvato
+    // comunque. Bloccarlo con Escape non ferma l'auto-save di YAP gia' scattato e creava
+    // un secondo appuntamento orfano. Il prerequisito veicolo vale solo per la PRATICA
+    // (preventivo/ODL), gestito piu' sotto con shouldBlockPracticeWriteForVehicle.
 
     const suffix = `${job.practiceId || "payload"}-${Date.now()}`;
     let beforeSavePath = null;
