@@ -3085,29 +3085,29 @@ async function gridSetLastRowTipo(page, tipo) {
   await page.keyboard.type(String(tipo), { delay: 60 }).catch(() => {});
   await page.waitForTimeout(350).catch(() => {}); // lascia comparire il dropdown
 
-  // Dropdown del Tipo: opzioni (diagnostica) + coordinate dell'opzione che inizia con `tipo`.
-  const dd = await safeEvaluate(page, (want) => {
+  // Diagnostica: opzioni del dropdown SOLO dal vero .gwt-SuggestBoxPopup (NON il menu in
+  // alto). Il bug precedente catturava .gwt-MenuItem = menu nav (Dashboard/Agenda/...) e
+  // cliccava "Dashboard" (inizia per D) -> navigava via dalla pratica.
+  const opts = await safeEvaluate(page, () => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
       const s = window.getComputedStyle(el);
       return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
     };
-    const items = [...document.querySelectorAll(
-      ".gwt-SuggestBoxPopup [__gwt_cell], .gwt-SuggestBoxPopup tr, [role='option'], .gwt-MenuItem",
-    )].filter(isVisible).filter((e) => (e.textContent || "").trim());
-    const opts = [...new Set(items.map((e) => (e.textContent || "").replace(/\s+/g, " ").trim().slice(0, 30)))].slice(0, 10);
-    const W = String(want).toUpperCase();
-    const hit = items.find((e) => (e.textContent || "").trim().toUpperCase().startsWith(W)) || items[0];
-    let coords = null;
-    if (hit) { const r = hit.getBoundingClientRect(); coords = { x: r.x + Math.min(r.width / 2, 60), y: r.y + (r.height / 2) }; }
-    return { opts, coords };
-  }, tipo).catch(() => ({ opts: [], coords: null }));
+    const items = [];
+    for (const p of [...document.querySelectorAll(".gwt-SuggestBoxPopup")].filter(isVisible)) {
+      for (const e of p.querySelectorAll("[__gwt_cell], tr, [role='option']")) {
+        if (isVisible(e) && (e.textContent || "").trim()) items.push((e.textContent || "").replace(/\s+/g, " ").trim().slice(0, 24));
+      }
+    }
+    return [...new Set(items)].slice(0, 10);
+  }).catch(() => []);
 
-  if (dd.coords) {
-    await page.mouse.click(dd.coords.x, dd.coords.y).catch(() => {});
-  } else {
-    await page.keyboard.press("Enter").catch(() => {});
-  }
+  // Selezione SOLO da TASTIERA (ArrowDown + Enter): mai click su coordinate, quindi
+  // impossibile cliccare per sbaglio il menu di navigazione.
+  await page.keyboard.press("ArrowDown").catch(() => {});
+  await page.waitForTimeout(120).catch(() => {});
+  await page.keyboard.press("Enter").catch(() => {});
   await page.waitForTimeout(250).catch(() => {});
 
   const readback = await safeEvaluate(page, () => {
@@ -3117,7 +3117,10 @@ async function gridSetLastRowTipo(page, tipo) {
     for (const inp of (c?.querySelectorAll("input") || [])) t += " " + (inp.value || "");
     return t.replace(/\s+/g, " ").trim().slice(0, 20);
   }).catch(() => null);
-  return { ok: true, opts: dd.opts, pickedDropdown: Boolean(dd.coords), readback };
+  // Guardia: se siamo finiti sulla dashboard, e' un fallimento grave (non navigare mai via).
+  const hash = await safeEvaluate(page, () => location.hash || "").catch(() => "");
+  const navigatedAway = /dashboard/i.test(hash);
+  return { ok: !navigatedAway, opts, readback, navigatedAway: navigatedAway || undefined };
 }
 
 // Legge il contenuto testuale delle celle chiave di una riga (readback).
