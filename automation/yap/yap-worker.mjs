@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09d-vehicle-toggle-first";
+const WORKER_BUILD = "2026-06-09e-vehicle-overlay-anchors";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1879,22 +1879,19 @@ async function readAppointmentVehicleText(page) {
     const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
       .find((p) => isVisible(p) && /dettagli appuntamento/i.test(p.textContent || ""));
     if (!popup) return null;
-    const vehicleRow = [...popup.querySelectorAll("div, td, span, a, button")]
-      .filter(isVisible)
-      .find((el) => {
-        const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-        return text.includes("veicolo") && (text.includes("nessun veicolo selezionato") || text.length > 8);
-      });
-    if (!vehicleRow) return null;
-    const text = (vehicleRow.textContent || "").replace(/\s+/g, " ").trim();
+    const rawText = (popup.textContent || "").replace(/\s+/g, " ").trim();
+    const vehicleMatch = rawText.match(/veicolo\s*(.*?)(?:\s+cosa\b|\s+quando\b|\s+tag\b|$)/i);
+    const text = (vehicleMatch?.[1] || "").replace(/\s+/g, " ").trim() || rawText;
     return {
       text: text.slice(0, 160),
-      linked: !/nessun veicolo selezionato/i.test(text),
+      linked: !/nessun veicolo selezionato/i.test(text)
+        && !/nessun veicolo/i.test(text)
+        && /[A-Z0-9]{6,}/i.test(text),
     };
   }).catch(() => null);
 }
 
-async function locateAppointmentVehicleToggle(page) {
+async function locateAppointmentVehicleControls(page) {
   return safeEvaluate(page, () => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
@@ -1922,7 +1919,7 @@ async function locateAppointmentVehicleToggle(page) {
       return "";
     };
 
-    const textBlocks = [...popup.querySelectorAll("div, td, span, a, button, label")]
+    const rows = [...popup.querySelectorAll("div, td, span, a, button, label")]
       .filter(isVisible)
       .map((el) => {
         const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -1931,27 +1928,184 @@ async function locateAppointmentVehicleToggle(page) {
       })
       .filter((item) => item.text && /veicolo|nessun veicolo selezionato/.test(item.text));
 
-    const ordered = [...textBlocks].sort((a, b) => a.area - b.area || a.rect.y - b.rect.y || a.rect.x - b.rect.x);
-    const target = ordered.find((item) => /nessun veicolo selezionato/.test(item.text))
-      || ordered.find((item) => item.text === "veicolo")
-      || ordered[0];
+    const vehicleLabel = rows.find((item) => item.text === "veicolo" || /nessun veicolo selezionato/.test(item.text));
+    const labelBox = vehicleLabel?.el?.closest?.(".LCWVQRD-jb-x") || vehicleLabel?.el?.parentElement || null;
+    const anchors = labelBox
+      ? [...labelBox.querySelectorAll("a.gwt-Anchor")]
+          .filter(isVisible)
+          .map((el) => {
+            const r = el.getBoundingClientRect();
+            return {
+              x: r.x + (r.width / 2),
+              y: r.y + (r.height / 2),
+              text: (el.textContent || "").replace(/\s+/g, " ").trim(),
+              area: r.width * r.height,
+            };
+          })
+      : [];
+
+    const target = anchors[0]
+      || anchors[1]
+      || rows.sort((a, b) => a.area - b.area || a.rect.y - b.rect.y || a.rect.x - b.rect.x)[0]
+      || null;
     if (!target) return null;
     return {
-      x: target.rect.x + (target.rect.width / 2),
-      y: target.rect.y + (target.rect.height / 2),
-      strategy: target.label ? `label:${target.label}` : `text:${target.text.slice(0, 40)}`,
+      x: target.x,
+      y: target.y,
+      strategy: target.text ? `anchor:${target.text}` : (vehicleLabel?.label ? `label:${vehicleLabel.label}` : `text:${vehicleLabel?.text?.slice(0, 40) || ""}`),
+      kind: anchors.length ? "anchor" : "text",
+      anchors: anchors.map((a) => a.text || ""),
     };
   }).catch(() => null);
+}
+
+async function chooseVehicleFromSearchOverlay(page, plate) {
+  const cleanPlate = String(plate || "").trim().toUpperCase();
+  let overlayFound = false;
+  for (let i = 0; i < 8 && !overlayFound; i += 1) {
+    overlayFound = await hasVehicleSearchOverlay(page);
+    if (!overlayFound) await page.waitForTimeout(180).catch(() => {});
+  }
+  if (!overlayFound) return { found: false, reason: "vehicle_overlay_not_found" };
+
+  const inputTarget = await safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 20 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const overlay = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup, [role='dialog']")]
+      .filter(isVisible)
+      .find((p) => /ricerca autoveicolo|crea un nuovo veicolo dalla targa/i.test((p.textContent || "").replace(/\s+/g, " ")));
+    if (!overlay) return null;
+    const inputs = [...overlay.querySelectorAll("input[type='text'], input:not([type])")]
+      .filter(isVisible)
+      .map((input) => {
+        const r = input.getBoundingClientRect();
+        return {
+          input,
+          x: r.x + (r.width / 2),
+          y: r.y + (r.height / 2),
+          width: r.width,
+          value: (input.value || "").trim(),
+          cls: String(input.className || ""),
+        };
+      })
+      .filter((item) => item.width > 50);
+    const target = inputs.find((el) => /targa|veicolo|search|cerca|ricerca/i.test(el.cls))
+      || inputs.find((el) => el.width > 180)
+      || inputs[0];
+    if (!target) return null;
+    return { x: target.x, y: target.y, width: target.width };
+  }).catch(() => null);
+
+  if (!inputTarget) return { found: false, reason: "vehicle_overlay_input_not_found" };
+
+  await page.mouse.click(inputTarget.x, inputTarget.y).catch(() => {});
+  await page.waitForTimeout(120).catch(() => {});
+  await page.keyboard.press("Control+a").catch(() => {});
+  await page.keyboard.press("Delete").catch(() => {});
+  await page.keyboard.type(cleanPlate, { delay: 50 }).catch(() => {});
+  await page.waitForTimeout(700).catch(() => {});
+
+  let selected = false;
+  let matchedText = null;
+  for (let poll = 0; poll < 10 && !selected; poll += 1) {
+    selected = await safeEvaluate(page, (wantedPlate) => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
+      const wanted = norm(wantedPlate);
+      const overlay = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel, .popup, [role='dialog']")]
+        .filter(isVisible)
+        .find((p) => /ricerca autoveicolo|crea un nuovo veicolo dalla targa/i.test((p.textContent || "").replace(/\s+/g, " ")));
+      if (!overlay) return false;
+      const candidates = [...overlay.querySelectorAll("tr, td, div, span, a, button, li")]
+        .filter(isVisible)
+        .map((el) => {
+          const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+          const r = el.getBoundingClientRect();
+          return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
+        })
+        .filter((item) => item.text && item.text.length <= 180);
+      const exactPlate = candidates.find((item) => norm(item.text).includes(wanted));
+      const createRow = candidates.find((item) => /crea un nuovo veicolo dalla targa/i.test(item.text));
+      const action = exactPlate || createRow || candidates[0];
+      if (!action) return false;
+      action.el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+      action.el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+      action.el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return true;
+    }, cleanPlate).catch(() => false);
+    if (!selected) {
+      await page.keyboard.press("Enter").catch(() => {});
+    }
+    await page.waitForTimeout(300).catch(() => {});
+    const popupVehicle = await readAppointmentVehicleText(page);
+    matchedText = popupVehicle?.text || matchedText;
+    if (popupVehicle?.linked) break;
+  }
+
+  const finalVehicle = await readAppointmentVehicleText(page).catch(() => null);
+
+  return {
+    found: true,
+    selected,
+    confirmed: Boolean(finalVehicle?.linked),
+    vehicleText: matchedText,
+  };
 }
 
 async function selectVehicleByPlate(page, plate) {
   if (!plate) return { found: false, reason: "no_plate" };
   const cleanPlate = String(plate).trim().toUpperCase();
 
-  const vehicleToggle = await locateAppointmentVehicleToggle(page).catch(() => null);
-  if (vehicleToggle) {
-    await page.mouse.click(vehicleToggle.x, vehicleToggle.y).catch(() => {});
-    await page.waitForTimeout(180).catch(() => {});
+  const vehicleControls = await locateAppointmentVehicleControls(page).catch(() => null);
+  if (vehicleControls?.kind === "anchor") {
+    for (const anchor of vehicleControls.anchors || []) {
+      if (!anchor) continue;
+      const action = await safeEvaluate(page, (wanted) => {
+        const isVisible = (el) => {
+          const r = el.getBoundingClientRect();
+          const s = window.getComputedStyle(el);
+          return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
+        };
+        const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
+          .find((p) => isVisible(p) && /dettagli appuntamento/i.test(p.textContent || ""));
+        if (!popup) return null;
+        const anchors = [...popup.querySelectorAll("a.gwt-Anchor")].filter(isVisible);
+        const hit = anchors.find((a) => (a.textContent || "").replace(/\s+/g, " ").trim() === wanted)
+          || anchors[0];
+        if (!hit) return null;
+        const r = hit.getBoundingClientRect();
+        return { x: r.x + (r.width / 2), y: r.y + (r.height / 2), text: (hit.textContent || "").replace(/\s+/g, " ").trim() };
+      }, anchor).catch(() => null);
+      if (!action) continue;
+      await page.mouse.click(action.x, action.y).catch(() => {});
+      await page.waitForTimeout(220).catch(() => {});
+      if (await hasVehicleSearchOverlay(page)) break;
+    }
+  } else {
+    const vehicleToggle = vehicleControls;
+    if (vehicleToggle) {
+      await page.mouse.click(vehicleToggle.x, vehicleToggle.y).catch(() => {});
+      await page.waitForTimeout(220).catch(() => {});
+    }
+  }
+
+  const overlayAttempt = await chooseVehicleFromSearchOverlay(page, cleanPlate).catch(() => null);
+  if (overlayAttempt?.confirmed) {
+    return {
+      found: true,
+      strategy: `overlay:${overlayAttempt.selected ? "selected" : "confirmed"}`,
+      selected: true,
+      confirmed: true,
+      vehicleText: overlayAttempt.vehicleText || null,
+      attempts: [{ attempt: 1, selected: true, confirmed: true, vehicleText: overlayAttempt.vehicleText || null }],
+    };
   }
 
   // Step 1: individua il campo Cosa nel popup tramite il contesto del DOM.
@@ -2066,7 +2220,7 @@ async function selectVehicleByPlate(page, plate) {
   return {
     found: true,
     strategy: vehicleInputCoords.strategy,
-    toggle: vehicleToggle ? vehicleToggle.strategy : null,
+    toggle: vehicleControls?.strategy || null,
     selected,
     confirmed,
     vehicleText,
