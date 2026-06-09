@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09l-preventivi-debug";
+const WORKER_BUILD = "2026-06-09m-vehicle-native-click";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1974,20 +1974,10 @@ async function chooseVehicleFromSearchOverlay(page, plate) {
   }, cleanPlate).catch(() => null);
 
   if (rowHit) {
-    await safeEvaluate(page, ({ x, y }) => {
-      const el = document.elementFromPoint(x, y);
-      const row = el?.closest?.("tr") || el;
-      if (!row) return false;
-      const r = row.getBoundingClientRect();
-      const cx = r.x + (r.width / 2);
-      const cy = r.y + (r.height / 2);
-      for (const type of ["mousedown", "mouseup", "click"]) {
-        row.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 }));
-      }
-      try { row.click(); } catch (_e) {}
-      return true;
-    }, { x: rowHit.x, y: rowHit.y }).catch(() => {});
-    await page.waitForTimeout(2800).catch(() => {});
+    await page.mouse.move(rowHit.x, rowHit.y).catch(() => {});
+    await page.waitForTimeout(120).catch(() => {});
+    await page.mouse.click(rowHit.x, rowHit.y, { button: "left", clickCount: 1 }).catch(() => {});
+    await page.waitForTimeout(3000).catch(() => {});
     const popupVehicle = await readAppointmentVehicleText(page);
     const popupStillOpen = await safeEvaluate(page, () => {
       const isVisible = (el) => {
@@ -2003,6 +1993,8 @@ async function chooseVehicleFromSearchOverlay(page, plate) {
       found: true,
       selected: true,
       confirmed: !popupStillOpen || Boolean(popupVehicle?.linked),
+      clickMode: "native_mouse",
+      popupStillOpen,
       vehicleText: popupVehicle?.text || rowHit.text || null,
     };
   }
