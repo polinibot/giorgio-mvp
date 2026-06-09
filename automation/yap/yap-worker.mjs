@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09m-vehicle-native-click";
+const WORKER_BUILD = "2026-06-09n-vehicle-trigger-candidates";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1922,26 +1922,48 @@ async function locateAppointmentVehicleControls(page) {
       return "";
     };
 
-    const rows = [...popup.querySelectorAll("div, td, span, a, button, label")]
+    const vehicleBlock = [...popup.querySelectorAll("div, td")]
+      .filter(isVisible)
+      .find((el) => /veicolo|nessun veicolo selezionato/.test((el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()));
+    if (!vehicleBlock) return null;
+
+    const clickable = [...vehicleBlock.querySelectorAll("a, button, [role='button'], [tabindex], .gwt-HTML, .gwt-InlineLabel, span, div")]
       .filter(isVisible)
       .map((el) => {
-        const text = (el.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
         const rect = el.getBoundingClientRect();
-        return { el, text, rect, label: labelFor(el), area: rect.width * rect.height };
+        const text = (el.textContent || el.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+        return {
+          text,
+          x: rect.x + (rect.width / 2),
+          y: rect.y + (rect.height / 2),
+          width: rect.width,
+          height: rect.height,
+          tabIndex: el.getAttribute("tabindex"),
+          role: el.getAttribute("role") || "",
+          tag: el.tagName,
+        };
       })
-      .filter((item) => item.text && /veicolo|nessun veicolo selezionato/.test(item.text));
+      .filter((item) => item.width >= 8 && item.height >= 8)
+      .map((item) => {
+        let score = 0;
+        if (item.tabIndex != null) score += 10;
+        if (/^A$|^BUTTON$/i.test(item.tag)) score += 8;
+        if (item.role) score += 6;
+        if (item.width <= 40 && item.height <= 40) score += 5;
+        if (!/veicolo|nessun veicolo selezionato/i.test(item.text)) score += 3;
+        return { ...item, score };
+      })
+      .sort((a, b) => b.score - a.score || a.y - b.y || a.x - b.x)
+      .slice(0, 6);
 
-    const target = rows
-      .sort((a, b) => a.area - b.area || a.rect.y - b.rect.y || a.rect.x - b.rect.x)[0]
-      || null;
-    if (!target) return null;
-    const r = target.rect;
+    const r = vehicleBlock.getBoundingClientRect();
     return {
       x: r.x + (r.width / 2),
       y: r.y + (r.height / 2),
-      strategy: target.text ? `text:${target.text.slice(0, 40)}` : (target.label ? `label:${target.label}` : "vehicle_target"),
+      strategy: `block:${((vehicleBlock.textContent || "").replace(/\s+/g, " ").trim().toLowerCase()).slice(0, 40)}`,
       kind: "row",
-      text: target.text.slice(0, 80),
+      text: ((vehicleBlock.textContent || "").replace(/\s+/g, " ").trim()).slice(0, 80),
+      candidates: clickable,
     };
   }).catch(() => null);
 }
@@ -1964,7 +1986,17 @@ async function chooseVehicleFromSearchOverlay(page, plate) {
         .map((el) => {
           const text = (el.textContent || "").replace(/\s+/g, " ").trim();
           const r = el.getBoundingClientRect();
-          return { el, text, x: r.x + (r.width / 2), y: r.y + (r.height / 2), width: r.width, height: r.height };
+          const focusTarget = el.querySelector("[__gwt_cell], [tabindex]");
+          const fr = focusTarget ? focusTarget.getBoundingClientRect() : r;
+          return {
+            el,
+            text,
+            x: fr.x + (fr.width / 2),
+            y: fr.y + (fr.height / 2),
+            width: fr.width,
+            height: fr.height,
+            usesFocusTarget: Boolean(focusTarget),
+          };
         })
         .filter((item) => item.text && item.text.length <= 240);
       const exact = rows.find((item) => norm(item.text).includes(wanted));
@@ -2008,8 +2040,41 @@ async function selectVehicleByPlate(page, plate, { skipInputFallback = false } =
 
   const vehicleControls = await locateAppointmentVehicleControls(page).catch(() => null);
   if (vehicleControls) {
-    await page.mouse.click(vehicleControls.x, vehicleControls.y).catch(() => {});
-    await page.waitForTimeout(220).catch(() => {});
+    const triggerPoints = [
+      ...(vehicleControls.candidates || []).map((c) => ({ x: c.x, y: c.y, strategy: `candidate:${c.tag}:${c.text || "icon"}` })),
+      { x: vehicleControls.x, y: vehicleControls.y, strategy: vehicleControls.strategy || "vehicle_block" },
+    ];
+    let openedBy = null;
+    for (const point of triggerPoints) {
+      await page.mouse.move(point.x, point.y).catch(() => {});
+      await page.waitForTimeout(80).catch(() => {});
+      await page.mouse.click(point.x, point.y).catch(() => {});
+      await page.waitForTimeout(180).catch(() => {});
+      const opened = await chooseVehicleFromSearchOverlay(page, cleanPlate).catch(() => null);
+      if (opened?.found) {
+        openedBy = { ...opened, trigger: point.strategy };
+        return {
+          found: true,
+          strategy: point.strategy,
+          selected: Boolean(opened.selected),
+          confirmed: Boolean(opened.confirmed),
+          vehicleText: opened.vehicleText || null,
+          attempts: [{ attempt: 1, selected: Boolean(opened.selected), confirmed: Boolean(opened.confirmed), vehicleText: opened.vehicleText || null }],
+          reason: opened.confirmed ? null : "vehicle_not_confirmed",
+        };
+      }
+    }
+    if (skipInputFallback) {
+      return {
+        found: true,
+        strategy: vehicleControls?.strategy || "vehicle_trigger_attempted",
+        selected: false,
+        confirmed: false,
+        vehicleText: null,
+        attempts: [],
+        reason: "vehicle_row_not_found",
+      };
+    }
   }
 
   const overlayAttempt = await chooseVehicleFromSearchOverlay(page, cleanPlate).catch(() => null);
