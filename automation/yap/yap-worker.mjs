@@ -2809,7 +2809,7 @@ async function gridDumpRow(page, rowIndex) {
 // Salva il documento (Preventivo/ODL): bottone gwt-Button con <span>Salva</span>
 // (anche nascosto) + icona floppy. Abilitato == ci sono modifiche da salvare;
 // dopo il salvataggio diventa gwt-Button-disabled -> segnale di conferma affidabile.
-async function saveWorkDocument(page) {
+async function saveWorkDocument(page, args = {}) {
   const locate = () => safeEvaluate(page, () => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
@@ -2828,35 +2828,57 @@ async function saveWorkDocument(page) {
     return { found: true, disabled, x: r.x + (r.width / 2), y: r.y + (r.height / 2) };
   }).catch(() => ({ found: false }));
 
+  const shot = async (tag) => {
+    if (!args?.artifactDir) return null;
+    const p = path.join(args.artifactDir, `doc-save-${tag}-${Date.now()}.png`);
+    await page.screenshot({ path: p, fullPage: true }).catch(() => {});
+    return p;
+  };
+  const notifNow = () => safeEvaluate(page, () => {
+    const t = [...document.querySelectorAll(".notifierWidget, .notifierMessageContainer, .gwt-InlineHTML")]
+      .map((e) => (e.textContent || "").trim())
+      .find((x) => /salvat|salvatagg/i.test(x) && !/appuntamento/i.test(x));
+    return t || null;
+  }).catch(() => null);
+
+  // 1) Committo l'eventuale edit di cella in corso (blur): se una cella e' in modifica,
+  // il primo click su Salva verrebbe "consumato" dal blur invece di salvare.
+  await safeEvaluate(page, () => { try { document.activeElement && document.activeElement.blur(); } catch {} }).catch(() => {});
+  await page.waitForTimeout(250).catch(() => {});
+
   const info = await locate();
-  if (!info.found) { logAction("doc_save", { found: false }); return { ok: false, reason: "save_btn_not_found" }; }
+  if (!info.found) { const s = await shot("notfound"); logAction("doc_save", { found: false, shot: s }); return { ok: false, reason: "save_btn_not_found" }; }
   if (info.disabled) { logAction("doc_save", { found: true, disabled: true, note: "niente da salvare" }); return { ok: false, reason: "nothing_to_save", disabled: true }; }
+
+  const beforeShot = await shot("before");
 
   // RPC di salvataggio (best-effort, secondario rispetto al bottone che si disabilita).
   const saveRpc = page.waitForResponse(
     (r) => /\/yap\/action\/\w+Action/i.test(r.url()) && r.request().method() === "POST" && r.status() === 200,
-    { timeout: 8000 },
+    { timeout: 9000 },
   ).then((r) => (r.url().split("/action/")[1] || "").slice(0, 44)).catch(() => null);
 
-  await page.mouse.click(info.x, info.y).catch(() => {});
-  // Conferma: (a) il bottone Salva diventa disabled, oppure (b) compare una notifica
-  // "salvato/salvataggio" del DOCUMENTO (non dell'appuntamento).
+  // 2) Click su Salva, con un RETRY: alcune UI consumano il primo click per chiudere
+  // l'editor di cella, e serve un secondo click per salvare davvero.
   let becameDisabled = false;
   let notif = null;
-  for (let i = 0; i < 25; i += 1) {
-    const s = await locate();
-    if (!s.found || s.disabled) { becameDisabled = true; break; }
-    notif = await safeEvaluate(page, () => {
-      const t = [...document.querySelectorAll(".notifierWidget, .notifierMessageContainer, .gwt-InlineHTML")]
-        .map((e) => (e.textContent || "").trim())
-        .find((x) => /salvat|salvatagg/i.test(x) && !/appuntamento/i.test(x));
-      return t || null;
-    }).catch(() => null);
-    if (notif) break;
-    await page.waitForTimeout(200).catch(() => {});
+  const clicks = [];
+  for (let attempt = 0; attempt < 2 && !becameDisabled && !notif; attempt += 1) {
+    const cur = await locate();
+    if (!cur.found || cur.disabled) { becameDisabled = true; break; }
+    await page.mouse.click(cur.x, cur.y).catch(() => {});
+    clicks.push(attempt + 1);
+    for (let i = 0; i < 14; i += 1) {
+      const s = await locate();
+      if (!s.found || s.disabled) { becameDisabled = true; break; }
+      notif = await notifNow();
+      if (notif) break;
+      await page.waitForTimeout(200).catch(() => {});
+    }
   }
   const rpc = await saveRpc;
   const ok = becameDisabled || Boolean(notif) || Boolean(rpc);
+  const afterShot = await shot(ok ? "ok" : "fail");
 
   // Diagnostico ONESTO quando NON confermato: dialog aperti, notifiche, stato bottone.
   let diag = null;
@@ -2873,15 +2895,18 @@ async function saveWorkDocument(page) {
         .filter(isVisible).map((p) => (p.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60)).filter(Boolean).slice(0, 5);
       const saveBtn = [...document.querySelectorAll("button.gwt-Button")]
         .find((b) => (b.querySelector("span")?.textContent || "").trim().toLowerCase() === "salva");
-      return { dialogs, notifs, saveBtnCls: (saveBtn?.className || "").slice(0, 64) };
+      // Righe della griglia (testo + valori input) per vedere se c'e' una riga incompleta.
+      const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]"))
+        .map((tr) => { let h = tr.textContent || ""; for (const inp of tr.querySelectorAll("input")) h += " " + (inp.value || ""); return h.replace(/\s+/g, " ").trim().slice(0, 60); });
+      return { dialogs, notifs, saveBtnCls: (saveBtn?.className || "").slice(0, 64), rows: rows.slice(0, 12) };
     }).catch(() => null);
   }
-  logAction("doc_save", { found: true, clicked: true, becameDisabled, notif, rpc, ok, diag });
+  logAction("doc_save", { found: true, clicks, becameDisabled, notif, rpc, ok, beforeShot, afterShot, diag });
   return { ok, becameDisabled, notif, rpc };
 }
 
 // Orchestratore: scrive le righe del documento (Preventivo/ODL). Per ora: MANODOPERA.
-async function writeWorkGrid(page, job) {
+async function writeWorkGrid(page, job, args = {}) {
   const sections = job.sections || [];
   const officina = sections.find((s) => String(s.reparto || "").toLowerCase() === "officina");
   const manHours = officina?.ore_man ?? officina?.man_hours ?? null;
@@ -2993,7 +3018,7 @@ async function writeWorkGrid(page, job) {
 
   // SALVA il documento: senza questo le righe restano solo client-side e si perdono
   // (su YAP "Preventivi" risultava vuoto). Il bottone Salva che si disabilita conferma.
-  out.saved = await saveWorkDocument(page);
+  out.saved = await saveWorkDocument(page, args);
   return out;
 }
 
@@ -3386,7 +3411,7 @@ async function writePracticeAndOdl(page, job, args) {
       // instrumentato. Separato dal flusso ODL keyword-based; al termine RITORNA SUBITO
       // (salta sezioni keyword + verify ODL: inutili e lentissimi per il preventivo).
       if (workPageEnum === "PREVENTIVO") {
-        const gridResult = await writeWorkGrid(page, job).catch((e) => ({ ok: false, error: e?.message }));
+        const gridResult = await writeWorkGrid(page, job, args).catch((e) => ({ ok: false, error: e?.message }));
         writeReport.gridResult = gridResult;
         const manOk = Boolean(gridResult?.manodopera?.articolo);
         if (manOk) { writeReport.openedOdl = true; writeReport.odl.success = true; writeReport.odl.error = null; }
