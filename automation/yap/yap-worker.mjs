@@ -2839,18 +2839,45 @@ async function saveWorkDocument(page) {
   ).then((r) => (r.url().split("/action/")[1] || "").slice(0, 44)).catch(() => null);
 
   await page.mouse.click(info.x, info.y).catch(() => {});
-  // Conferma: il bottone Salva diventa disabled == documento salvato.
+  // Conferma: (a) il bottone Salva diventa disabled, oppure (b) compare una notifica
+  // "salvato/salvataggio" del DOCUMENTO (non dell'appuntamento).
   let becameDisabled = false;
-  for (let i = 0; i < 22; i += 1) {
+  let notif = null;
+  for (let i = 0; i < 25; i += 1) {
     const s = await locate();
-    if (s.found && s.disabled) { becameDisabled = true; break; }
-    if (!s.found) { becameDisabled = true; break; } // sparito = probabile reload post-save
+    if (!s.found || s.disabled) { becameDisabled = true; break; }
+    notif = await safeEvaluate(page, () => {
+      const t = [...document.querySelectorAll(".notifierWidget, .notifierMessageContainer, .gwt-InlineHTML")]
+        .map((e) => (e.textContent || "").trim())
+        .find((x) => /salvat|salvatagg/i.test(x) && !/appuntamento/i.test(x));
+      return t || null;
+    }).catch(() => null);
+    if (notif) break;
     await page.waitForTimeout(200).catch(() => {});
   }
   const rpc = await saveRpc;
-  const ok = becameDisabled || Boolean(rpc);
-  logAction("doc_save", { found: true, clicked: true, becameDisabled, rpc, ok });
-  return { ok, becameDisabled, rpc };
+  const ok = becameDisabled || Boolean(notif) || Boolean(rpc);
+
+  // Diagnostico ONESTO quando NON confermato: dialog aperti, notifiche, stato bottone.
+  let diag = null;
+  if (!ok) {
+    diag = await safeEvaluate(page, () => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 6 && r.height > 6 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      const dialogs = [...document.querySelectorAll(".gwt-DialogBox, .gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
+        .filter(isVisible).map((p) => (p.textContent || "").replace(/\s+/g, " ").trim().slice(0, 90)).filter(Boolean).slice(0, 5);
+      const notifs = [...document.querySelectorAll(".notifierWidget, .notifierMessageContainer")]
+        .filter(isVisible).map((p) => (p.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60)).filter(Boolean).slice(0, 5);
+      const saveBtn = [...document.querySelectorAll("button.gwt-Button")]
+        .find((b) => (b.querySelector("span")?.textContent || "").trim().toLowerCase() === "salva");
+      return { dialogs, notifs, saveBtnCls: (saveBtn?.className || "").slice(0, 64) };
+    }).catch(() => null);
+  }
+  logAction("doc_save", { found: true, clicked: true, becameDisabled, notif, rpc, ok, diag });
+  return { ok, becameDisabled, notif, rpc };
 }
 
 // Orchestratore: scrive le righe del documento (Preventivo/ODL). Per ora: MANODOPERA.
@@ -4072,12 +4099,30 @@ async function fillAppointmentPopup(page, job) {
   const plate = String(job.customer?.plate || "").trim().toUpperCase();
 
   // --- VEICOLO (per primo, sul campo Cosa) ---
-  // 1. scrivo la targa nel Cosa (tastiera reale -> attiva l'autocomplete veicolo);
-  // 2. guardo il popup di suggerimento:
-  //    - "Nessun risultato trovato." -> veicolo NON in anagrafica (state=not_found, ok);
-  //    - trova la targa -> la clicco (state=linked);
-  // 3. se linked: ATTENDO che il veicolo sia committato ("Nessun veicolo selezionato"
-  //    sparisce) cosi' il re-render finisce PRIMA di toccare data/ora/tag e prima del save.
+  // ORDINE CRITICO: TAG e DATA/ORA prima, VEICOLO per ULTIMO.
+  // Quando il veicolo si aggancia, YAP considera l'appuntamento COMPLETO (veicolo+data+
+  // ora) e lo AUTO-SALVA chiudendo il popup. Se il tag fosse scritto dopo il veicolo,
+  // arriverebbe a popup gia' chiuso (era il bug "tag mancante"). Quindi: tag, poi
+  // data/ora, poi veicolo (che fa scattare l'auto-save con tutto gia' dentro).
+
+  // --- TAG (prima del veicolo) ---
+  const yapTags = pickYapTagsFromJob(job);
+  const tagResult = await addYapTagChips(page, yapTags);
+  logAction("tags_written", { requested: yapTags, added: tagResult.added, failed: tagResult.failed, ok: tagResult.ok });
+
+  // --- DATA/ORA (prima del veicolo) ---
+  await fillVisibleInput(page, dateIndex, toItalianDate(job.appointment.date));
+  await fillVisibleInput(page, timeIndexes[0], toYapTime(job.appointment.time));
+  await fillVisibleInput(page, timeIndexes[1], toYapTime(endTime));
+  const emptyAfterTimes = inputs.filter(
+    (item) => item.index > timeIndexes[1] && !item.value && item.width > 40,
+  );
+  if (notes && emptyAfterTimes[0]) {
+    await fillVisibleInput(page, emptyAfterTimes[0].index, notes).catch(() => {});
+  }
+
+  // --- VEICOLO (per ULTIMO): scrivo la targa nel Cosa (tastiera reale -> autocomplete),
+  // poi clicco il suggerimento per agganciare. Questo puo' far scattare l'auto-save. ---
   let vehicleState = "skipped"; // skipped|linked|not_found|failed
   const cosaX = cosaInput.x + Math.min(cosaInput.width / 2, 60);
   const cosaY = cosaInput.y + (cosaInput.height / 2);
@@ -4173,23 +4218,6 @@ async function fillAppointmentPopup(page, job) {
   }
   const vehicleLinked = vehicleState === "linked";
   logAction("cosa_vehicle", { plate, cosaValue, vehicleState });
-
-  // --- DATA/ORA (il veicolo e' ora committato, popup stabile) ---
-  await fillVisibleInput(page, dateIndex, toItalianDate(job.appointment.date));
-  await fillVisibleInput(page, timeIndexes[0], toYapTime(job.appointment.time));
-  await fillVisibleInput(page, timeIndexes[1], toYapTime(endTime));
-
-  const emptyAfterTimes = inputs.filter(
-    (item) => item.index > timeIndexes[1] && !item.value && item.width > 40,
-  );
-  if (notes && emptyAfterTimes[0]) {
-    await fillVisibleInput(page, emptyAfterTimes[0].index, notes).catch(() => {});
-  }
-
-  // --- TAG (per ultimo, su popup ormai stabile) ---
-  const yapTags = pickYapTagsFromJob(job);
-  const tagResult = await addYapTagChips(page, yapTags);
-  logAction("tags_written", { requested: yapTags, added: tagResult.added, failed: tagResult.failed, ok: tagResult.ok });
 
   return {
     tagResult,
