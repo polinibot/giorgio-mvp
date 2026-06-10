@@ -914,9 +914,8 @@ async function removeStaleTagChips(page, wantedTags) {
   const wanted = new Set(wantedTags.map((t) => String(t).trim().toLowerCase()));
   const removed = [];
   const failedRemove = [];
-  const labelWords = ["cosa", "quando", "tag", "info", "lightbulb"];
-  for (let pass = 0; pass < 10; pass += 1) {
-    const stale = await safeEvaluate(page, ({ want, labels }) => {
+  for (let pass = 0; pass < KNOWN_YAP_TAGS.length; pass += 1) {
+    const stale = await safeEvaluate(page, ({ known, want }) => {
       const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
       const isVisible = (node) => {
         const r = node.getBoundingClientRect();
@@ -928,15 +927,10 @@ async function removeStaleTagChips(page, wantedTags) {
       if (!popup) return null;
       const chip = [...popup.querySelectorAll("span, div, td, li")]
         .filter(isVisible)
-        .find((el) => {
-          if (el.children.length !== 0 || el.tagName === "INPUT") return false;
-          const text = norm(el.textContent);
-          if (!text) return false;
-          if (labels.includes(text)) return false;
-          if (want.includes(text)) return false;
-          if (text.length > 40) return false;
-          return true;
-        });
+        .find((el) => el.children.length === 0
+          && el.tagName !== "INPUT"
+          && known.includes(norm(el.textContent))
+          && !want.includes(norm(el.textContent)));
       if (!chip) return null;
       const r = chip.getBoundingClientRect();
       return {
@@ -945,7 +939,7 @@ async function removeStaleTagChips(page, wantedTags) {
         chip: { x: r.x + r.width / 2, y: r.y + r.height / 2 },
         containerHtml: (chip.parentElement?.parentElement?.outerHTML || chip.parentElement?.outerHTML || "").slice(0, 600),
       };
-    }, { want: [...wanted], labels: labelWords }).catch(() => null);
+    }, { known: KNOWN_YAP_TAGS, want: [...wanted] }).catch(() => null);
     if (!stale) break;
 
     // L'icona di rimozione dei chip GWT spesso compare solo all'HOVER: prima
@@ -5557,18 +5551,38 @@ async function fillAppointmentPopup(page, job) {
       }
       await page.waitForTimeout(220).catch(() => {});
     }
+    // Controlla se il widget "Veicolo" nel popup mostra ancora "Nessun veicolo selezionato".
+    // Se la risposta è true il click sul suggerimento ha chiuso il dropdown senza agganciare
+    // davvero il veicolo in YAP (evento GWT onSuggestionSelected non scattato).
+    const isVehicleWidgetUnlinked = () => safeEvaluate(page, () => {
+      const popup = document.querySelector(".popupMiddleCenter, .popupContent");
+      if (!popup) return false; // popup chiuso = auto-save avvenuto = veicolo agganciato
+      return /nessun veicolo selezionato/i.test(popup.textContent || "");
+    }).catch(() => false);
+
     const steps = [];
     if (sug.state === "match") {
       // Un solo suggerimento (la targa) => escalare e' sicuro. Mi fermo appena sparisce.
       const gone = async () => (await findSuggestion()).state !== "match";
       await page.mouse.click(sug.x, sug.y).catch(() => {});
       await page.waitForTimeout(320).catch(() => {});
-      steps.push({ how: "click", gone: await gone() });
-      if (!steps[steps.length - 1].gone) {
+      const clickGone = await gone();
+      // Se gone=true ma il widget mostra ancora "Nessun veicolo", il click ha chiuso il
+      // dropdown senza che GWT sparasse onSuggestionSelected -> aggancio non avvenuto.
+      const needsKeyboardRetry = clickGone && await isVehicleWidgetUnlinked();
+      steps.push({ how: "click", gone: clickGone, vehicleUnlinked: needsKeyboardRetry || undefined });
+      if (!clickGone || needsKeyboardRetry) {
+        if (needsKeyboardRetry) {
+          // Riapri il dropdown ridigitando l'ultimo carattere della targa
+          await page.keyboard.press("Backspace").catch(() => {});
+          await page.waitForTimeout(180).catch(() => {});
+          await page.keyboard.type(plate.slice(-1), { delay: 50 }).catch(() => {});
+          await page.waitForTimeout(420).catch(() => {});
+        }
         await page.keyboard.press("ArrowDown").catch(() => {});
-        await page.waitForTimeout(140).catch(() => {});
+        await page.waitForTimeout(150).catch(() => {});
         await page.keyboard.press("Enter").catch(() => {});
-        await page.waitForTimeout(320).catch(() => {});
+        await page.waitForTimeout(400).catch(() => {});
         steps.push({ how: "arrowdown_enter", gone: await gone() });
       }
       if (!steps[steps.length - 1].gone) {
