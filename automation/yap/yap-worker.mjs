@@ -3014,28 +3014,42 @@ async function gridSelectArticolo(page, rowIndex, code) {
         return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
       };
       const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
+      const pickPrimaryCode = (tr) => {
+        const cells = [...tr.querySelectorAll("td, th")]
+          .map((cell) => norm(cell.textContent))
+          .filter(Boolean);
+        if (cells.length) return cells[0];
+        const firstChunk = norm(tr.textContent).split(/\s+/).filter(Boolean)[0] || "";
+        return firstChunk;
+      };
       // righe del popup catalogo = tr SENZA yapcolumnid ma con uno span in grassetto (codice)
       const rows = [...document.querySelectorAll("tr")].filter((tr) =>
         !tr.querySelector("[yapcolumnid]") && isVisible(tr)
         && [...tr.querySelectorAll("span")].some((s) => /font-weight:\s*bolder/i.test(s.getAttribute("style") || "")));
-    const results = rows.map((tr) => {
-      const bold = [...tr.querySelectorAll("span")].find((s) => /font-weight:\s*bolder/i.test(s.getAttribute("style") || ""));
-      return { tr, code: norm(bold?.textContent), text: norm(tr.textContent) };
-    });
-    const wantedNorm = norm(wanted);
-    const exact = results.find((r) => r.code === wantedNorm);
-    const fuzzy = exact || results.find((r) => r.text.includes(wantedNorm) || wantedNorm.includes(r.code));
-    if (fuzzy) {
-      const rr = fuzzy.tr.getBoundingClientRect();
+      const results = rows.map((tr) => {
+        const bold = [...tr.querySelectorAll("span")].find((s) => /font-weight:\s*bolder/i.test(s.getAttribute("style") || ""));
+        return {
+          tr,
+          code: norm(bold?.textContent),
+          primaryCode: pickPrimaryCode(tr),
+          text: norm(tr.textContent),
+        };
+      });
+      const wantedNorm = norm(wanted);
+      const exact = results.find((r) => r.primaryCode === wantedNorm);
+      const startsWith = exact || results.find((r) => r.primaryCode.startsWith(`${wantedNorm} `) || r.primaryCode.startsWith(`${wantedNorm}-`));
+      const fuzzy = startsWith || results.find((r) => r.text.includes(wantedNorm) || wantedNorm.includes(r.primaryCode));
+      if (fuzzy) {
+        const rr = fuzzy.tr.getBoundingClientRect();
       return {
         x: rr.x + rr.width / 2,
         y: rr.y + rr.height / 2,
-        codes: results.slice(0, 6).map((r) => r.code),
-        matchMode: exact ? "exact" : "fuzzy",
+        codes: results.slice(0, 6).map((r) => r.primaryCode || r.code),
+        matchMode: exact ? "exact" : (startsWith ? "startswith" : "fuzzy"),
       };
     }
-    return results.length ? { x: null, y: null, codes: results.slice(0, 6).map((r) => r.code) } : null;
-  }, code).catch(() => null);
+      return results.length ? { x: null, y: null, codes: results.slice(0, 6).map((r) => r.primaryCode || r.code) } : null;
+    }, code).catch(() => null);
     if (picked && picked.x == null) {
       // popup presente ma nessun match esatto ancora: continua a pollare
       if (i >= 6) break;
@@ -3516,6 +3530,115 @@ function sectionWasteAmount(section) {
 
 function buildWorkGridDescriptionLines(job) {
   return buildWorkGridRows(job);
+}
+
+async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
+  const sections = Array.isArray(job?.sections) ? job.sections : [];
+  const out = {
+    attempted: false,
+    wroteAny: false,
+  };
+  for (const section of sections) {
+    const reparto = String(section?.reparto || "").trim();
+    const yapReparto = yapRepartoForOdl(reparto);
+    const repartoKeys = [...new Set([yapReparto, reparto].filter(Boolean))];
+    if (reparto) {
+      await clickRepartoSection(page, yapReparto).catch(() => false);
+      if (yapReparto !== reparto) {
+        await clickRepartoSection(page, reparto).catch(() => false);
+      }
+      await page.waitForTimeout(60).catch(() => {});
+    }
+    const sectionDebug = args.debug ? {
+      reparto,
+      yapReparto,
+      fields: {},
+    } : null;
+    if (section.materiali_euro != null) {
+      out.attempted = true;
+      writeReport.materials.attempted = true;
+      const matOkResult = await fillWithRetry(
+        page,
+        [
+          [...repartoKeys, "materiali", "consumo", "euro"],
+          [...repartoKeys, "materiali di consumo", "materiali"],
+          [...repartoKeys, "materiali"],
+        ],
+        String(section.materiali_euro),
+        {},
+        { debug: args.debug, fieldId: `odl.${reparto}.materiali`, returnDebug: args.debug },
+      );
+      const matOk = Boolean(matOkResult?.ok ?? matOkResult);
+      writeReport.materials.success = writeReport.materials.success || matOk;
+      if (!matOk && !writeReport.materials.error) writeReport.materials.error = "materials_field_not_found";
+      out.wroteAny = out.wroteAny || matOk;
+      if (sectionDebug) sectionDebug.fields.materiali = matOkResult?.debug || null;
+    }
+    if (section.smaltimento_applica) {
+      out.attempted = true;
+      writeReport.waste.attempted = true;
+      const wasteDetails = sectionWasteDetails(section);
+      logAction("waste_calc", wasteDetails || {
+        reparto,
+        percent: section?.smaltimento_percentuale ?? 2,
+        subtotal: null,
+        amount: null,
+        reason: "missing_numeric_basis",
+      });
+      const smaltOkResult = await fillWithRetry(
+        page,
+        [
+          [...repartoKeys, "smaltimento", "rifiuti", "%"],
+          [...repartoKeys, "smaltimento rifiuti", "smaltimento"],
+          [...repartoKeys, "rifiuti", "percentuale"],
+        ],
+        String(section.smaltimento_percentuale ?? 2),
+        {},
+        { debug: args.debug, fieldId: `odl.${reparto}.smaltimento`, returnDebug: args.debug },
+      );
+      const smaltOk = Boolean(smaltOkResult?.ok ?? smaltOkResult);
+      writeReport.waste.success = writeReport.waste.success || smaltOk;
+      if (!smaltOk && !writeReport.waste.error) writeReport.waste.error = "waste_field_not_found";
+      out.wroteAny = out.wroteAny || smaltOk;
+      if (sectionDebug) sectionDebug.fields.smaltimento = smaltOkResult?.debug || null;
+
+      const smaltAmount = sectionWasteAmount(section);
+      if (smaltAmount != null) {
+        writeReport.waste.amountAttempted = true;
+        const smaltAmountText = formatGridAmount(smaltAmount);
+        logAction("waste_amount_write", {
+          reparto,
+          amount: smaltAmountText,
+          percent: wasteDetails?.percent ?? null,
+          subtotal: wasteDetails?.subtotal ?? null,
+        });
+        const smaltAmountResult = await fillWithRetry(
+          page,
+          [
+            [...repartoKeys, "smaltimento", "importo"],
+            [...repartoKeys, "smaltimento", "prezzo"],
+            [...repartoKeys, "smaltimento", "euro"],
+            [...repartoKeys, "smaltimento rifiuti", "importo"],
+            [...repartoKeys, "smaltimento rifiuti", "prezzo"],
+            [...repartoKeys, "rifiuti", "totale"],
+          ],
+          smaltAmountText,
+          {},
+          { debug: args.debug, fieldId: `odl.${reparto}.smaltimento_importo`, returnDebug: args.debug },
+        );
+        const smaltAmountOk = Boolean(smaltAmountResult?.ok ?? smaltAmountResult);
+        writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltAmountOk;
+        writeReport.waste.success = writeReport.waste.success || smaltAmountOk;
+        if (!smaltAmountOk && !writeReport.waste.amountError) writeReport.waste.amountError = "waste_amount_field_not_found";
+        out.wroteAny = out.wroteAny || smaltAmountOk;
+        if (sectionDebug) sectionDebug.fields.smaltimentoImporto = smaltAmountResult?.debug || null;
+      }
+    }
+    if (sectionDebug && Object.keys(sectionDebug.fields).length) {
+      writeReport.debug.sections.push(sectionDebug);
+    }
+  }
+  return out;
 }
 
 function buildWorkGridRows(job) {
@@ -4222,7 +4345,23 @@ async function writePracticeAndOdl(page, job, args) {
         const expectedRows = (gridResult?.righe || []).length;
         const persistedRows = (gridResult?.righe || []).filter((r) => r.written).length;
         const docSaved = Boolean(gridResult?.saved?.ok);
-        const gridOk = Boolean(gridResult?.ok) && docSaved && (!manExpected || manOk) && persistedRows === expectedRows;
+        let extraFieldsResult = { attempted: false, wroteAny: false };
+        if (docSaved) {
+          extraFieldsResult = await writeGridFlowExtraFields(page, job, writeReport, args).catch((e) => ({ attempted: true, wroteAny: false, error: e?.message || String(e) }));
+        }
+        const materialsExpected = (job.sections || []).some((section) => section?.materiali_euro != null);
+        const materialsOk = !materialsExpected || Boolean(writeReport?.materials?.success);
+        const wasteExpected = (job.sections || []).some((section) => section?.smaltimento_applica);
+        const wastePercentOk = !wasteExpected || Boolean(writeReport?.waste?.success);
+        const wasteAmountExpected = (job.sections || []).some((section) => sectionWasteAmount(section) != null);
+        const wasteAmountOk = !wasteAmountExpected || Boolean(writeReport?.waste?.amountSuccess ?? writeReport?.waste?.success);
+        const gridOk = Boolean(gridResult?.ok)
+          && docSaved
+          && (!manExpected || manOk)
+          && persistedRows === expectedRows
+          && materialsOk
+          && wastePercentOk
+          && wasteAmountOk;
         logAction("grid_flow_result", {
           docKind,
           workPage: writeReport.workPage,
@@ -4234,6 +4373,13 @@ async function writePracticeAndOdl(page, job, args) {
           descrizioniPersisted: persistedRows,
           descrizioniExpected: expectedRows,
           saved: docSaved,
+          materialsExpected,
+          materials: materialsOk,
+          wasteExpected,
+          wastePercent: wastePercentOk,
+          wasteAmountExpected,
+          wasteAmount: wasteAmountOk,
+          extraFields: extraFieldsResult,
           rowKinds: (gridResult?.righe || []).map((r) => ({
             kind: r.kind,
             reparto: r.reparto,
@@ -4267,8 +4413,53 @@ async function writePracticeAndOdl(page, job, args) {
           found: docSaved ? "salvato" : null, status: docSaved ? "written" : "missing",
           hint: `${docLabel} > pulsante Salva.`,
         });
+        for (const section of (job.sections || [])) {
+          const reparto = String(section?.reparto || "").trim().toLowerCase() || "reparto";
+          if (section.materiali_euro != null) {
+            const matExpected = String(section.materiali_euro);
+            const matOk = Boolean(writeReport?.materials?.success);
+            pf.push({
+              field_id: `${docKind}.${reparto}.materiali`,
+              expected: matExpected,
+              found: matOk ? matExpected : null,
+              status: matOk ? "written" : "missing",
+              hint: `${docLabel} > Materiali di consumo.`,
+            });
+          }
+          if (section.smaltimento_applica) {
+            const wasteExpectedValue = String(section.smaltimento_percentuale ?? 2);
+            const wasteOk = Boolean(writeReport?.waste?.success);
+            pf.push({
+              field_id: `${docKind}.${reparto}.smaltimento`,
+              expected: wasteExpectedValue,
+              found: wasteOk ? wasteExpectedValue : null,
+              status: wasteOk ? "written" : "missing",
+              hint: `${docLabel} > Smaltimento rifiuti.`,
+            });
+            const wasteAmount = sectionWasteAmount(section);
+            if (wasteAmount != null) {
+              const wasteAmountExpectedValue = formatGridAmount(wasteAmount);
+              const wasteAmountWritten = Boolean(writeReport?.waste?.amountSuccess ?? writeReport?.waste?.success);
+              pf.push({
+                field_id: `${docKind}.${reparto}.smaltimento_importo`,
+                expected: wasteAmountExpectedValue,
+                found: wasteAmountWritten ? wasteAmountExpectedValue : null,
+                status: wasteAmountWritten ? "written" : "missing",
+                hint: `${docLabel} > Smaltimento rifiuti importo.`,
+              });
+            }
+          }
+        }
         writeReport.fields = pf;
-        logPhase("grid_write", gridOk ? "done" : "failed", { docKind, manodoperaExpected: manExpected, manodopera: manOk, rows: `${persistedRows}/${expectedRows}` });
+        logPhase("grid_write", gridOk ? "done" : "failed", {
+          docKind,
+          manodoperaExpected: manExpected,
+          manodopera: manOk,
+          rows: `${persistedRows}/${expectedRows}`,
+          materials: materialsOk ? "ok" : (materialsExpected ? "fail" : "skip"),
+          waste: wastePercentOk ? "ok" : (wasteExpected ? "fail" : "skip"),
+          wasteAmount: wasteAmountOk ? "ok" : (wasteAmountExpected ? "fail" : "skip"),
+        });
         _detachRpcTrace();
         return writeReport;
       }
