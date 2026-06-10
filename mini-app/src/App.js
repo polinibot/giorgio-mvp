@@ -5373,10 +5373,21 @@ function App() {
                   });
                 }
               } catch (yapErr) {
+                // detail puo' essere un oggetto (FastAPI): normalizza a stringa.
+                const detailText = (() => {
+                  const d = yapErr?.response?.data?.detail;
+                  if (typeof d === 'string') return d;
+                  try { return JSON.stringify(d || ''); } catch { return ''; }
+                })();
+                // 409 = appuntamento bloccato da preventivo/ODL: NON cancellare la
+                // pratica locale, altrimenti resta un appuntamento orfano su YAP
+                // senza piu' nessuna pratica da cui ritentare l'eliminazione.
+                if (yapErr?.response?.status === 409) {
+                  throw yapErr;
+                }
                 // Se non trovato su YAP, continua comunque
-                if (!yapErr?.response?.data?.detail?.includes('not_found') &&
-                    !yapErr?.response?.data?.detail?.includes('non trovato')) {
-                  console.warn(`YAP delete warning for ${id}:`, yapErr?.response?.data?.detail || yapErr.message);
+                if (!detailText.includes('not_found') && !detailText.includes('non trovato')) {
+                  console.warn(`YAP delete warning for ${id}:`, detailText || yapErr.message);
                 }
               }
               // 2. Poi elimina pratica locale
