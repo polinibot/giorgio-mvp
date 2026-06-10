@@ -1506,12 +1506,10 @@ def _build_inline_sync_audit_result(
     inline_audit = result_data.get("inline_audit")
     if not isinstance(inline_audit, dict):
         return None
+    write_issues = _write_report_issue_labels(write_report, worker_phases)
+    wr = write_report if isinstance(write_report, dict) else {}
 
     if inline_audit.get("error"):
-        write_issues = _write_report_issue_labels(write_report, worker_phases)
-        # write_report puo' essere None (es. revisione pura: nessun ODL scritto):
-        # accedi in modo sicuro per non sollevare AttributeError.
-        wr = write_report if isinstance(write_report, dict) else {}
         if write_issues or wr.get("ok") is False or wr.get("error") or inline_audit.get("present") or inline_audit.get("missing") or inline_audit.get("mismatch"):
             return _build_post_write_review_audit(
                 {
@@ -1538,6 +1536,18 @@ def _build_inline_sync_audit_result(
     mismatch = list(inline_audit.get("mismatch") or [])
     verified = bool(inline_audit.get("verified"))
     summary = inline_audit.get("summary") if isinstance(inline_audit.get("summary"), dict) else None
+    if write_issues or wr.get("ok") is False or wr.get("error"):
+        return _build_post_write_review_audit(
+            {
+                "message": str(inline_audit.get("error") or "Verifica automatica parziale."),
+                "summary": summary,
+                "present": present,
+                "missing": missing,
+                "mismatch": mismatch,
+            },
+            write_report,
+            worker_phases,
+        )
 
     status_value = "complete_synced" if verified else ("partial_synced" if (present or missing or mismatch) else "agenda_synced")
     if status_value == "complete_synced":

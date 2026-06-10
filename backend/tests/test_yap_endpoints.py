@@ -239,6 +239,62 @@ class TestYapSyncEndpoints:
         assert any(item.get("name") == "audit" and item.get("status") == "completed" for item in data["phase_timeline"])
         assert isinstance(data.get("write_report"), dict)
 
+    def test_yap_sync_downgrades_complete_inline_audit_when_post_write_fields_failed(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+        from automation_service import AutomationService
+
+        monkeypatch.setattr(
+            AutomationService,
+            "pre_sync_check",
+            staticmethod(lambda payload: {"ready": True, "score": 92, "issues": [], "warnings": []}),
+        )
+
+        async def fake_run_yap_script(script_name, *args, **kwargs):
+            assert script_name == "yap-worker.mjs"
+            return {
+                "result": {
+                    "saved": True,
+                    "mode": "commit",
+                    "message": "Appuntamento YAP scritto e verificato automaticamente.",
+                    "status": "complete_synced",
+                    "telemetry": {"saveAttempts": 1},
+                    "inline_audit": {
+                        "verified": True,
+                        "present": [{"field": "preventivo.manodopera", "expected": "MAN (0,8)"}],
+                        "missing": [],
+                        "mismatch": [],
+                        "summary": {"present": 1, "missing": 0, "mismatch": 0, "fields": ["preventivo.manodopera"]},
+                    },
+                    "write_report": {
+                        "attempted": True,
+                        "ok": False,
+                        "materials": {"attempted": True, "success": False, "error": "materials_field_not_found"},
+                        "waste": {"attempted": True, "success": True},
+                    },
+                },
+                "stdout": "",
+                "stderr": "",
+            }
+
+        monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+
+        response = client.post(
+            f"/practices/{sample_practice['id']}/yap/sync?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "partial_synced"
+        assert data["status_reason"] == "post_write_review_needed"
+        assert data["practice"]["management_sync_status"] == "partial_synced"
+        assert data["practice"]["synced"] is False
+        assert "materiali" in data["message"].lower()
+        assert data["write_report"]["materials"]["error"] == "materials_field_not_found"
+
     def test_yap_sync_keeps_write_report_details_when_inline_audit_is_partial(self, client, sample_practice, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
@@ -288,7 +344,7 @@ class TestYapSyncEndpoints:
         assert response.status_code == 200
         data = response.json()["data"]
         assert data["status"] == "partial_synced"
-        assert data["status_reason"] == "strict_mismatch_missing_1_mismatch_0"
+        assert data["status_reason"] == "post_write_review_needed"
         assert data["error_code"] is None
         assert data["action_target"] is None
         assert data["next_action"] is None

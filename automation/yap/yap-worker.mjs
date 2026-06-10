@@ -5516,20 +5516,35 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
     const g = wr.gridResult;
     // Prefisso onesto in base al tipo di documento (preventivo o ODL): stessa griglia.
     const dk = g.docKind === "odl" ? "odl" : "preventivo";
-    if (g.manodopera?.expected) {
-      if (g.manodopera?.articolo) {
-        present.push({ field: `${dk}.manodopera`, expected: `MAN (${g.manodopera?.readback?.qta || "ore"})` });
-      } else {
-        missing.push({ field: `${dk}.manodopera`, expected: "riga manodopera (MAN)" });
+    const gridFields = Array.isArray(wr.fields)
+      ? wr.fields.filter((field) => String(field?.field_id || "").startsWith(`${dk}.`))
+      : [];
+    if (gridFields.length) {
+      for (const field of gridFields) {
+        const item = {
+          field: field.field_id,
+          expected: field.expected,
+          found: field.found ?? null,
+        };
+        if (field.status === "written") present.push(item);
+        else missing.push(item);
       }
+    } else {
+      if (g.manodopera?.expected) {
+        if (g.manodopera?.articolo) {
+          present.push({ field: `${dk}.manodopera`, expected: `MAN (${g.manodopera?.readback?.qta || "ore"})` });
+        } else {
+          missing.push({ field: `${dk}.manodopera`, expected: "riga manodopera (MAN)" });
+        }
+      }
+      for (const r of (g.righe || [])) {
+        if (r.written) present.push({ field: `${dk}.${r.kind}`, expected: r.text });
+        else missing.push({ field: `${dk}.${r.kind}`, expected: r.text, found: "non scritto" });
+      }
+      // Salvataggio del documento: senza questo le righe NON persistono su YAP. Onesto.
+      if (g.saved?.ok) present.push({ field: `${dk}.salvataggio`, expected: "documento salvato" });
+      else missing.push({ field: `${dk}.salvataggio`, expected: "documento salvato", found: g.saved?.reason || "non salvato" });
     }
-    for (const r of (g.righe || [])) {
-      if (r.written) present.push({ field: `${dk}.${r.kind}`, expected: r.text });
-      else missing.push({ field: `${dk}.${r.kind}`, expected: r.text, found: "non scritto" });
-    }
-    // Salvataggio del documento: senza, le righe NON persistono su YAP. Onesto.
-    if (g.saved?.ok) present.push({ field: `${dk}.salvataggio`, expected: "documento salvato" });
-    else missing.push({ field: `${dk}.salvataggio`, expected: "documento salvato", found: g.saved?.reason || "non salvato" });
     return {
       verified: missing.length === 0,
       present,
