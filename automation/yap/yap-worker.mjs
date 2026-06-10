@@ -402,6 +402,21 @@ function normalizeLoose(value) {
   return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+function normalizeGridArticleCode(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .replace(/^O+/, "")
+    .trim();
+}
+
+function isExpectedGridArticle(readbackValue, expectedCode) {
+  const expected = normalizeGridArticleCode(expectedCode);
+  const actual = normalizeGridArticleCode(readbackValue);
+  if (!expected || !actual) return false;
+  return actual === expected;
+}
+
 function formatManNeedle(value) {
   return `MAN: ${value}`;
 }
@@ -3045,7 +3060,8 @@ async function gridSelectArticolo(page, rowIndex, code, options = {}) {
       const wantedNorm = norm(wanted);
       const expectedPriceNorm = normalizePrice(expectedPrice || "");
       const preferredNeedles = Array.isArray(preferredTerms) ? preferredTerms.map((term) => norm(term)).filter(Boolean) : [];
-      const exact = results.find((r) => r.primaryCode === wantedNorm || r.code === wantedNorm);
+      const strictExact = results.find((r) => r.primaryCode === wantedNorm);
+      const looseExact = results.find((r) => r.code === wantedNorm);
       const startsWithCandidates = results.filter((r) =>
         r.primaryCode === `O${wantedNorm}`
         || r.primaryCode.startsWith(`${wantedNorm} `)
@@ -3058,7 +3074,8 @@ async function gridSelectArticolo(page, rowIndex, code, options = {}) {
       const preferredStartsWith = preferredNeedles.length
         ? startsWithCandidates.find((r) => preferredNeedles.some((needle) => r.text.includes(needle)))
         : null;
-      const startsWith = exact || priceMatchedStartsWith || preferredStartsWith || startsWithCandidates[0] || null;
+      const exact = strictExact || (!expectedPriceNorm && !preferredNeedles.length ? looseExact : null);
+      const startsWith = exact || priceMatchedStartsWith || preferredStartsWith || startsWithCandidates[0] || looseExact || null;
       const fuzzy = startsWith || results.find((r) => r.text.includes(wantedNorm) || wantedNorm.includes(r.primaryCode));
       if (fuzzy) {
         const rr = fuzzy.tr.getBoundingClientRect();
@@ -3900,17 +3917,24 @@ async function writeWorkGrid(page, job, args = {}) {
       readback,
     });
     if (!out.manodopera && (row.kind === "man" || row.kind === "mac")) {
+      const articleValid = row.articleQuery ? isExpectedGridArticle(readback?.articolo, row.articleQuery) : Boolean(art.ok);
       out.manodopera = {
         expected: true,
         reparto: row.reparto,
         added: added.ok,
-        articolo: art.ok,
+        articolo: articleValid,
         qta: row.qta != null,
         readback,
       };
       logAction("grid_lavoro_after", out.manodopera.readback);
     }
-    out.righe.push({ ...row, typed: Boolean(setDescr.value && setDescr.value.length > 0), written: false, article: Boolean(art.ok), readback });
+    out.righe.push({
+      ...row,
+      typed: Boolean(setDescr.value && setDescr.value.length > 0),
+      written: false,
+      article: row.articleQuery ? isExpectedGridArticle(readback?.articolo, row.articleQuery) : Boolean(art.ok),
+      readback,
+    });
   }
 
   // FLUSH ultima riga: una riga GWT si committa quando perde il focus, cosa che
@@ -3935,7 +3959,8 @@ async function writeWorkGrid(page, job, args = {}) {
   }).catch(() => []);
   for (const r of out.righe) {
     const n = String(r.text || "").toUpperCase();
-    r.written = finalRows.some((h) => h.toUpperCase().includes(n));
+    const textWritten = finalRows.some((h) => h.toUpperCase().includes(n));
+    r.written = r.articleQuery ? (textWritten && Boolean(r.article)) : textWritten;
   }
   logAction("grid_verify_rows", out.righe.map((row) => ({
     kind: row.kind,
