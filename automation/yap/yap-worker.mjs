@@ -914,8 +914,9 @@ async function removeStaleTagChips(page, wantedTags) {
   const wanted = new Set(wantedTags.map((t) => String(t).trim().toLowerCase()));
   const removed = [];
   const failedRemove = [];
-  for (let pass = 0; pass < KNOWN_YAP_TAGS.length; pass += 1) {
-    const stale = await safeEvaluate(page, ({ known, want }) => {
+  const labelWords = ["cosa", "quando", "tag", "info", "lightbulb"];
+  for (let pass = 0; pass < 10; pass += 1) {
+    const stale = await safeEvaluate(page, ({ want, labels }) => {
       const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
       const isVisible = (node) => {
         const r = node.getBoundingClientRect();
@@ -927,10 +928,15 @@ async function removeStaleTagChips(page, wantedTags) {
       if (!popup) return null;
       const chip = [...popup.querySelectorAll("span, div, td, li")]
         .filter(isVisible)
-        .find((el) => el.children.length === 0
-          && el.tagName !== "INPUT"
-          && known.includes(norm(el.textContent))
-          && !want.includes(norm(el.textContent)));
+        .find((el) => {
+          if (el.children.length !== 0 || el.tagName === "INPUT") return false;
+          const text = norm(el.textContent);
+          if (!text) return false;
+          if (labels.includes(text)) return false;
+          if (want.includes(text)) return false;
+          if (text.length > 40) return false;
+          return true;
+        });
       if (!chip) return null;
       const r = chip.getBoundingClientRect();
       return {
@@ -939,7 +945,7 @@ async function removeStaleTagChips(page, wantedTags) {
         chip: { x: r.x + r.width / 2, y: r.y + r.height / 2 },
         containerHtml: (chip.parentElement?.parentElement?.outerHTML || chip.parentElement?.outerHTML || "").slice(0, 600),
       };
-    }, { known: KNOWN_YAP_TAGS, want: [...wanted] }).catch(() => null);
+    }, { want: [...wanted], labels: labelWords }).catch(() => null);
     if (!stale) break;
 
     // L'icona di rimozione dei chip GWT spesso compare solo all'HOVER: prima
