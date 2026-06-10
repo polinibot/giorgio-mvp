@@ -114,74 +114,85 @@ async function visibleYapMessage(page) {
 }
 
 /**
- * Gestisce ODL bloccante: apre pratica, naviga ODL, elimina, torna ad agenda
+ * Gestisce documento bloccante (ODL o preventivo): apre la pratica, naviga al tab
+ * del documento, lo elimina, torna ad agenda e riprova la delete dell'appuntamento.
  */
-async function handleOdlBlockingAndRetry(page, event, dateIso, searchTerm, trace) {
-  trace?.mark("odl_fix_open_practice", { event: event.title });
+async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace, kind = "odl") {
+  const doc = kind === "preventivo"
+    ? { tabRe: /Preventivi/i, pageEnum: "PREVENTIVO" }
+    : { tabRe: /Ordini di lavoro|ODL|Lavori/i, pageEnum: "ODL" };
+  trace?.mark(`${kind}_fix_open_practice`, { event: event.title });
+  // I dialog nativi (confirm di eliminazione documento) vanno accettati.
+  const onDialog = (dialog) => { dialog.accept().catch(() => {}); };
+  page.on("dialog", onDialog);
   try {
     // Clicca sull'appuntamento per aprire popup
     await page.mouse.click(event.x, event.y);
     await page.waitForTimeout(800);
-    
+
     // Cerca link "Gestione pratica" o "Dettagli"
     const praticaLink = await page.locator("a.gwt-Anchor, button").filter({ hasText: /Gestione pratica|Dettagli|Apri pratica/i }).first();
     if (await praticaLink.isVisible().catch(() => false)) {
       await praticaLink.click();
       await page.waitForTimeout(2000);
-      trace?.mark("odl_fix_practice_opened");
+      trace?.mark(`${kind}_fix_practice_opened`);
     } else {
       // Prova doppio click per aprire diretto
       await page.mouse.dblclick(event.x, event.y);
       await page.waitForTimeout(2000);
     }
-    
+
     // Attendi caricamento pratica
     await page.waitForTimeout(3000);
-    
-    // Cerca tab "Ordini di lavoro" o "ODL"
-    const odlTab = await page.locator("[role='tab'], .gwt-TabBarItem, .tab").filter({ hasText: /Ordini di lavoro|ODL|Lavori/i }).first();
-    if (await odlTab.isVisible().catch(() => false)) {
-      await odlTab.click();
+
+    // Cerca il tab del documento (Ordini di lavoro / Preventivi)
+    const docTab = await page.locator("[role='tab'], .gwt-TabBarItem, .gwt-TabLayoutPanelTab, .tab").filter({ hasText: doc.tabRe }).first();
+    if (await docTab.isVisible().catch(() => false)) {
+      await docTab.click();
       await page.waitForTimeout(2500);
-      trace?.mark("odl_fix_odl_tab_opened");
+      trace?.mark(`${kind}_fix_tab_opened`);
     } else {
       // Prova URL hash navigation
       const currentUrl = page.url();
       if (currentUrl.includes("pratica")) {
-        await page.evaluate(() => { window.location.hash = window.location.hash.replace(/Page":"[^"]+"/, 'Page":"ODL"'); });
+        await page.evaluate((pageEnum) => { window.location.hash = window.location.hash.replace(/Page%22:%22[^%]+%22|Page":"[^"]+"/, `Page":"${pageEnum}"`); }, doc.pageEnum);
         await page.waitForTimeout(2500);
-        trace?.mark("odl_fix_hash_navigated");
+        trace?.mark(`${kind}_fix_hash_navigated`);
       }
     }
-    
-    // Cerca bottone elimina in ODL
-    const eliminaOdl = await page.locator("button, a.gwt-Anchor, .gwt-Button").filter({ hasText: /Elimina|Rimuovi|Cancella|Delete/i }).first();
-    if (await eliminaOdl.isVisible().catch(() => false)) {
-      await eliminaOdl.click();
+
+    // Cerca bottone elimina del documento
+    const eliminaDoc = await page.locator("button, a.gwt-Anchor, .gwt-Button").filter({ hasText: /Elimina|Rimuovi|Cancella|Delete/i }).first();
+    if (await eliminaDoc.isVisible().catch(() => false)) {
+      await eliminaDoc.click();
       await page.waitForTimeout(1000);
-      
-      // Conferma eliminazione
+
+      // Conferma eliminazione (dialog GWT; quelli nativi sono gestiti da onDialog)
       const conferma = await page.locator("button, .gwt-Button").filter({ hasText: /Sì|Conferma|OK|Elimina/i }).first();
       if (await conferma.isVisible().catch(() => false)) {
         await conferma.click();
         await page.waitForTimeout(3000);
-        trace?.mark("odl_fix_odl_deleted");
+        trace?.mark(`${kind}_fix_doc_deleted`);
       }
+    } else {
+      trace?.mark(`${kind}_fix_delete_button_not_found`);
     }
-    
+
     // Torna all'agenda
     await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
     await page.waitForTimeout(1500);
-    trace?.mark("odl_fix_back_to_agenda");
-    
+    trace?.mark(`${kind}_fix_back_to_agenda`);
+
     // Riprova eliminazione appuntamento
     const retryResult = await findAndDeleteAppointment(page, searchTerm, false, dateIso, false, null);
-    trace?.mark("odl_fix_retry_completed", { deleted: retryResult.deleted });
-    
+    trace?.mark(`${kind}_fix_retry_completed`, { deleted: retryResult.deleted });
+
     return retryResult.deleted;
   } catch (err) {
-    trace?.mark("odl_fix_error", { error: err.message });
+    trace?.mark(`${kind}_fix_error`, { error: err.message });
     return false;
+  } finally {
+    page.off("dialog", onDialog);
   }
 }
 
@@ -417,14 +428,16 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   let failureStatus = !targetDeleted
     ? classifyDeleteFailure(deleteRpcResponse?.body || visibleMessage)
     : null;
-  // Gestione automatica ODL: se bloccato, apri pratica, elimina ODL, riprova
+  // Gestione automatica documento bloccante (ODL o preventivo): apri pratica,
+  // elimina il documento, riprova la delete dell'appuntamento.
   let odlAutoFixed = false;
-  if (failureStatus === "blocked_by_odl" && !dryRun) {
-    trace?.mark("odl_auto_fix_started");
+  if ((failureStatus === "blocked_by_odl" || failureStatus === "blocked_by_preventivo") && !dryRun) {
+    const blockKind = failureStatus === "blocked_by_preventivo" ? "preventivo" : "odl";
+    trace?.mark("blocking_doc_auto_fix_started", { kind: blockKind });
     try {
-      odlAutoFixed = await handleOdlBlockingAndRetry(page, match, dateIso, searchTerm, trace);
+      odlAutoFixed = await handleBlockingDocAndRetry(page, match, dateIso, searchTerm, trace, blockKind);
       if (odlAutoFixed) {
-        trace?.mark("odl_auto_fix_success");
+        trace?.mark("blocking_doc_auto_fix_success", { kind: blockKind });
         // Riverifica eliminazione
         await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
         await page.waitForTimeout(400);
@@ -445,11 +458,11 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   const repairHint = (failureStatus === "blocked_by_odl" && !odlAutoFixed)
     ? {
       script: `node automation/yap/yap-delete-linked-odl.mjs --date ${dateIso} --search ${searchTerm}${expectedTime ? ` --time ${expectedTime}` : ""}`,
-      reason: "L'appuntamento e' collegato a un ordine di lavoro. Prima elimina l'ODL, poi rilancia questo script.",
+      reason: "L'appuntamento e' collegato a un ordine di lavoro. La rimozione automatica dell'ODL non e' riuscita: elimina l'ODL su YAP, poi riprova.",
     }
-    : failureStatus === "blocked_by_preventivo"
+    : (failureStatus === "blocked_by_preventivo" && !odlAutoFixed)
       ? {
-        reason: "L'appuntamento e' collegato a un preventivo. Apri la pratica su YAP, elimina il preventivo, poi riprova l'eliminazione.",
+        reason: "L'appuntamento e' collegato a un preventivo. La rimozione automatica del preventivo non e' riuscita: apri la pratica su YAP, elimina il preventivo, poi riprova.",
       }
       : null;
 
@@ -485,7 +498,9 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
         : undefined
       : failureStatus === "blocked_by_odl"
         ? "YAP blocca la cancellazione perche l'appuntamento e' associato a un ordine di lavoro."
-        : "Richiesta delete inviata ma evento ancora visibile in agenda."
+        : failureStatus === "blocked_by_preventivo"
+          ? "YAP blocca la cancellazione perche l'appuntamento e' associato a un preventivo."
+          : "Richiesta delete inviata ma evento ancora visibile in agenda."
       ,
     repairHint,
     telemetry: {

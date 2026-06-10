@@ -3431,7 +3431,8 @@ function App() {
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
       updateYapActionProgress({ percent: 22, label: 'YAP: accesso al portale in corso...' });
       // NON ritentare in automatico: la delete e' non idempotente lato YAP.
-      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
+      // 340s: attesa lock (100s) + worker con cascata preventivo/ODL (230s).
+      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 340000 });
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
@@ -4862,7 +4863,10 @@ function App() {
         setSaving(true);
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         try {
-          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
+          // 340s: attesa lock YAP (fino a 100s) + worker delete con cascata
+          // preventivo/ODL (fino a 230s). Con 180s il backend stava ancora
+          // lavorando e l'utente vedeva un falso "Errore di rete".
+          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 340000 });
           // Il backend distingue "eliminata anche su YAP" da "eliminata SOLO localmente"
           // (appuntamento non trovato / dati mancanti): mostra il messaggio vero.
           const deleteMessage = res?.data?.data?.message || 'Pratica cancellata con successo';
@@ -5356,16 +5360,21 @@ function App() {
                   : null;
                 const inferredTime = listPractice?.appointment_time || '';
                 if (practiceNeedsYapDelete(listPractice)) {
+                  // 340s (NON 60s): un run di delete YAP dura 60-90s+ (login incluso)
+                  // e con la cascata preventivo/ODL anche di piu'. Con 60s la richiesta
+                  // andava in timeout mentre il worker girava ancora, la pratica veniva
+                  // comunque eliminata in locale (skip_yap sotto) e l'appuntamento
+                  // restava su YAP senza alcun errore visibile.
                   await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, {
                     data: inferredTime ? { skip_audit: true, time: inferredTime } : { skip_audit: true },
                     params: getAuthParams(),
                     headers: getHeaders(),
-                    timeout: 60000,
+                    timeout: 340000,
                   });
                 }
               } catch (yapErr) {
                 // Se non trovato su YAP, continua comunque
-                if (!yapErr?.response?.data?.detail?.includes('not_found') && 
+                if (!yapErr?.response?.data?.detail?.includes('not_found') &&
                     !yapErr?.response?.data?.detail?.includes('non trovato')) {
                   console.warn(`YAP delete warning for ${id}:`, yapErr?.response?.data?.detail || yapErr.message);
                 }

@@ -2638,9 +2638,12 @@ async def delete_practice(
             yap_args = ["--date", date_iso, f"--search={search}"]
             if time_arg:
                 yap_args.extend(["--time", time_arg])
+            # 230s come il sync: con la cascata (elimina preventivo/ODL collegato e
+            # riprova) il run puo' superare i 180s di default.
             result = await _run_yap_script(
                 "yap-delete-appointment.mjs",
                 yap_args,
+                timeout_seconds=230,
                 db=db,
             )
             failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
@@ -3429,7 +3432,7 @@ async def delete_practice_yap_appointment(
     if body.fresh_login:
         args.append("--fresh-login")
 
-    result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
+    result = await _run_yap_script("yap-delete-appointment.mjs", args, timeout_seconds=230, db=db)
     _write_yap_delete_dump({
         "practice_id": practice_id,
         "endpoint": "yap_appointment_delete",
