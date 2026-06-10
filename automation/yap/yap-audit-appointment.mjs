@@ -577,7 +577,7 @@ function sanitizeFoundValue(field, value) {
 
 function buildAuditHint(field, expected = "", reason = "") {
   if (field.group === "agenda" && field.kind === "time" && reason === "orario_fuori_fascia") {
-    return `Orario fuori fascia YAP: usa un orario tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}.`;
+    return `Orario non selezionabile nella mini app: usa uno slot YAP tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}.`;
   }
   if (field.group === "agenda") return "Apri popup appuntamento e verifica Cosa/Quando/Dalle/Alle.";
   if (field.group === "tags") return "Apri popup appuntamento e riallinea i tag richiesti.";
@@ -592,7 +592,7 @@ function buildAuditHint(field, expected = "", reason = "") {
 function buildMismatchReason(field, expected, actual) {
   if (!actual) return "campo_non_rilevato";
   if (field.kind === "time") {
-    if (isYapTimeOutsideVisibleRange(expected)) return "orario_fuori_fascia";
+    if (isYapTimeOutsideVisibleRange(expected) || isYapTimeOutsideVisibleRange(actual)) return "orario_fuori_fascia";
     return "orario_diverso";
   }
   if (field.kind === "date") return "data_diversa";
@@ -657,9 +657,9 @@ function buildAuditFeedback(present, missing, mismatch) {
     hint: item.hint || null,
   }));
   const summary = timeIssue
-    ? `Orario fuori fascia YAP: ${timeIssue.expected_preview || previewValue(timeIssue.expected)} non è valido. Usa un orario tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}.`
+    ? `Orario non selezionabile nella mini app: ${timeIssue.expected_preview || previewValue(timeIssue.expected)} non e' valido. Usa un orario tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}.`
     : (blockers.length
-      ? `Priorita': ${topBlockers.slice(0, 3).map((item) => item.label).join(" • ")}`
+      ? `Priorita': ${topBlockers.slice(0, 3).map((item) => item.label).join(", ")}`
       : "Nessun blocco rilevato.");
   return {
     summary,
@@ -723,7 +723,7 @@ function classifyAudit(fields, found) {
   if (timeIssue) {
     const expectedTime = timeIssue.expected_preview || previewValue(timeIssue.expected);
     const foundTime = timeIssue.found_preview || previewValue(timeIssue.found);
-    message = `Orario fuori fascia YAP: hai chiesto ${expectedTime}, ma YAP mostra ${foundTime || "08.00"}. Usa un orario tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}.`;
+    message = `Orario non selezionabile nella mini app: hai chiesto ${expectedTime || "un orario non valido"}, ma YAP mostra ${foundTime || "un orario non valido"}. La select accetta solo slot tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}, ogni 20 minuti.`;
   }
 
   const feedback = buildAuditFeedback(present, missing, mismatch);
@@ -907,3 +907,4 @@ main().catch((error) => {
   }, null, 2));
   process.exit(1);
 });
+

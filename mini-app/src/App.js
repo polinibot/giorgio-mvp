@@ -838,7 +838,7 @@ function formatDateForBackend(value) {
 
 const YAP_APPOINTMENT_MIN_TIME = '08:00';
 const YAP_APPOINTMENT_MAX_TIME = '18:00';
-const MINI_APP_TIME_STEP_MINUTES = 5;
+const MINI_APP_TIME_STEP_MINUTES = 20;
 
 function timeToMinutes(time) {
   const match = String(time || '').match(/^(\d{2}):(\d{2})$/);
@@ -862,7 +862,7 @@ function clampAppointmentTimeToYapRange(time, fallback = YAP_APPOINTMENT_MIN_TIM
   return formatMinutesAsTime(clampedMinutes);
 }
 
-/** Opzioni orario nella fascia YAP, ogni 5 min. */
+/** Opzioni orario nella fascia YAP, ogni 20 min. */
 function buildAppointmentTimeOptions() {
   const options = [];
   const startMinutes = timeToMinutes(YAP_APPOINTMENT_MIN_TIME);
@@ -1204,7 +1204,7 @@ const DEMO_DRAFT = {
   customer_type: 'azienda',
   billing_to_complete: true,
   appointment_date: '2026-11-20',
-  appointment_time: '09:30',
+  appointment_time: '09:20',
   practice_type: 'preventivo',
   internal_notes: 'Demo QA precompilata',
   company_name: 'Rossi SRL',

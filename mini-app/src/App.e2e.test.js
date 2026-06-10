@@ -342,7 +342,8 @@ describe('Mini App user-simulation suite', () => {
     expect(values[values.length - 1]).toBe('18:00');
     expect(values).not.toContain('00:40');
     expect(values).not.toContain('07:55');
-    expect(values).toContain('09:30');
+    expect(values).toContain('09:20');
+    expect(values).not.toContain('09:30');
   });
 
   test('opens a fully prefilled demo form with one URL', async () => {
@@ -354,17 +355,17 @@ describe('Mini App user-simulation suite', () => {
     expect(getFormInput('phone').value).toBe('3331234567');
     expect(getFormInput('customer_name').value).toBe('Mario Rossi');
     expect(getFormInput('customer_type').value).toBe('azienda');
-    expect(getFormInput('appointment_time').value).toBe('09:30');
+    expect(getFormInput('appointment_time').value).toBe('09:20');
     expect(getFormInput('practice_type').value).toBe('preventivo');
 
     await waitFor(() => getSection('Officina'));
     await waitFor(() => getSection('Carrozzeria'));
-    await waitFor(() => getSection('Revisione'));
+    await waitFor(() => getCheckboxLabel('Revisione').querySelector('input[type="checkbox"]').checked);
 
     expect(document.querySelector('textarea[placeholder="Note generali per la pratica..."]')).toBeNull();
     expect(getSection('Officina').querySelector('textarea#notes_officina').value).toBe('Demo officina');
     expect(getSection('Carrozzeria').querySelector('textarea#notes_carrozzeria').value).toBe('Demo carrozzeria');
-    expect(getSection('Revisione').querySelector('textarea#notes_revisione').value).toBe('Demo revisione');
+    expect(getCheckboxLabel('Revisione').querySelector('input[type="checkbox"]').checked).toBe(true);
     expect(document.body.textContent).not.toMatch(/da_completare/i);
   });
 
@@ -1729,11 +1730,13 @@ describe('Mini App user-simulation suite', () => {
     mount('?plate=AB123CD');
 
     await waitFor(() => document.querySelector('form'));
+    clickElement(document.querySelector('.schedule-toggle input[type="checkbox"]'));
+    await waitFor(() => document.querySelector('#appointment_date'));
 
     setValueBySelector('#phone', '3331234567');
     setValueBySelector('#customer_name', 'Bozza Cliente');
     setValueBySelector('#appointment_date', '2026-11-01');
-    setValueBySelector('#appointment_time', '10:30');
+    setValueBySelector('#appointment_time', '10:40');
 
     clickElement(getCheckboxLabel('Officina').querySelector('input[type="checkbox"]'));
     await waitFor(() => getSection('Officina'));
@@ -1756,7 +1759,7 @@ describe('Mini App user-simulation suite', () => {
 
     expect(getFormInput('phone').value).toBe('3331234567');
     expect(getFormInput('customer_name').value).toBe('Bozza Cliente');
-    expect(getFormInput('appointment_time').value).toBe('10:30');
+    expect(getFormInput('appointment_time').value).toBe('10:40');
     expect(getSection('Officina').querySelector('input[placeholder="Descrizione lavoro..."]').value).toBe('Controllo generale');
     expect(getSection('Officina').querySelector('input[placeholder="Es. Pastiglie freno"]').value).toBe('Filtro aria');
     expect(getSection('Officina').querySelector('input[placeholder="1 pz"]').value).toBe('1 pz');
@@ -2001,17 +2004,20 @@ describe('Mini App user-simulation suite', () => {
 
   test('creates a practice with all fields, checkboxes, sections, and parts', async () => {
     axios.post.mockResolvedValueOnce({ data: { success: true, data: { id: 42 } } });
+    axios.get.mockRejectedValueOnce({ response: { status: 404 } });
 
     mount('?plate=AB123CD');
 
     await waitFor(() => document.querySelector('form'));
+    clickElement(document.querySelector('.schedule-toggle input[type="checkbox"]'));
+    await waitFor(() => document.querySelector('#appointment_date'));
 
     setValueBySelector('#plate_confirmed', 'AB123CD');
     setValueBySelector('#phone', '+393331234567');
     setValueBySelector('#customer_name', 'Mario Rossi');
     setValueBySelector('#customer_type', 'azienda');
     setValueBySelector('#appointment_date', '2026-11-15');
-    setValueBySelector('#appointment_time', '09:30');
+    setValueBySelector('#appointment_time', '09:20');
     setValueBySelector('#practice_type', 'ordine_di_lavoro');
 
     const billingCheckbox = await waitFor(() => getCheckboxLabel('Dati fatturazione da completare').querySelector('input[type="checkbox"]'));
@@ -2033,7 +2039,7 @@ describe('Mini App user-simulation suite', () => {
 
     await waitFor(() => getSection('Officina'));
     await waitFor(() => getSection('Carrozzeria'));
-    await waitFor(() => getSection('Revisione'));
+    await waitFor(() => getCheckboxLabel('Revisione').querySelector('input[type="checkbox"]').checked);
 
     const officinaSection = getSection('Officina');
     setValueWithin(officinaSection, '#notes_officina', 'Controllo rapido e diagnosi');
@@ -2056,10 +2062,6 @@ describe('Mini App user-simulation suite', () => {
     setValueWithin(carrozzeriaSection, 'input[placeholder="Descrizione lavoro..."]', 'Riparazione paraurti');
     setValueWithin(carrozzeriaSection, 'input[type="number"]', '2.5');
 
-    const revisioneSection = getSection('Revisione');
-    setValueWithin(revisioneSection, 'input[placeholder="Descrizione lavoro..."]', 'Controllo revisione');
-    setValueWithin(revisioneSection, '#notes_revisione', 'Note revisione');
-
     const submit = getButton('Salva');
     clickElement(submit);
 
@@ -2076,7 +2078,7 @@ describe('Mini App user-simulation suite', () => {
       customer_name: 'Mario Rossi',
       customer_type: 'azienda',
       billing_to_complete: true,
-      appointment_time: '09:30',
+      appointment_time: '09:20',
       practice_type: 'ordine_di_lavoro',
       internal_notes: null,
       contexts: ['officina', 'carrozzeria', 'revisione'],
@@ -2084,7 +2086,6 @@ describe('Mini App user-simulation suite', () => {
     expect(payload.sections).toEqual(expect.arrayContaining([
       expect.objectContaining({ context: 'officina' }),
       expect.objectContaining({ context: 'carrozzeria' }),
-      expect.objectContaining({ context: 'revisione' }),
     ]));
     expect(payload.parts).toEqual([
       expect.objectContaining({ context: 'officina', name: 'Filtro olio', quantity: '1 pz' }),
