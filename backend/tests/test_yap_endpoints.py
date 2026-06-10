@@ -621,7 +621,7 @@ class TestYapSyncEndpoints:
         assert "--time" in captured["args"]
         assert "10:00" in captured["args"]
 
-    def test_yap_delete_endpoint_soft_deletes_when_not_found(self, client, sample_practice, monkeypatch):
+    def test_yap_delete_endpoint_soft_deletes_when_not_found(self, client, sample_practice, db_session, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
@@ -645,6 +645,7 @@ class TestYapSyncEndpoints:
             }
 
         monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+        mark_practice_yap_touched(db_session, sample_practice["id"])
 
         response = client.request(
             "DELETE",
@@ -671,7 +672,39 @@ class TestYapSyncEndpoints:
         ids = [item["id"] for item in listed.json().get("data", [])]
         assert sample_practice["id"] not in ids
 
-    def test_yap_delete_endpoint_keeps_practice_when_blocked_by_odl(self, client, sample_practice, monkeypatch):
+    def test_yap_delete_endpoint_skips_remote_lookup_when_never_synced(self, client, sample_practice, monkeypatch):
+        monkeypatch.setenv("YAP_USERNAME", "demo")
+        monkeypatch.setenv("YAP_PASSWORD", "demo")
+
+        import main
+
+        called = {"value": False}
+
+        async def fail_if_called(*args, **kwargs):
+            called["value"] = True
+            raise AssertionError("_run_yap_script non dovrebbe partire per pratiche mai sincronizzate")
+
+        monkeypatch.setattr(main, "_run_yap_script", fail_if_called)
+
+        response = client.request(
+            "DELETE",
+            f"/practices/{sample_practice['id']}/yap/appointment?user_id=761118078",
+            json={},
+        )
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["status"] == "not_needed"
+        assert data["status_reason"] == "never_synced"
+        assert data["yap"]["attempted"] is False
+        assert called["value"] is False
+
+        listed = client.get("/api/practices?user_id=761118078")
+        assert listed.status_code == 200
+        ids = [item["id"] for item in listed.json().get("data", [])]
+        assert sample_practice["id"] not in ids
+
+    def test_yap_delete_endpoint_keeps_practice_when_blocked_by_odl(self, client, sample_practice, db_session, monkeypatch):
         monkeypatch.setenv("YAP_USERNAME", "demo")
         monkeypatch.setenv("YAP_PASSWORD", "demo")
 
@@ -686,6 +719,7 @@ class TestYapSyncEndpoints:
             }
 
         monkeypatch.setattr(main, "_run_yap_script", fake_run_yap_script)
+        mark_practice_yap_touched(db_session, sample_practice["id"])
 
         response = client.request(
             "DELETE",

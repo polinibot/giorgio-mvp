@@ -1172,6 +1172,27 @@ def _safe_practice_yap_time_arg(practice: Practice) -> str:
         return ""
 
 
+def _practice_needs_yap_delete(practice: Any) -> bool:
+    management_status = str(getattr(practice, "management_sync_status", "") or "").strip().lower()
+    return bool(
+        getattr(practice, "management_external_id", None)
+        or getattr(practice, "synced", False)
+        or getattr(practice, "management_last_sync_at", None)
+        or management_status in {
+            "synced",
+            "duplicate",
+            "agenda_synced",
+            "partial_synced",
+            "complete_synced",
+            "sync_failed",
+            "audit_failed",
+            "deleted",
+            "not_found",
+            "unknown",
+        }
+    )
+
+
 def _yap_session_fernet() -> Fernet:
     secret = settings.secret_key or settings.telegram_bot_token or "dev-yap-session-state-key"
     digest = hashlib.sha256(f"giorgio:yap-session-state:{secret}".encode("utf-8")).digest()
@@ -2572,14 +2593,7 @@ async def delete_practice(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
     _repair_practice_owner_if_needed(db, practice, user_data, access_token)
 
-    management_status = str(getattr(practice, "management_sync_status", "") or "").strip()
-    needs_yap_delete = bool(
-        getattr(practice, "management_external_id", None)
-        or
-        getattr(practice, "synced", False)
-        or getattr(practice, "management_last_sync_at", None)
-        or management_status in {"synced", "duplicate", "agenda_synced", "partial_synced", "complete_synced", "unknown"}
-    )
+    needs_yap_delete = _practice_needs_yap_delete(practice)
     if skip_yap or not needs_yap_delete:
         practice.status = PracticeStatus.DELETED
         practice.updated_by_telegram_id = user_data["id"]
@@ -3254,8 +3268,6 @@ async def delete_practice_yap_appointment(
     practice = _owned_active_practice(db, practice_id, user_data["id"], for_update=True)
     if not practice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pratica non trovata")
-    _ensure_yap_credentials("eliminare l'appuntamento su YAP")
-
     phase_timeline: List[Dict[str, Any]] = []
     phase_started_at = time.perf_counter()
     phase_started_wall = datetime.now(timezone.utc)
@@ -3277,6 +3289,51 @@ async def delete_practice_yap_appointment(
         phase_timeline.append(phase)
         phase_started_at = now
         phase_started_wall = wall_now
+
+    if not _practice_needs_yap_delete(practice):
+        close_phase("precheck", "completed", "Pratica mai sincronizzata: nessuna delete YAP necessaria.")
+        practice.status = PracticeStatus.DELETED
+        practice.synced = False
+        practice.management_sync_status = "not_needed"
+        practice.management_last_sync_at = datetime.now(timezone.utc)
+        practice.management_audit_result = None
+        practice.updated_by_telegram_id = user_data["id"]
+        db.commit()
+        _cache_invalidate_practice(practice.id)
+        close_phase("finalize", "completed", "Pratica rimossa localmente senza ricerca su YAP.")
+        return APIResponse(
+            success=True,
+            data={
+                "status": "not_needed",
+                "status_reason": "never_synced",
+                "message": "Pratica mai sincronizzata: eliminazione locale immediata.",
+                "error_code": None,
+                "next_action": None,
+                "action_target": None,
+                "retryable": False,
+                "phase_timeline": phase_timeline,
+                "telemetry": {},
+                "timing": {
+                    "started_at": request_started_at,
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "total_elapsed_ms": sum(int(phase.get("duration_ms") or 0) for phase in phase_timeline),
+                },
+                "practice": {
+                    "id": practice.id,
+                    "status": practice.status.value if hasattr(practice.status, "value") else str(practice.status),
+                    "synced": False,
+                    "management_sync_status": practice.management_sync_status,
+                    "management_last_sync_at": practice.management_last_sync_at.isoformat() if practice.management_last_sync_at else None,
+                },
+                "yap": {
+                    "attempted": False,
+                    "skipped": True,
+                    "reason": "never_synced",
+                },
+            },
+        )
+
+    _ensure_yap_credentials("eliminare l'appuntamento su YAP")
 
     date_iso = body.date or _practice_date_iso(practice)
     search = _safe_search_arg(body.search or practice.plate_confirmed or practice.plate_detected or practice.customer_name)

@@ -541,6 +541,16 @@ function formatYapChecklistValue(value) {
   return 'n.d.';
 }
 
+function practiceNeedsYapDelete(practice) {
+  const status = String(practice?.management_sync_status || '').trim().toLowerCase();
+  return Boolean(
+    practice?.management_external_id
+    || practice?.synced
+    || practice?.management_last_sync_at
+    || ['synced', 'duplicate', 'agenda_synced', 'partial_synced', 'complete_synced', 'sync_failed', 'audit_failed', 'deleted', 'not_found', 'unknown'].includes(status)
+  );
+}
+
 function buildYapChecklist({ audit, result, practiceType }) {
   const normalizedPracticeType = String(practiceType || result?.practice?.practice_type || '').trim().toLowerCase();
   const agendaState = getYapAuditChecklistState(audit, [/^agenda$/i, 'appuntamento salvato in agenda']);
@@ -3398,7 +3408,7 @@ function App() {
       rememberResponse('yap.delete');
       invalidatePracticeCaches(id);
       const phaseLabel = summarizePhaseTimeline(data.phase_timeline, data.message || 'Eliminazione YAP completata.');
-      if (data.status === 'deleted' || data.status === 'not_found') {
+      if (data.status === 'deleted' || data.status === 'not_found' || data.status === 'not_needed') {
         finishYapActionProgress(phaseLabel, 'success', 1200);
         addToast(data.status === 'not_found' ? 'Appuntamento già assente su YAP. Pratica rimossa.' : 'Appuntamento eliminato da YAP', 'success');
         setPractices((current) => current.filter((practiceItem) => String(practiceItem.id) !== String(id)));
@@ -5308,12 +5318,14 @@ function App() {
                   ? practices.find(practiceItem => String(practiceItem.id) === String(id))
                   : null;
                 const inferredTime = listPractice?.appointment_time || '';
-                await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, {
-                  data: inferredTime ? { skip_audit: true, time: inferredTime } : { skip_audit: true },
-                  params: getAuthParams(),
-                  headers: getHeaders(),
-                  timeout: 60000,
-                });
+                if (practiceNeedsYapDelete(listPractice)) {
+                  await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, {
+                    data: inferredTime ? { skip_audit: true, time: inferredTime } : { skip_audit: true },
+                    params: getAuthParams(),
+                    headers: getHeaders(),
+                    timeout: 60000,
+                  });
+                }
               } catch (yapErr) {
                 // Se non trovato su YAP, continua comunque
                 if (!yapErr?.response?.data?.detail?.includes('not_found') && 
