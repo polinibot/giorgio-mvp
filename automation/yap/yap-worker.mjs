@@ -2997,7 +2997,7 @@ async function gridAddRow(page, hasRows) {
 }
 
 // Seleziona un articolo per CODICE ESATTO dal catalogo autocomplete.
-async function gridSelectArticolo(page, rowIndex, code) {
+async function gridSelectArticolo(page, rowIndex, code, options = {}) {
   const cell = await gridCellRect(page, rowIndex, GRID_COL.articolo);
   if (!cell) return { ok: false, reason: "cell_not_found" };
   await page.mouse.click(cell.x, cell.y).catch(() => {});
@@ -3007,13 +3007,19 @@ async function gridSelectArticolo(page, rowIndex, code) {
   let picked = null;
   for (let i = 0; i < 12 && !picked; i += 1) {
     await page.waitForTimeout(250).catch(() => {});
-    picked = await safeEvaluate(page, (wanted) => {
+    picked = await safeEvaluate(page, ({ wanted, expectedPrice, preferredTerms }) => {
       const isVisible = (el) => {
         const r = el.getBoundingClientRect();
         const s = window.getComputedStyle(el);
         return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
       };
       const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toUpperCase();
+      const normalizePrice = (v) => norm(v).replace(/[^\d,.-]/g, "");
+      const priceFromText = (text) => {
+        const raw = String(text || "");
+        const match = raw.match(/VENDITA\s*([0-9]+,\d{1,4})/i);
+        return normalizePrice(match?.[1] || "");
+      };
       const pickPrimaryCode = (tr) => {
         const cells = [...tr.querySelectorAll("td, th")]
           .map((cell) => norm(cell.textContent))
@@ -3033,23 +3039,42 @@ async function gridSelectArticolo(page, rowIndex, code) {
           code: norm(bold?.textContent),
           primaryCode: pickPrimaryCode(tr),
           text: norm(tr.textContent),
+          price: priceFromText(tr.textContent),
         };
       });
       const wantedNorm = norm(wanted);
-      const exact = results.find((r) => r.primaryCode === wantedNorm);
-      const startsWith = exact || results.find((r) => r.primaryCode.startsWith(`${wantedNorm} `) || r.primaryCode.startsWith(`${wantedNorm}-`));
+      const expectedPriceNorm = normalizePrice(expectedPrice || "");
+      const preferredNeedles = Array.isArray(preferredTerms) ? preferredTerms.map((term) => norm(term)).filter(Boolean) : [];
+      const exact = results.find((r) => r.primaryCode === wantedNorm || r.code === wantedNorm);
+      const startsWithCandidates = results.filter((r) =>
+        r.primaryCode === `O${wantedNorm}`
+        || r.primaryCode.startsWith(`${wantedNorm} `)
+        || r.primaryCode.startsWith(`${wantedNorm}-`)
+        || r.primaryCode.startsWith(`O${wantedNorm}`)
+      );
+      const priceMatchedStartsWith = expectedPriceNorm
+        ? startsWithCandidates.find((r) => r.price === expectedPriceNorm)
+        : null;
+      const preferredStartsWith = preferredNeedles.length
+        ? startsWithCandidates.find((r) => preferredNeedles.some((needle) => r.text.includes(needle)))
+        : null;
+      const startsWith = exact || priceMatchedStartsWith || preferredStartsWith || startsWithCandidates[0] || null;
       const fuzzy = startsWith || results.find((r) => r.text.includes(wantedNorm) || wantedNorm.includes(r.primaryCode));
       if (fuzzy) {
         const rr = fuzzy.tr.getBoundingClientRect();
-      return {
-        x: rr.x + rr.width / 2,
-        y: rr.y + rr.height / 2,
-        codes: results.slice(0, 6).map((r) => r.primaryCode || r.code),
-        matchMode: exact ? "exact" : (startsWith ? "startswith" : "fuzzy"),
-      };
-    }
+        return {
+          x: rr.x + rr.width / 2,
+          y: rr.y + rr.height / 2,
+          codes: results.slice(0, 6).map((r) => r.primaryCode || r.code),
+          matchMode: exact ? "exact" : (priceMatchedStartsWith ? "price_match" : (preferredStartsWith ? "preferred" : (startsWith ? "startswith" : "fuzzy"))),
+        };
+      }
       return results.length ? { x: null, y: null, codes: results.slice(0, 6).map((r) => r.primaryCode || r.code) } : null;
-    }, code).catch(() => null);
+    }, {
+      wanted: code,
+      expectedPrice: options.expectedPrice || "",
+      preferredTerms: options.preferredTerms || [],
+    }).catch(() => null);
     if (picked && picked.x == null) {
       // popup presente ma nessun match esatto ancora: continua a pollare
       if (i >= 6) break;
@@ -3801,7 +3826,13 @@ async function writeWorkGrid(page, job, args = {}) {
 
     let art = { ok: false, skipped: true };
     if (row.articleQuery) {
-      art = await gridSelectArticolo(page, rowIndex, row.articleQuery);
+      const preferredTerms = row.kind === "man"
+        ? ["MANODOPERA"]
+        : (row.kind === "mac" ? ["MAQNODOPERA", "MACCHINA", "MANODOPERA"] : []);
+      art = await gridSelectArticolo(page, rowIndex, row.articleQuery, {
+        expectedPrice: row.prezzo,
+        preferredTerms,
+      });
       logAction("grid_row_articolo", { kind: row.kind, query: row.articleQuery, ...art });
     }
 
@@ -3899,7 +3930,7 @@ async function writeWorkGrid(page, job, args = {}) {
     return rows.map((tr) => {
       let hay = tr.textContent || "";
       for (const inp of tr.querySelectorAll("input")) hay += " " + (inp.value || "");
-      return hay.replace(/\s+/g, " ").trim().slice(0, 80);
+      return hay.replace(/\s+/g, " ").trim().slice(0, 240);
     });
   }).catch(() => []);
   for (const r of out.righe) {
