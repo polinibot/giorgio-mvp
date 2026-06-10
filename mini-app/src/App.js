@@ -5458,19 +5458,21 @@ function App() {
                 ? 'Ricarica pratiche demo locali'
                 : (seedingDemoPractices ? 'Creazione pratiche demo...' : `Crea ${DASHBOARD_DEMO_PRACTICES.length} pratiche esempio piene`)}
             </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={seedYapTestPractices}
-              disabled={seedingYapTestPractices}
-              style={{ marginLeft: 8 }}
-            >
-              {browserPreviewMode
-                ? 'Carica pratiche test YAP locali'
-                : (seedingYapTestPractices ? 'Creazione pratiche test YAP...' : `Crea ${YAP_TEST_BATCH_PRACTICES.length} pratiche test YAP (CN401MV)`)}
-            </button>
           </div>
         )}
+
+        <div className="detail-actions" style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={seedYapTestPractices}
+            disabled={seedingYapTestPractices}
+          >
+            {browserPreviewMode
+              ? 'Carica pratiche test YAP locali'
+              : (seedingYapTestPractices ? 'Creazione pratiche test YAP...' : `Crea ${YAP_TEST_BATCH_PRACTICES.length} pratiche test YAP (CN401MV)`)}
+          </button>
+        </div>
 
         {/* Practice list */}
         {dashboardLoading ? (
