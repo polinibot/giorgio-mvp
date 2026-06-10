@@ -13,7 +13,13 @@ DATABASE_URL = settings.database_url or "sqlite:///./giorgio.db"
 
 engine_kwargs = {}
 if DATABASE_URL.startswith("sqlite"):
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
+    # SQLite in production can block reads while another process is writing.
+    # Increase the busy timeout and enable WAL to keep dashboard reads responsive
+    # during concurrent bot/API activity.
+    engine_kwargs["connect_args"] = {
+        "check_same_thread": False,
+        "timeout": 30,
+    }
 else:
     engine_kwargs.update(pool_size=10, pool_recycle=3600, pool_pre_ping=True)
 
@@ -23,6 +29,9 @@ if DATABASE_URL.startswith("sqlite"):
     def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
         cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

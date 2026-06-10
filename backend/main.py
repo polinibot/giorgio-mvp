@@ -972,12 +972,16 @@ async def get_practice_stats(
 ):
     """Return statistics for the current user's practices."""
     telegram_id = user_data["id"]
+    started_at = time.perf_counter()
 
+    total_started = time.perf_counter()
     total = db.query(func.count(Practice.id)).filter(
         Practice.created_by_telegram_id == telegram_id,
         Practice.status != PracticeStatus.DELETED,
     ).scalar() or 0
+    total_elapsed_ms = (time.perf_counter() - total_started) * 1000
 
+    month_started = time.perf_counter()
     now = datetime.utcnow()
     first_of_month = datetime(now.year, now.month, 1)
     this_month = db.query(func.count(Practice.id)).filter(
@@ -985,15 +989,26 @@ async def get_practice_stats(
         Practice.status != PracticeStatus.DELETED,
         Practice.created_at >= first_of_month,
     ).scalar() or 0
+    month_elapsed_ms = (time.perf_counter() - month_started) * 1000
 
+    sync_started = time.perf_counter()
     pending_sync = db.query(func.count(Practice.id)).filter(
         Practice.created_by_telegram_id == telegram_id,
         Practice.status != PracticeStatus.DELETED,
         Practice.synced == False,
     ).scalar() or 0
+    sync_elapsed_ms = (time.perf_counter() - sync_started) * 1000
 
     logger.info("Stats retrieved for user %d: total=%d, this_month=%d, pending_sync=%d",
                 telegram_id, total, this_month, pending_sync)
+    logger.info(
+        "Stats timing for user %d: total=%.1fms this_month=%.1fms pending_sync=%.1fms total=%.1fms",
+        telegram_id,
+        total_elapsed_ms,
+        month_elapsed_ms,
+        sync_elapsed_ms,
+        (time.perf_counter() - started_at) * 1000,
+    )
 
     return APIResponse(success=True, data={
         "total": total,
@@ -1015,7 +1030,9 @@ async def list_practices(
 ):
     """List practices for the current user with filtering and sorting."""
     telegram_id = user_data["id"]
+    started_at = time.perf_counter()
 
+    query_started = time.perf_counter()
     query = db.query(Practice).filter(
         Practice.created_by_telegram_id == telegram_id,
         Practice.status != PracticeStatus.DELETED,
@@ -1048,7 +1065,9 @@ async def list_practices(
         query = query.order_by(Practice.customer_name.asc())
     else:  # newest/date_desc (default)
         query = query.order_by(Practice.created_at.desc())
+    query_build_elapsed_ms = (time.perf_counter() - query_started) * 1000
 
+    fetch_started = time.perf_counter()
     practices = query.with_entities(
         Practice.id,
         Practice.plate_confirmed,
@@ -1062,7 +1081,9 @@ async def list_practices(
         Practice.management_sync_status,
         Practice.management_last_sync_at,
     ).all()
+    fetch_elapsed_ms = (time.perf_counter() - fetch_started) * 1000
 
+    serialize_started = time.perf_counter()
     results = []
     for p in practices:
         results.append({
@@ -1079,8 +1100,17 @@ async def list_practices(
             "management_sync_status": p.management_sync_status,
             "management_last_sync_at": p.management_last_sync_at.isoformat() if p.management_last_sync_at else None,
         })
+    serialize_elapsed_ms = (time.perf_counter() - serialize_started) * 1000
 
     logger.info("Listed %d practices for user %d", len(results), telegram_id)
+    logger.info(
+        "Dashboard timing for user %d: build=%.1fms fetch=%.1fms serialize=%.1fms total=%.1fms",
+        telegram_id,
+        query_build_elapsed_ms,
+        fetch_elapsed_ms,
+        serialize_elapsed_ms,
+        (time.perf_counter() - started_at) * 1000,
+    )
     return APIResponse(success=True, data=results)
 
 
@@ -3974,4 +4004,3 @@ async def pydantic_validation_handler(request: Request, exc: PydanticValidationE
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
