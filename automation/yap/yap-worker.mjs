@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-09r-odl-grid-flow";
+const WORKER_BUILD = "2026-06-10r-vehicle-suggest-fix";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -5297,6 +5297,11 @@ async function fillAppointmentPopup(page, job) {
     await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
 
     // Trova la RIGA-suggerimento (CellList GWT) con la targa, fuori dall'agenda di sfondo.
+    // ATTENZIONE: l'appointment popup e' anch'esso un .gwt-DecoratedPopupPanel e contiene
+    // la targa nella propria UI — cercare globalmente con quella classe produce falsi match
+    // dentro il popup stesso invece che nel dropdown dei suggerimenti. Si cercano prima i
+    // .gwt-SuggestBoxPopup (dropdown reale), poi si applica un fallback leaf-element inside
+    // qualsiasi panel visibile.
     const findSuggestion = () => safeEvaluate(page, (targetPlate) => {
       const isVisible = (el) => {
         const r = el.getBoundingClientRect();
@@ -5304,25 +5309,52 @@ async function fillAppointmentPopup(page, job) {
         return r.width > 4 && r.height > 4 && s.display !== "none" && s.visibility !== "hidden";
       };
       const P = String(targetPlate || "").toUpperCase();
-      const panels = [...document.querySelectorAll(
+      // Panel specifici del SuggestBox (dropdown autocomplete), escluso il popup appuntamento.
+      const suggestPanels = [...document.querySelectorAll(
+        ".gwt-SuggestBoxPopup, [role='listbox']",
+      )].filter(isVisible);
+      // Tutti i panel visibili (per "nessun risultato" e fallback)
+      const allPanels = [...document.querySelectorAll(
         ".gwt-SuggestBoxPopup, .gwt-DecoratedPopupPanel, .gwt-PopupPanel, [role='listbox']",
       )].filter(isVisible);
-      if (panels.some((p) => /nessun risultato/i.test(p.textContent || ""))) return { state: "not_found" };
+      if (allPanels.some((p) => /nessun risultato/i.test(p.textContent || ""))) return { state: "not_found" };
+      // Scope di ricerca: prefer suggest panels, fallback su tutti i panel
+      const scope = suggestPanels.length > 0 ? suggestPanels : allPanels;
       let el = null;
       for (const sel of ["[__gwt_cell]", "tr[__gwt_row]", "[role='option']", ".gwt-MenuItem"]) {
         const m = [...document.querySelectorAll(sel)]
           .filter(isVisible)
+          // deve essere DENTRO uno dei panel di scope (non nel popup appuntamento)
+          .filter((e) => scope.some((p) => p.contains(e)))
           .filter((e) => (e.textContent || "").toUpperCase().includes(P))
           .filter((e) => e.getBoundingClientRect().height < 140)
           .filter((e) => !e.closest(".fc-time-grid, .fc-view-container"));
         if (m.length) { el = m[0]; break; }
       }
+      // Fallback: qualsiasi elemento leaf nei panel di scope che contiene la targa
+      if (!el) {
+        for (const panel of scope) {
+          const m = [...panel.querySelectorAll("div, td, li, span")]
+            .filter(isVisible)
+            .filter((e) => (e.textContent || "").toUpperCase().includes(P))
+            .filter((e) => {
+              const r = e.getBoundingClientRect();
+              return r.height > 4 && r.height < 80;
+            })
+            .filter((e) => !e.closest(".fc-time-grid, .fc-view-container"))
+            // preferisce elementi foglia (nessun figlio con la stessa targa)
+            .filter((e) => ![...e.querySelectorAll("div,td,li,span")].some(
+              (c) => (c.textContent || "").toUpperCase().includes(P),
+            ));
+          if (m.length) { el = m[0]; break; }
+        }
+      }
       if (el) {
         const r = el.getBoundingClientRect();
         return { state: "match", x: r.x + Math.min(r.width / 2, 120), y: r.y + (r.height / 2), label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 50) };
       }
-      const sawContent = panels.some((p) => (p.textContent || "").trim().length > 0);
-      return { state: "pending", sawContent };
+      const sawContent = allPanels.some((p) => (p.textContent || "").trim().length > 0);
+      return { state: "pending", sawContent, suggestPanelCount: suggestPanels.length };
     }, plate).catch(() => ({ state: "pending" }));
 
     let sug = { state: "pending" };
@@ -5359,7 +5391,7 @@ async function fillAppointmentPopup(page, job) {
     } else {
       vehicleState = sawPopup ? "failed" : "not_found";
     }
-    logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, sug: sug.state, label: sug.label || null, steps, vehicleState });
+    logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, sug: sug.state, label: sug.label || null, steps, vehicleState, suggestPanelCount: sug.suggestPanelCount ?? null });
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
@@ -5488,8 +5520,9 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
     const vehicleLinked = vstate === "linked";
     if (vehicleLinked) {
       present.push({ field: "veicolo", expected: `veicolo agganciato (${job.customer.plate})` });
-    } else if (vstate === "not_found" && !odlRequested) {
-      // Il veicolo non e' in anagrafica YAP: NON e' un errore, lo segnaliamo come presente/ok.
+    } else if (vstate === "not_found") {
+      // Il veicolo non e' in anagrafica YAP: NON e' un errore per nessun tipo di pratica.
+      // Il worker ha cercato e non ha trovato — non c'e' nulla da fare.
       present.push({ field: "veicolo", expected: `veicolo non in anagrafica YAP (${job.customer.plate}) — ok` });
     } else {
       missing.push({ field: "veicolo", expected: `veicolo agganciato (${job.customer.plate})`, found: "aggancio non riuscito" });
