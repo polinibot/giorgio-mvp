@@ -5571,7 +5571,7 @@ async function fillAppointmentPopup(page, job) {
         steps.push({ how: "dblclick", gone: await gone() });
       }
       await page.waitForTimeout(500).catch(() => {});
-      vehicleState = "linked"; // tentativo: confermato/corretto dall'agenda post-save
+      vehicleState = "pending_confirmation";
     } else if (sug.state === "not_found") {
       vehicleState = "not_found";
     } else {
@@ -6540,11 +6540,13 @@ async function runYapAutomation(job, args) {
     if (job.customer?.plate && popupResult) {
       const vCheck = await verifyVehicleInAgenda(page, job.customer.plate);
       logAction("vehicle_agenda_verify", vCheck);
-      if (vCheck.found) {
-        // not_found (targa non in anagrafica) resta com'e'; altrimenti decide l'agenda.
-        if (popupResult.vehicleState !== "not_found") {
-          popupResult.vehicleState = vCheck.linked ? "linked" : "failed";
-          popupResult.vehicleLinked = vCheck.linked;
+      if (popupResult.vehicleState !== "not_found") {
+        if (vCheck.linked) {
+          popupResult.vehicleState = "linked";
+          popupResult.vehicleLinked = true;
+        } else {
+          popupResult.vehicleState = "failed";
+          popupResult.vehicleLinked = false;
         }
       }
     }
@@ -6558,6 +6560,28 @@ async function runYapAutomation(job, args) {
     // PREREQUISITO: senza veicolo agganciato NON si entra in gestione pratica.
     // Qualsiasi stato diverso da "linked" blocca preventivo/ODL.
     const vehicleBlocksPractice = shouldBlockPracticeWriteForVehicle(job, popupResult);
+    if (popupResult?.vehicleState !== "linked" && job.customer?.plate) {
+      logPhase("vehicle", "not_confirmed", { plate: job.customer.plate, state: popupResult?.vehicleState || "unknown" });
+      return {
+        saved: true,
+        mode: "commit-agenda-only",
+        status: "agenda_synced",
+        putAction: {
+          detected: Boolean(putResponse),
+          status: putResponse?.status(),
+          url: putResponse?.url?.(),
+          body_excerpt: putResponseSummary,
+        },
+        warning: "Veicolo non confermato con certezza: ODL/preventivo non avviati.",
+        popup: popupResult,
+        telemetry: buildYapTelemetry({
+          runtime,
+          startedAtMs: _runStart,
+          extra: { saveAttempts: saveAttemptsUsed },
+        }),
+        message: "Appuntamento salvato, ma veicolo non confermato con certezza. ODL/preventivo bloccati.",
+      };
+    }
     if (shouldWriteOdlFromWorker(job) && vehicleBlocksPractice) {
       logPhase("odl", "skipped_no_vehicle", { plate: job.customer?.plate });
       managementWrite = {
