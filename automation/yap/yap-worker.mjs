@@ -2884,7 +2884,11 @@ function buildFieldWriteReport(job, writeReport) {
       pushField(`odl.${reparto}.materiali`, String(section.materiali_euro), Boolean(writeReport?.materials?.success), "Apri Materiali di consumo e verifica importo.");
     }
     if (section.smaltimento_applica) {
+      const wasteAmount = sectionWasteAmount(section);
       pushField(`odl.${reparto}.smaltimento`, String(section.smaltimento_percentuale ?? 2), Boolean(writeReport?.waste?.success), "Apri Smaltimento rifiuti e verifica percentuale.");
+      if (wasteAmount != null) {
+        pushField(`odl.${reparto}.smaltimento_importo`, formatGridAmount(wasteAmount), Boolean(writeReport?.waste?.amountSuccess ?? writeReport?.waste?.success), "Apri Smaltimento rifiuti e verifica importo.");
+      }
     }
     for (const part of section.ricambi || []) {
       const name = String(part?.name || part?.nome || "").trim();
@@ -2914,7 +2918,40 @@ function hasVerifiedOdlWorkspace(writeReport) {
 
 // === GRIGLIA PREVENTIVO/ODL (righe-documento, GWT CellTable) =================
 // Mappa colonne (da DOM reale, attributo yapcolumnid sui <td>).
-const GRID_COL = { tipo: 2, articolo: 3, descrizione: 4, udm: 7, qta: 8, prezzo: 9 };
+const GRID_COL = {
+  tipo: 2,
+  articolo: 3,
+  descrizione: 4,
+  cl: 5,
+  cat: 6,
+  udm: 7,
+  qta: 8,
+  prezzo: 9,
+  sconto: 10,
+  imponibile: 11,
+  iva: 12,
+};
+
+const GRID_DEFAULT_WORK_PRICES = {
+  man: 44,
+  mac: 38,
+};
+
+const GRID_DEFAULT_ROW_VALUES = {
+  cl: {
+    man: "M",
+    mac: "M",
+    part: "A",
+  },
+  cat: "101",
+  udm: "NR",
+  iva: "I22",
+  sconto: "0",
+};
+
+function gridWorkPriceForArticle(article) {
+  return GRID_DEFAULT_WORK_PRICES[String(article || "").trim().toLowerCase()] ?? null;
+}
 
 // Coordinate del centro di una cella della griglia documento (righe con td[yapcolumnid]).
 async function gridCellRect(page, rowIndex, colId) {
@@ -2981,17 +3018,24 @@ async function gridSelectArticolo(page, rowIndex, code) {
       const rows = [...document.querySelectorAll("tr")].filter((tr) =>
         !tr.querySelector("[yapcolumnid]") && isVisible(tr)
         && [...tr.querySelectorAll("span")].some((s) => /font-weight:\s*bolder/i.test(s.getAttribute("style") || "")));
-      const results = rows.map((tr) => {
-        const bold = [...tr.querySelectorAll("span")].find((s) => /font-weight:\s*bolder/i.test(s.getAttribute("style") || ""));
-        return { tr, code: norm(bold?.textContent) };
-      });
-      const exact = results.find((r) => r.code === norm(wanted));
-      if (exact) {
-        const rr = exact.tr.getBoundingClientRect();
-        return { x: rr.x + rr.width / 2, y: rr.y + rr.height / 2, codes: results.slice(0, 6).map((r) => r.code) };
-      }
-      return results.length ? { x: null, y: null, codes: results.slice(0, 6).map((r) => r.code) } : null;
-    }, code).catch(() => null);
+    const results = rows.map((tr) => {
+      const bold = [...tr.querySelectorAll("span")].find((s) => /font-weight:\s*bolder/i.test(s.getAttribute("style") || ""));
+      return { tr, code: norm(bold?.textContent), text: norm(tr.textContent) };
+    });
+    const wantedNorm = norm(wanted);
+    const exact = results.find((r) => r.code === wantedNorm);
+    const fuzzy = exact || results.find((r) => r.text.includes(wantedNorm) || wantedNorm.includes(r.code));
+    if (fuzzy) {
+      const rr = fuzzy.tr.getBoundingClientRect();
+      return {
+        x: rr.x + rr.width / 2,
+        y: rr.y + rr.height / 2,
+        codes: results.slice(0, 6).map((r) => r.code),
+        matchMode: exact ? "exact" : "fuzzy",
+      };
+    }
+    return results.length ? { x: null, y: null, codes: results.slice(0, 6).map((r) => r.code) } : null;
+  }, code).catch(() => null);
     if (picked && picked.x == null) {
       // popup presente ma nessun match esatto ancora: continua a pollare
       if (i >= 6) break;
@@ -3001,7 +3045,7 @@ async function gridSelectArticolo(page, rowIndex, code) {
   if (picked && picked.x != null) {
     await page.mouse.click(picked.x, picked.y).catch(() => {});
     await page.waitForTimeout(400).catch(() => {});
-    return { ok: true, codes: picked.codes };
+    return { ok: true, codes: picked.codes, matchMode: picked.matchMode || "exact" };
   }
   await page.keyboard.press("Escape").catch(() => {});
   return { ok: false, reason: "no_exact_match", codes: picked?.codes || [] };
@@ -3165,8 +3209,17 @@ async function gridDumpRow(page, rowIndex) {
     const txt = (id) => (row.querySelector(`td[yapcolumnid="${id}"]`)?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40);
     return {
       found: true,
-      tipo: txt(COL.tipo), articolo: txt(COL.articolo), descrizione: txt(COL.descrizione),
-      udm: txt(COL.udm), qta: txt(COL.qta), prezzo: txt(COL.prezzo),
+      tipo: txt(COL.tipo),
+      articolo: txt(COL.articolo),
+      descrizione: txt(COL.descrizione),
+      cl: txt(COL.cl),
+      cat: txt(COL.cat),
+      udm: txt(COL.udm),
+      qta: txt(COL.qta),
+      prezzo: txt(COL.prezzo),
+      sconto: txt(COL.sconto),
+      imponibile: txt(COL.imponibile),
+      iva: txt(COL.iva),
     };
   }, { rowIndex, COL: GRID_COL }).catch(() => ({ found: false }));
 }
@@ -3344,13 +3397,6 @@ function gridRowsIncludeText(rows, needle) {
   return (rows || []).some((row) => comparableGridText(row).includes(n));
 }
 
-function gridRowsIncludeManodopera(rows) {
-  return (rows || []).some((row) => {
-    const text = comparableGridText(row);
-    return /\bMAN+\b/.test(text) || /MANODOPERA/.test(text);
-  });
-}
-
 function gridWorkSections(job) {
   const order = { officina: 0, carrozzeria: 1 };
   return (job.sections || [])
@@ -3377,37 +3423,147 @@ function sectionNumber(value) {
   return value;
 }
 
+function normalizeGridQty(value) {
+  const n = sectionNumber(value);
+  return n == null ? null : String(n).trim();
+}
+
+function normalizeGridMoney(value) {
+  const n = sectionNumber(value);
+  return n == null ? null : String(n).trim();
+}
+
+function parseGridNumber(value) {
+  if (value == null || value === "") return null;
+  const raw = String(value).trim().replace(/\s+/g, "").replace(/[€]/g, "");
+  const normalized = raw
+    .replace(/\.(?=\d{3}(\D|$))/g, "")
+    .replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatGridAmount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed.toFixed(2);
+}
+
+function sectionKnownPriceTotal(section) {
+  let total = 0;
+  const manHours = parseGridNumber(section?.ore_man ?? section?.man_hours);
+  if (manHours != null) total += manHours * (gridWorkPriceForArticle("MAN") ?? 0);
+  const macHours = parseGridNumber(section?.ore_mac ?? section?.mac_hours);
+  if (macHours != null) total += macHours * (gridWorkPriceForArticle("MAC") ?? 0);
+  const materialsAmount = parseGridNumber(section?.materiali_euro ?? section?.materials_amount);
+  if (materialsAmount != null) total += materialsAmount;
+  for (const part of (section?.ricambi || [])) {
+    const qty = parseGridNumber(part?.quantity ?? part?.quantita) ?? 1;
+    const price = parseGridNumber(part?.prezzo ?? part?.price ?? part?.unit_price ?? part?.costo);
+    if (price != null) total += qty * price;
+  }
+  return total;
+}
+
+function sectionWasteAmount(section) {
+  if (!section?.smaltimento_applica) return null;
+  const percent = parseGridNumber(section?.smaltimento_percentuale ?? 2);
+  if (percent == null) return null;
+  const subtotal = sectionKnownPriceTotal(section);
+  return subtotal * (percent / 100);
+}
+
 function buildWorkGridDescriptionLines(job) {
+  return buildWorkGridRows(job);
+}
+
+function buildWorkGridRows(job) {
   const workSections = gridWorkSections(job);
   const addRepartoPrefix = workSections.length > 1;
-  const descrLines = [];
-  const pushLine = (section, kind, rawText) => {
-    const text = String(rawText || "").trim();
-    if (!text) return;
-    const reparto = String(section?.reparto || "").trim().toLowerCase();
-    const displayText = addRepartoPrefix ? `${sectionGridLabel(section)} - ${text}` : text;
-    descrLines.push({ kind, reparto, text: displayText });
+  const rows = [];
+  const withPrefix = (section, text) => {
+    const base = String(text || "").trim();
+    if (!base) return "";
+    return addRepartoPrefix ? `${sectionGridLabel(section)} - ${base}` : base;
+  };
+  const sectionWorkText = (section, kind) => {
+    const reparto = sectionGridLabel(section).toUpperCase();
+    const desc = (section?.descrizioni || []).map((d) => String(d || "").trim()).filter(Boolean);
+    const head = kind === "mac" ? "MACCHINA" : "MANODOPERA";
+    if (!desc.length) return `${head} ${reparto}`;
+    return `${head} ${reparto} PER LA ${desc.join(", ")}`;
   };
 
   for (const section of workSections) {
     for (const d of (section?.descrizioni || [])) {
-      pushLine(section, "descrizione", d);
+      const text = withPrefix(section, d);
+      if (text) rows.push({
+        kind: "descrizione",
+        reparto: String(section?.reparto || "").trim().toLowerCase(),
+        tipo: "D",
+        text,
+      });
     }
+
+    const ricambi = Array.isArray(section?.ricambi) ? section.ricambi : [];
+    for (const part of ricambi) {
+      const name = String(part?.name || part?.nome || "").trim();
+      if (!name) continue;
+      const qty = normalizeGridQty(part?.quantity ?? part?.quantita);
+      rows.push({
+        kind: "ricambio",
+        reparto: String(section?.reparto || "").trim().toLowerCase(),
+        tipo: "N",
+        articleQuery: name,
+        text: name,
+        cl: GRID_DEFAULT_ROW_VALUES.cl.part,
+        cat: GRID_DEFAULT_ROW_VALUES.cat,
+        udm: GRID_DEFAULT_ROW_VALUES.udm,
+        qta: qty || "1",
+        sconto: part?.sconto != null ? String(part.sconto).trim() : null,
+        prezzo: normalizeGridMoney(part?.prezzo ?? part?.price ?? part?.unit_price ?? part?.costo ?? null),
+        iva: GRID_DEFAULT_ROW_VALUES.iva,
+      });
+    }
+
+    const manHours = sectionNumber(section?.ore_man ?? section?.man_hours);
+    if (manHours != null) {
+      rows.push({
+        kind: "man",
+        reparto: String(section?.reparto || "").trim().toLowerCase(),
+        tipo: "N",
+        articleQuery: "MAN",
+        text: sectionWorkText(section, "man"),
+        cl: GRID_DEFAULT_ROW_VALUES.cl.man,
+        cat: GRID_DEFAULT_ROW_VALUES.cat,
+        udm: GRID_DEFAULT_ROW_VALUES.udm,
+        qta: normalizeGridQty(manHours),
+        prezzo: normalizeGridMoney(gridWorkPriceForArticle("MAN")),
+        sconto: GRID_DEFAULT_ROW_VALUES.sconto,
+        iva: GRID_DEFAULT_ROW_VALUES.iva,
+      });
+    }
+
     const macHours = sectionNumber(section?.ore_mac ?? section?.mac_hours);
-    if (macHours != null) pushLine(section, "mac", `MAC: ${macHours} h`);
-    const materialsAmount = sectionNumber(section?.materiali_euro ?? section?.materials_amount);
-    if (materialsAmount != null) pushLine(section, "materiali", `Materiali: ${materialsAmount}`);
-    if (section?.smaltimento_applica) {
-      pushLine(section, "smaltimento", `Smaltimento: ${section.smaltimento_percentuale ?? 2}%`);
-    }
-    for (const r of (section?.ricambi || [])) {
-      const name = r?.name || r?.nome;
-      const qty = r?.quantity || r?.quantita;
-      if (name) pushLine(section, "ricambio", `${String(name).trim()}${qty ? ` x ${String(qty).trim()}` : ""}`);
+    if (macHours != null) {
+      rows.push({
+        kind: "mac",
+        reparto: String(section?.reparto || "").trim().toLowerCase(),
+        tipo: "N",
+        articleQuery: "MAC",
+        text: sectionWorkText(section, "mac"),
+        cl: GRID_DEFAULT_ROW_VALUES.cl.mac,
+        cat: GRID_DEFAULT_ROW_VALUES.cat,
+        udm: GRID_DEFAULT_ROW_VALUES.udm,
+        qta: normalizeGridQty(macHours),
+        prezzo: normalizeGridMoney(gridWorkPriceForArticle("MAC")),
+        sconto: GRID_DEFAULT_ROW_VALUES.sconto,
+        iva: GRID_DEFAULT_ROW_VALUES.iva,
+      });
     }
   }
 
-  return descrLines;
+  return rows;
 }
 
 // Orchestratore: scrive le righe del documento (Preventivo/ODL).
@@ -3440,72 +3596,53 @@ async function writeWorkGrid(page, job, args = {}) {
   logAction("grid_snapshot_before", await snapshotWorkGrid(page));
 
   const out = { ok: true, changed: false, manodopera: null, sections: workSections.map((s) => String(s?.reparto || "").trim()).filter(Boolean) };
-  if (manHours != null) {
-    if (gridRowsIncludeManodopera(existingRows)) {
-      logAction("grid_man_skip_existing", { reparto: String(manSection?.reparto || "").trim(), value: manHours });
-      out.manodopera = {
-        expected: true,
-        reparto: String(manSection?.reparto || "").trim(),
-        added: false,
-        existing: true,
-        articolo: true,
-        qta: true,
-        readback: { found: true, existing: true },
-      };
-    } else {
-      const hasRows = existingRows.length > 0;
-      const added = await gridAddRow(page, hasRows);
-      out.changed = out.changed || Boolean(added.ok);
-      logAction("grid_add_row", added);
-      const rc = await gridCellRect(page, 0, GRID_COL.articolo);
-      const newRow = Math.max(0, (rc?.rowCount || 1) - 1);
-      const art = await gridSelectArticolo(page, newRow, "MAN");
-      logAction("grid_articolo", { row: newRow, code: "MAN", ...art });
-      let qta = null;
-      if (art.ok) {
-        qta = await gridSetCell(page, newRow, GRID_COL.qta, manHours);
-        logAction("grid_qta", { row: newRow, value: manHours, ...qta });
-      }
-      const after = await gridDumpRow(page, newRow);
-      logAction("grid_row_after", after);
-      logAction("grid_snapshot_after_man", await snapshotWorkGrid(page));
-      out.manodopera = {
-        expected: true,
-        reparto: String(manSection?.reparto || "").trim(),
-        added: added.ok,
-        articolo: art.ok,
-        qta: Boolean(qta?.ok),
-        readback: after,
-      };
-    }
-  }
 
-  // Descrizioni libere + dati carrozzeria/ricambi come righe descrittive.
-  const descrLines = buildWorkGridDescriptionLines(job);
+  const gridRows = buildWorkGridRows(job);
   out.righe = [];
-  let addedDescrRows = 0;
-  for (const line of descrLines) {
-    if (gridRowsIncludeText(existingRows, line.text)) {
-      logAction("grid_desc_skip_existing", { kind: line.kind, text: line.text.slice(0, 60) });
-      out.righe.push({ ...line, typed: false, written: true, existing: true });
+  let addedGridRows = 0;
+  for (const row of gridRows) {
+    const rowKey = `${row.tipo}:${row.articleQuery || row.text || row.kind}`;
+    if (gridRowsIncludeText(existingRows, row.text) || (row.articleQuery && gridRowsIncludeText(existingRows, row.articleQuery))) {
+      logAction("grid_row_skip_existing", { kind: row.kind, text: row.text.slice(0, 60) });
+      out.righe.push({ ...row, typed: false, written: true, existing: true });
       continue;
     }
-    const hasRows = existingRows.length > 0 || addedDescrRows > 0;
+    const hasRows = existingRows.length > 0 || addedGridRows > 0;
     const added = await gridAddRow(page, hasRows);
     out.changed = out.changed || Boolean(added.ok);
-    addedDescrRows += 1;
+    addedGridRows += 1;
     await page.waitForTimeout(150).catch(() => {}); // gridAddRow ha gia' la sua attesa interna
-    const tipo = await gridSetLastRowTipo(page, "D");
-    logAction("grid_tipo", {
-      kind: line.kind,
-      text: line.text.slice(0, 30),
+    const tipo = await gridSetLastRowTipo(page, row.tipo || "D");
+    logAction("grid_row_tipo", {
+      kind: row.kind,
+      text: row.text.slice(0, 30),
       added: added.ok,
       ...tipo,
     });
-    // Scrive direttamente nell'input Descrizione (il piu' largo) della riga in modifica.
-    const set = await gridTypeDescrizione(page, line.text);
-    // Verifica immediata: il testo compare in una riga (testo OPPURE valore di un input)?
-    // Le celle editabili tengono il valore nell'<input>, che NON sta in textContent.
+    const rowIndex = existingRows.length + addedGridRows - 1;
+
+    let art = { ok: false, skipped: true };
+    if (row.articleQuery) {
+      art = await gridSelectArticolo(page, rowIndex, row.articleQuery);
+      logAction("grid_row_articolo", { kind: row.kind, query: row.articleQuery, ...art });
+    }
+
+    const setDescr = row.text ? await gridTypeDescrizione(page, row.text) : { ok: true, skipped: true };
+    const writeCell = async (field, value) => {
+      if (value == null || value === "") return null;
+      const res = await gridSetCell(page, rowIndex, GRID_COL[field], value);
+      logAction("grid_row_cell", { kind: row.kind, field, value: String(value).slice(0, 30), ...res });
+      return res;
+    };
+
+    await writeCell("cl", row.cl);
+    await writeCell("cat", row.cat);
+    await writeCell("udm", row.udm);
+    await writeCell("qta", row.qta);
+    await writeCell("prezzo", row.prezzo);
+    await writeCell("sconto", row.sconto);
+    await writeCell("iva", row.iva);
+
     const inGridNow = await safeEvaluate(page, (needle) => {
       const n = String(needle || "").toUpperCase();
       const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]"));
@@ -3515,20 +3652,36 @@ async function writeWorkGrid(page, job, args = {}) {
         if (hay.toUpperCase().includes(n)) return { found: true, rowIndex: i };
       }
       return { found: false, rowCount: rows.length };
-    }, line.text).catch(() => ({ found: false }));
-    logAction("grid_desc", {
-      kind: line.kind, text: line.text.slice(0, 30), added: added.ok,
-      descrInput: set.target, inputValue: set.value, inGridNow: inGridNow.found,
+    }, row.text).catch(() => ({ found: false }));
+    logAction("grid_row", {
+      kind: row.kind,
+      key: rowKey,
+      text: row.text.slice(0, 30),
+      added: added.ok,
+      descrInput: setDescr.target,
+      inputValue: setDescr.value,
+      article: art.ok,
+      inGridNow: inGridNow.found,
     });
-    // typed = ho digitato (l'input ha accettato); written = lo verifico ONESTAMENTE dopo, sotto.
-    out.righe.push({ ...line, typed: Boolean(set.value && set.value.length > 0), written: false });
+    if (!out.manodopera && (row.kind === "man" || row.kind === "mac")) {
+      out.manodopera = {
+        expected: true,
+        reparto: row.reparto,
+        added: added.ok,
+        articolo: art.ok,
+        qta: row.qta != null,
+        readback: await gridDumpRow(page, rowIndex),
+      };
+      logAction("grid_lavoro_after", out.manodopera.readback);
+    }
+    out.righe.push({ ...row, typed: Boolean(setDescr.value && setDescr.value.length > 0), written: false, article: Boolean(art.ok) });
   }
 
   // FLUSH ultima riga: una riga GWT si committa quando perde il focus, cosa che
   // avviene al gridAddRow SUCCESSIVO. L'ultima riga digitata non ha un "dopo",
   // quindi aggiungo una riga civetta per forzarne il commit (poi resta vuota in coda,
   // come la riga-aggiungi che ogni griglia ha gia').
-  if (addedDescrRows) {
+  if (addedGridRows) {
     await gridAddRow(page, true).catch(() => {});
     await page.waitForTimeout(450).catch(() => {});
   }
@@ -4461,6 +4614,31 @@ async function writePracticeAndOdl(page, job, args) {
       writeReport.waste.success = writeReport.waste.success || smaltOk;
       if (!smaltOk && !writeReport.waste.error) writeReport.waste.error = "waste_field_not_found";
       if (sectionDebug) sectionDebug.fields.smaltimento = smaltOkResult?.debug || null;
+
+      const smaltAmount = sectionWasteAmount(section);
+      if (smaltAmount != null) {
+        writeReport.waste.amountAttempted = true;
+        const smaltAmountText = formatGridAmount(smaltAmount);
+        const smaltAmountResult = await fillWithRetry(
+          page,
+          [
+            [...repartoKeys, "smaltimento", "importo"],
+            [...repartoKeys, "smaltimento", "prezzo"],
+            [...repartoKeys, "smaltimento", "euro"],
+            [...repartoKeys, "smaltimento rifiuti", "importo"],
+            [...repartoKeys, "smaltimento rifiuti", "prezzo"],
+            [...repartoKeys, "rifiuti", "totale"],
+          ],
+          smaltAmountText,
+          {},
+          { debug: args.debug, fieldId: `odl.${reparto}.smaltimento_importo`, returnDebug: args.debug },
+        );
+        const smaltAmountOk = Boolean(smaltAmountResult?.ok ?? smaltAmountResult);
+        writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltAmountOk;
+        writeReport.waste.success = writeReport.waste.success || smaltAmountOk;
+        if (!smaltAmountOk && !writeReport.waste.amountError) writeReport.waste.amountError = "waste_amount_field_not_found";
+        if (sectionDebug) sectionDebug.fields.smaltimentoImporto = smaltAmountResult?.debug || null;
+      }
     }
     if ((section.ricambi || []).length) {
       writeReport.parts.attempted = true;

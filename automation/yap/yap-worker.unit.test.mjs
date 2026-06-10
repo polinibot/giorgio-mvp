@@ -70,6 +70,8 @@ test("buildFieldWriteReport uses canonical field expectations", () => {
 
   assert.ok(fields.some((field) => field.field_id === "odl.officina.man" && field.expected === "MAN: 1"));
   assert.ok(fields.some((field) => field.field_id === "odl.officina.mac" && field.expected === "MAC: 0.5"));
+  assert.ok(fields.some((field) => field.field_id === "odl.officina.smaltimento" && field.expected === "2"));
+  assert.ok(fields.some((field) => field.field_id === "odl.officina.smaltimento_importo" && field.expected === "1.51"));
   assert.ok(fields.some((field) => field.field_id === "odl.officina.ricambio.Filtro olio" && field.expected === "Filtro olio x 1"));
 });
 
@@ -110,7 +112,7 @@ test("preventivo work contexts use preventivi page", () => {
   assert.deepEqual(plan.agenda.delegatedToYap, ["pratica", "odl_base"]);
 });
 
-test("carrozzeria preventivo grid lines include MAC materials waste and parts", () => {
+test("carrozzeria preventivo grid rows include description, part, and labor fields", () => {
   const lines = buildWorkGridDescriptionLines({
     sections: [{
       reparto: "carrozzeria",
@@ -124,11 +126,40 @@ test("carrozzeria preventivo grid lines include MAC materials waste and parts", 
   });
 
   assert.deepEqual(lines, [
-    { kind: "descrizione", reparto: "carrozzeria", text: "Ripristino paraurti" },
-    { kind: "mac", reparto: "carrozzeria", text: "MAC: 0.8 h" },
-    { kind: "materiali", reparto: "carrozzeria", text: "Materiali: 333.7" },
-    { kind: "smaltimento", reparto: "carrozzeria", text: "Smaltimento: 2%" },
-    { kind: "ricambio", reparto: "carrozzeria", text: "Vernice metallizzata x 1" },
+    {
+      kind: "descrizione",
+      reparto: "carrozzeria",
+      tipo: "D",
+      text: "Ripristino paraurti",
+    },
+    {
+      kind: "ricambio",
+      reparto: "carrozzeria",
+      tipo: "N",
+      articleQuery: "Vernice metallizzata",
+      text: "Vernice metallizzata",
+      cl: "A",
+      cat: "101",
+      udm: "NR",
+      qta: "1",
+      sconto: null,
+      prezzo: null,
+      iva: "I22",
+    },
+    {
+      kind: "mac",
+      reparto: "carrozzeria",
+      tipo: "N",
+      articleQuery: "MAC",
+      text: "MACCHINA CARROZZERIA PER LA Ripristino paraurti",
+      cl: "M",
+      cat: "101",
+      udm: "NR",
+      qta: "0.8",
+      prezzo: "38",
+      sconto: "0",
+      iva: "I22",
+    },
   ]);
 });
 
@@ -142,7 +173,7 @@ test("mixed officina and carrozzeria grid lines keep reparto context", () => {
 
   assert.deepEqual(lines.map((line) => line.text), [
     "Officina - Tagliando",
-    "Officina - Filtro olio x 1",
+    "Filtro olio",
     "Carrozzeria - Lucidatura",
   ]);
 });
