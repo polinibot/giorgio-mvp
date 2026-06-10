@@ -2966,10 +2966,39 @@ function App() {
   const [yapLogCopyStatus, setYapLogCopyStatus] = useState('');
   const [yapActionProgress, setYapActionProgress] = useState(null);
 
+  // Recupero ONESTO dell'esito dopo una caduta di rete sul POST lungo di sync: il worker
+  // gira ancora / ha finito e il backend ha gia' persistito l'esito (audit + worker log).
+  // Pollo la pratica finche' compare un esito FRESCO (management_last_sync_at >= inizio
+  // sync) e terminale, poi lo ricostruisco nel formato risultato (con log completo).
+  const recoverPersistedSyncResult = useCallback(async (id, sinceMs) => {
+    const deadline = Date.now() + 210000; // ~3.5 min (worker timeout ~230s)
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+      let practice = null;
+      try {
+        const res = await axios.get(`${API_BASE_URL}/api/practices/${id}`, {
+          params: getAuthParams(), headers: getHeaders(), timeout: 15000,
+        });
+        practice = res?.data?.data || res?.data || null;
+      } catch (_) { continue; }
+      if (!practice) continue;
+      const lastSyncMs = practice.management_last_sync_at ? Date.parse(practice.management_last_sync_at) : 0;
+      const status = String(practice.management_sync_status || '').toLowerCase();
+      const terminal = ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate', 'sync_failed'].includes(status);
+      // -90s di tolleranza per skew di clock frontend/server.
+      if (terminal && lastSyncMs && lastSyncMs >= sinceMs - 90000) {
+        const base = normalizeYapResult({ status: practice.management_sync_status, practice }, {});
+        return mergeYapResultWithPersistedAudit(base, practice);
+      }
+    }
+    return null;
+  }, [getAuthParams, getHeaders]);
+
   const syncToYap = useCallback(async (id, options = {}) => {
     const silent = options.silent || false;
     const apiOptions = { ...options };
     delete apiOptions.silent;
+    const syncStartedAtMs = Date.now();
     const currentSync = yapSyncRequestRef.current;
     if (currentSync?.practiceId != null) {
       if (String(currentSync.practiceId || '') === String(id || '')) {
@@ -3043,6 +3072,35 @@ function App() {
           '\nphases:', JSON.stringify(detail.worker_phases || [], null, 2),
           '\nstderr_tail:\n', detail.stderr_tail || '');
       }
+      // RETE CADUTA sul POST lungo: NON dichiarare un falso fallimento. Il worker quasi
+      // sicuramente gira ancora / ha finito e il backend ha persistito l'esito completo
+      // (audit + worker log). Lo recuperiamo in polling e mostriamo QUELLO.
+      const isNetworkError = !err?.response
+        && (err?.code === 'ERR_NETWORK' || err?.code === 'ECONNABORTED'
+            || /network|timeout/i.test(String(err?.message || '')));
+      if (isNetworkError) {
+        if (!silent) updateYapActionProgress({ percent: 92, label: 'Rete interrotta: recupero esito dal server...' });
+        const recovered = await recoverPersistedSyncResult(id, syncStartedAtMs);
+        if (recovered) {
+          setYapLastResult(recovered);
+          rememberResponse('yap.sync');
+          invalidatePracticeCaches(id);
+          loadDetail(id);
+          const tone = recovered.status === 'complete_synced' ? 'success'
+            : (recovered.status === 'sync_failed' ? 'error' : 'warning');
+          if (!silent) addToast(recovered.message || 'Esito YAP recuperato dopo interruzione di rete.', tone);
+          if (!silent) finishYapActionProgress(recovered.message || 'Esito YAP recuperato.', recovered.status === 'sync_failed' ? 'error' : 'success', 1200);
+          return recovered;
+        }
+        // Non recuperato entro il timeout: messaggio onesto (niente "errore di rete" secco).
+        const pending = buildYapErrorResult(err, 'sync_failed');
+        pending.message = 'Rete interrotta durante il sync. Il worker potrebbe essere ancora in corso: attendi qualche secondo e premi "Verifica YAP".';
+        setYapLastResult(pending);
+        if (!silent) addToast(pending.message, 'warning');
+        if (!silent) finishYapActionProgress(pending.message, 'error', 0);
+        return pending;
+      }
+
       const errorResult = buildYapErrorResult(err, 'sync_failed');
       setYapLastResult(errorResult);
       if (!silent) addToast(errorResult.message, 'error');
@@ -3053,7 +3111,7 @@ function App() {
       yapSyncRequestRef.current = { practiceId: null, promise: null };
       setYapSyncLoading(false);
     }
-  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, rememberRequest, rememberResponse, rememberError]);
+  }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, recoverPersistedSyncResult, rememberRequest, rememberResponse, rememberError]);
 
   const deleteYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
