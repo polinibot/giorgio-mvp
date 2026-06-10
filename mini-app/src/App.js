@@ -3318,7 +3318,9 @@ function App() {
       rememberRequest('yap.sync', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/sync`, params: getAuthParams(), headers: getHeaders() });
       // NON ritentare in automatico: la sync e' un POST non idempotente che apre il
       // browser e scrive su YAP. Il retry raddoppiava l'esecuzione ("appena finito, riparte").
-      const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 240000, signal: abortController.signal });
+      // 340s: worker sync (210s) + attesa lock YAP (fino a 100s). Con 240s la
+      // richiesta abortiva durante la contesa del lock con un falso errore di rete.
+      const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/sync`, apiOptions, { params: getAuthParams(), headers: getHeaders(), timeout: 340000, signal: abortController.signal });
       const data = normalizeYapOutcome(res.data?.data || {}, { dryRun: Boolean(apiOptions.dry_run) });
       setYapLastResult(data);
       rememberResponse('yap.sync');
@@ -3498,7 +3500,8 @@ function App() {
     try {
       rememberRequest('yap.audit', { method: 'POST', url: `${API_BASE_URL}/practices/${id}/yap/audit`, params: getAuthParams(), headers: getHeaders() });
       // NON ritentare in automatico: l'audit apre il browser; un retry lanciava un secondo run.
-      const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 275000, signal: auditAbortController.signal });
+      // 340s: worker audit (240s) + attesa lock YAP (fino a 100s).
+      const res = await axios.post(`${API_BASE_URL}/practices/${id}/yap/audit`, options, { params: getAuthParams(), headers: getHeaders(), timeout: 340000, signal: auditAbortController.signal });
       const data = normalizeYapOutcome(res.data?.data || {});
       rememberResponse('yap.audit');
       invalidatePracticeCaches(id);

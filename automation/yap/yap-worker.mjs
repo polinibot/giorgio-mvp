@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-10v-chip-hover-article-final-check";
+const WORKER_BUILD = "2026-06-10w-descr-only-retry";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -3227,8 +3227,11 @@ async function gridSetCell(page, rowIndex, colId, value) {
   // In ODL la selezione articolo committa la riga: il primo dblclick sulla cella
   // puo' non aprire l'editor (activeElement resta BODY). Riprova fino a 3 volte,
   // ricalcolando le coordinate (la riga puo' essersi spostata al re-render).
+  // Il retry vale solo per la descrizione: cat/udm sono derivate dall'articolo e
+  // non diventano mai INPUT — ritentarle sprecherebbe ~5s a riga articolo.
+  const maxAttempts = colId === GRID_COL.descrizione ? 3 : 1;
   let before = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const cell = await gridCellRect(page, rowIndex, colId);
     if (!cell) return { ok: false, reason: "cell_not_found" };
     await page.mouse.dblclick(cell.x, cell.y).catch(() => {});
