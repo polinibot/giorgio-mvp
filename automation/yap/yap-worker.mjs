@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-10r-vehicle-suggest-fix";
+const WORKER_BUILD = "2026-06-10s-odl-tab-cell-commit";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -3126,7 +3126,10 @@ async function gridSetCell(page, rowIndex, colId, value) {
     const ae = document.activeElement;
     return ae ? { tag: ae.tagName, cls: (ae.className || "").slice(0, 40), val: (ae.value || "").slice(0, 30) } : null;
   }).catch(() => null);
-  await page.keyboard.press("Enter").catch(() => {});
+  // Tab invece di Enter: Enter in ODL committa immediatamente la riga (chiude tutti gli
+  // input), Tab sposta il focus alla cella successiva mantenendo la riga in modifica.
+  // Effetto: dopo la descrizione, qta/prezzo restano INPUT editabili in entrambi i docKind.
+  await page.keyboard.press("Tab").catch(() => {});
   await page.waitForTimeout(220).catch(() => {});
   return { ok: true, before, afterType, typedInActive: Boolean(afterType?.val && afterType.val.length > 0) };
 }
