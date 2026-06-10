@@ -18,6 +18,9 @@ import {
   toYapTime,
   addMinutes,
   normalizeAppointmentTime,
+  getYapVisibleStartTime,
+  getYapVisibleEndTime,
+  isYapTimeOutsideVisibleRange,
   normalize,
   getYapSlotMinutes,
   ROOT_DIR,
@@ -572,7 +575,10 @@ function sanitizeFoundValue(field, value) {
   return raw;
 }
 
-function buildAuditHint(field) {
+function buildAuditHint(field, expected = "", reason = "") {
+  if (field.group === "agenda" && field.kind === "time" && reason === "orario_fuori_fascia") {
+    return `Orario fuori fascia YAP: usa un orario tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}.`;
+  }
   if (field.group === "agenda") return "Apri popup appuntamento e verifica Cosa/Quando/Dalle/Alle.";
   if (field.group === "tags") return "Apri popup appuntamento e riallinea i tag richiesti.";
   if (field.group === "notes") return "Apri Gestione pratica e controlla note interne/reparto.";
@@ -585,7 +591,10 @@ function buildAuditHint(field) {
 
 function buildMismatchReason(field, expected, actual) {
   if (!actual) return "campo_non_rilevato";
-  if (field.kind === "time") return "orario_diverso";
+  if (field.kind === "time") {
+    if (isYapTimeOutsideVisibleRange(expected)) return "orario_fuori_fascia";
+    return "orario_diverso";
+  }
   if (field.kind === "date") return "data_diversa";
   if (field.kind === "number_contains") return "valore_numerico_diverso";
   if (field.kind === "contains") return "testo_atteso_non_trovato";
@@ -638,6 +647,7 @@ function buildAuditFeedback(present, missing, mismatch) {
       nextSteps.push(issue.hint);
     }
   }
+  const timeIssue = blockers.find((issue) => issue?.reason === "orario_fuori_fascia");
   const topBlockers = blockers.slice(0, 6).map((item) => ({
     label: item.label || item.field,
     group: item.group,
@@ -646,9 +656,11 @@ function buildAuditFeedback(present, missing, mismatch) {
     found: item.found_preview || previewValue(item.found),
     hint: item.hint || null,
   }));
-  const summary = blockers.length
-    ? `Priorita': ${topBlockers.slice(0, 3).map((item) => item.label).join(" • ")}`
-    : "Nessun blocco rilevato.";
+  const summary = timeIssue
+    ? `Orario fuori fascia YAP: ${timeIssue.expected_preview || previewValue(timeIssue.expected)} non è valido. Usa un orario tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}.`
+    : (blockers.length
+      ? `Priorita': ${topBlockers.slice(0, 3).map((item) => item.label).join(" • ")}`
+      : "Nessun blocco rilevato.");
   return {
     summary,
     totalBlockers: blockers.length,
@@ -670,7 +682,7 @@ function classifyAudit(fields, found) {
       continue;
     }
     const reason = buildMismatchReason(field, field.expected, actual);
-    const hint = buildAuditHint(field);
+    const hint = buildAuditHint(field, field.expected, reason);
     if (actual) {
       mismatch.push({
         ...field,
@@ -696,6 +708,7 @@ function classifyAudit(fields, found) {
   let status = "sync_failed";
   let message = "Appuntamento YAP non verificato.";
   let statusReason = "appointment_not_verified";
+  const timeIssue = [...present, ...missing, ...mismatch].find((field) => field?.reason === "orario_fuori_fascia");
 
   if (agendaPresent && !missing.length && !mismatch.length) {
     status = "complete_synced";
@@ -705,6 +718,12 @@ function classifyAudit(fields, found) {
     status = "partial_synced";
     message = "Agenda presente, ma verifica incompleta su note/ODL/materiali/ricambi/smaltimento.";
     statusReason = `strict_mismatch_missing_${missing.length}_mismatch_${mismatch.length}`;
+  }
+
+  if (timeIssue) {
+    const expectedTime = timeIssue.expected_preview || previewValue(timeIssue.expected);
+    const foundTime = timeIssue.found_preview || previewValue(timeIssue.found);
+    message = `Orario fuori fascia YAP: hai chiesto ${expectedTime}, ma YAP mostra ${foundTime || "08.00"}. Usa un orario tra ${getYapVisibleStartTime()} e ${getYapVisibleEndTime()}.`;
   }
 
   const feedback = buildAuditFeedback(present, missing, mismatch);

@@ -10,6 +10,8 @@ export const YAP_SESSION_STATE = process.env.YAP_SESSION_STATE || path.join(ROOT
 export const YAP_APPOINTMENT_DELETE_CONFIRM = "Confermi l'eliminazione dell'appuntamento?";
 export const YAP_ODL_DELETE_CONFIRM = "Confermi di voler eliminare l'ordine di lavoro?";
 export const DEFAULT_YAP_SLOT_MINUTES = 20;
+export const DEFAULT_YAP_VISIBLE_START_TIME = "08:00";
+export const DEFAULT_YAP_VISIBLE_END_TIME = "18:00";
 const DEFAULT_CHROMIUM_PATHS = [
   "/usr/bin/chromium",
   "/usr/bin/chromium-browser",
@@ -22,6 +24,19 @@ export function getYapSlotMinutes() {
   const raw = String(process.env.YAP_SLOT_MINUTES || DEFAULT_YAP_SLOT_MINUTES).trim();
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_YAP_SLOT_MINUTES;
+}
+
+function normalizeVisibleTime(rawValue, fallback) {
+  const raw = String(rawValue || "").trim();
+  return /^\d{2}:\d{2}$/.test(raw) ? raw : fallback;
+}
+
+export function getYapVisibleStartTime() {
+  return normalizeVisibleTime(process.env.YAP_VISIBLE_START_TIME, DEFAULT_YAP_VISIBLE_START_TIME);
+}
+
+export function getYapVisibleEndTime() {
+  return normalizeVisibleTime(process.env.YAP_VISIBLE_END_TIME, DEFAULT_YAP_VISIBLE_END_TIME);
 }
 
 export function normalize(value) {
@@ -53,11 +68,20 @@ export function toYapTime(time) {
 
 function parseTimeToMinutes(time) {
   const raw = String(time || "").trim();
-  if (!/^\d{2}:\d{2}$/.test(raw)) {
+  if (!/^\d{2}[:.]\d{2}$/.test(raw)) {
     throw new Error(`Ora non valida: ${raw}. Atteso formato HH:MM`);
   }
-  const [hours, minutes] = raw.split(":").map(Number);
+  const [hours, minutes] = raw.replace(".", ":").split(":").map(Number);
   return hours * 60 + minutes;
+}
+
+export function isYapTimeOutsideVisibleRange(time) {
+  const raw = String(time || "").trim();
+  if (!raw) return false;
+  const timeMinutes = parseTimeToMinutes(raw);
+  const startMinutes = parseTimeToMinutes(getYapVisibleStartTime());
+  const endMinutes = parseTimeToMinutes(getYapVisibleEndTime());
+  return timeMinutes < startMinutes || timeMinutes > endMinutes;
 }
 
 function formatMinutes(totalMinutes) {

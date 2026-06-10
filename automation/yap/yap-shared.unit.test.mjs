@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   acquireYapProfileLease,
   buildYapProfileLockPath,
+  isYapTimeOutsideVisibleRange,
   shouldBreakYapProfileLock,
   waitForAgendaEventPopulation,
   evalWithTimeout,
@@ -99,6 +100,14 @@ test("waitForAgendaEventPopulation confirms a truly empty agenda only after repe
   assert.equal(settled.visibleEventCount, 0);
   assert.equal(settled.agendaSettle.emptyConfirmed, true);
   assert.ok(settled.agendaSettle.polls >= 1);
+});
+
+test("isYapTimeOutsideVisibleRange recognizes the default visible window", () => {
+  assert.equal(isYapTimeOutsideVisibleRange("00.40"), true);
+  assert.equal(isYapTimeOutsideVisibleRange("07:59"), true);
+  assert.equal(isYapTimeOutsideVisibleRange("08:00"), false);
+  assert.equal(isYapTimeOutsideVisibleRange("18:00"), false);
+  assert.equal(isYapTimeOutsideVisibleRange("18:01"), true);
 });
 
 
