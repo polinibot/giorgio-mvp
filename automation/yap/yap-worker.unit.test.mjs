@@ -112,6 +112,21 @@ test("preventivo work contexts use preventivi page", () => {
   assert.deepEqual(plan.agenda.delegatedToYap, ["pratica", "odl_base"]);
 });
 
+test("officina non-preventivo uses ordini di lavoro page", () => {
+  const mapping = {
+    contexts: ["officina"],
+    anagrafica: { targa: "GA019BC" },
+    agenda: { data: "2026-11-24", ora: "10:20", durata_minuti: 20, tipo_pratica: "officina" },
+    lavorazioni: [{ reparto: "officina", descrizioni: ["Tagliando completo"] }],
+  };
+
+  const plan = buildManagementPlan({ mapping });
+
+  assert.equal(plan.odl.page, "ordini di lavoro");
+  assert.equal(plan.odl.pageLabel, "Ordini di lavoro");
+  assert.equal(plan.odl.yapMenu[0], "Ordini di lavoro");
+});
+
 test("carrozzeria preventivo grid rows include description, part, and labor fields", () => {
   const lines = buildWorkGridDescriptionLines({
     sections: [{
@@ -161,6 +176,25 @@ test("carrozzeria preventivo grid rows include description, part, and labor fiel
       iva: "I22",
     },
   ]);
+});
+
+test("grid rows do not emit materials or waste as document lines", () => {
+  const lines = buildWorkGridDescriptionLines({
+    sections: [{
+      reparto: "officina",
+      descrizioni: ["Tagliando"],
+      ore_man: 1,
+      materiali_euro: 12.5,
+      smaltimento_applica: true,
+      smaltimento_percentuale: 2,
+      ricambi: [{ name: "Filtro olio", quantity: 1 }],
+    }],
+  });
+
+  assert.equal(lines.some((line) => line.kind === "materiali"), false);
+  assert.equal(lines.some((line) => line.kind === "smaltimento"), false);
+  assert.equal(lines.some((line) => line.kind === "man"), true);
+  assert.equal(lines.some((line) => line.kind === "ricambio"), true);
 });
 
 test("mixed officina and carrozzeria grid lines keep reparto context", () => {

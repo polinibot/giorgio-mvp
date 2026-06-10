@@ -3465,12 +3465,46 @@ function sectionKnownPriceTotal(section) {
   return total;
 }
 
-function sectionWasteAmount(section) {
+function sectionWasteDetails(section) {
   if (!section?.smaltimento_applica) return null;
   const percent = parseGridNumber(section?.smaltimento_percentuale ?? 2);
   if (percent == null) return null;
-  const subtotal = sectionKnownPriceTotal(section);
-  return subtotal * (percent / 100);
+  const manHours = parseGridNumber(section?.ore_man ?? section?.man_hours);
+  const macHours = parseGridNumber(section?.ore_mac ?? section?.mac_hours);
+  const materialsAmount = parseGridNumber(section?.materiali_euro ?? section?.materials_amount);
+  const pricedParts = [];
+  for (const part of (section?.ricambi || [])) {
+    const qty = parseGridNumber(part?.quantity ?? part?.quantita) ?? 1;
+    const price = parseGridNumber(part?.prezzo ?? part?.price ?? part?.unit_price ?? part?.costo);
+    if (price == null) continue;
+    pricedParts.push({
+      name: String(part?.name || part?.nome || "").trim(),
+      qty,
+      price,
+      total: Number((qty * price).toFixed(2)),
+    });
+  }
+  const subtotal = Number(sectionKnownPriceTotal(section).toFixed(2));
+  const amount = Number((subtotal * (percent / 100)).toFixed(2));
+  return {
+    reparto: String(section?.reparto || "").trim().toLowerCase() || null,
+    percent,
+    subtotal,
+    amount,
+    components: {
+      manHours,
+      manRate: manHours != null ? (gridWorkPriceForArticle("MAN") ?? null) : null,
+      macHours,
+      macRate: macHours != null ? (gridWorkPriceForArticle("MAC") ?? null) : null,
+      materialsAmount,
+      pricedParts,
+    },
+  };
+}
+
+function sectionWasteAmount(section) {
+  const details = sectionWasteDetails(section);
+  return details ? details.amount : null;
 }
 
 function buildWorkGridDescriptionLines(job) {
@@ -3598,12 +3632,32 @@ async function writeWorkGrid(page, job, args = {}) {
   const out = { ok: true, changed: false, manodopera: null, sections: workSections.map((s) => String(s?.reparto || "").trim()).filter(Boolean) };
 
   const gridRows = buildWorkGridRows(job);
+  logAction("grid_rows_plan", {
+    count: gridRows.length,
+    sections: workSections.map((s) => String(s?.reparto || "").trim()).filter(Boolean),
+    rows: gridRows.map((row, index) => ({
+      index,
+      kind: row.kind,
+      reparto: row.reparto,
+      tipo: row.tipo,
+      articleQuery: row.articleQuery || null,
+      text: String(row.text || "").slice(0, 80),
+      qta: row.qta ?? null,
+      prezzo: row.prezzo ?? null,
+      sconto: row.sconto ?? null,
+    })),
+  });
   out.righe = [];
   let addedGridRows = 0;
   for (const row of gridRows) {
     const rowKey = `${row.tipo}:${row.articleQuery || row.text || row.kind}`;
     if (gridRowsIncludeText(existingRows, row.text) || (row.articleQuery && gridRowsIncludeText(existingRows, row.articleQuery))) {
-      logAction("grid_row_skip_existing", { kind: row.kind, text: row.text.slice(0, 60) });
+      logAction("grid_row_skip_existing", {
+        kind: row.kind,
+        text: row.text.slice(0, 60),
+        articleQuery: row.articleQuery || null,
+        existingSample: existingRows.slice(0, 8),
+      });
       out.righe.push({ ...row, typed: false, written: true, existing: true });
       continue;
     }
@@ -3642,6 +3696,7 @@ async function writeWorkGrid(page, job, args = {}) {
     await writeCell("prezzo", row.prezzo);
     await writeCell("sconto", row.sconto);
     await writeCell("iva", row.iva);
+    const readback = await gridDumpRow(page, rowIndex);
 
     const inGridNow = await safeEvaluate(page, (needle) => {
       const n = String(needle || "").toUpperCase();
@@ -3662,6 +3717,19 @@ async function writeWorkGrid(page, job, args = {}) {
       inputValue: setDescr.value,
       article: art.ok,
       inGridNow: inGridNow.found,
+      expected: {
+        tipo: row.tipo || null,
+        articolo: row.articleQuery || null,
+        descrizione: row.text || null,
+        cl: row.cl || null,
+        cat: row.cat || null,
+        udm: row.udm || null,
+        qta: row.qta || null,
+        prezzo: row.prezzo || null,
+        sconto: row.sconto || null,
+        iva: row.iva || null,
+      },
+      readback,
     });
     if (!out.manodopera && (row.kind === "man" || row.kind === "mac")) {
       out.manodopera = {
@@ -3670,11 +3738,11 @@ async function writeWorkGrid(page, job, args = {}) {
         added: added.ok,
         articolo: art.ok,
         qta: row.qta != null,
-        readback: await gridDumpRow(page, rowIndex),
+        readback,
       };
       logAction("grid_lavoro_after", out.manodopera.readback);
     }
-    out.righe.push({ ...row, typed: Boolean(setDescr.value && setDescr.value.length > 0), written: false, article: Boolean(art.ok) });
+    out.righe.push({ ...row, typed: Boolean(setDescr.value && setDescr.value.length > 0), written: false, article: Boolean(art.ok), readback });
   }
 
   // FLUSH ultima riga: una riga GWT si committa quando perde il focus, cosa che
@@ -3701,6 +3769,17 @@ async function writeWorkGrid(page, job, args = {}) {
     const n = String(r.text || "").toUpperCase();
     r.written = finalRows.some((h) => h.toUpperCase().includes(n));
   }
+  logAction("grid_verify_rows", out.righe.map((row) => ({
+    kind: row.kind,
+    reparto: row.reparto,
+    tipo: row.tipo,
+    text: String(row.text || "").slice(0, 80),
+    articleQuery: row.articleQuery || null,
+    article: row.article || false,
+    written: row.written,
+    existing: row.existing || false,
+    readback: row.readback || null,
+  })));
   logAction("grid_desc_verify", {
     gridRows: finalRows.length,
     persisted: out.righe.filter((r) => r.written).length,
@@ -4132,6 +4211,8 @@ async function writePracticeAndOdl(page, job, args) {
         const gridOk = Boolean(gridResult?.ok) && docSaved && (!manExpected || manOk) && persistedRows === expectedRows;
         logAction("grid_flow_result", {
           docKind,
+          workPage: writeReport.workPage,
+          pageEnumAfterRoute: writeReport.pageEnumAfterRoute,
           ok: gridOk,
           reason: gridResult?.reason || gridResult?.error || null,
           manodoperaExpected: manExpected,
@@ -4139,6 +4220,14 @@ async function writePracticeAndOdl(page, job, args) {
           descrizioniPersisted: persistedRows,
           descrizioniExpected: expectedRows,
           saved: docSaved,
+          rowKinds: (gridResult?.righe || []).map((r) => ({
+            kind: r.kind,
+            reparto: r.reparto,
+            tipo: r.tipo,
+            article: Boolean(r.article),
+            written: Boolean(r.written),
+            existing: Boolean(r.existing),
+          })),
         });
         if (gridOk) { writeReport.openedOdl = true; writeReport.odl.success = true; writeReport.odl.error = null; }
         writeReport.ok = gridOk;
@@ -4599,6 +4688,14 @@ async function writePracticeAndOdl(page, job, args) {
     }
     if (section.smaltimento_applica) {
       writeReport.waste.attempted = true;
+      const wasteDetails = sectionWasteDetails(section);
+      logAction("waste_calc", wasteDetails || {
+        reparto,
+        percent: section?.smaltimento_percentuale ?? 2,
+        subtotal: null,
+        amount: null,
+        reason: "missing_numeric_basis",
+      });
       const smaltOkResult = await fillWithRetry(
         page,
         [
@@ -4619,6 +4716,12 @@ async function writePracticeAndOdl(page, job, args) {
       if (smaltAmount != null) {
         writeReport.waste.amountAttempted = true;
         const smaltAmountText = formatGridAmount(smaltAmount);
+        logAction("waste_amount_write", {
+          reparto,
+          amount: smaltAmountText,
+          percent: wasteDetails?.percent ?? null,
+          subtotal: wasteDetails?.subtotal ?? null,
+        });
         const smaltAmountResult = await fillWithRetry(
           page,
           [

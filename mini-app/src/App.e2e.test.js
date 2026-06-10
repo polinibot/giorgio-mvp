@@ -2092,6 +2092,47 @@ describe('Mini App user-simulation suite', () => {
     ]);
   });
 
+  test('developer batch button creates all YAP test practices on CN401MV', async () => {
+    axios.get.mockImplementation((url) => {
+      if (String(url).includes('/api/practices/stats')) {
+        return Promise.resolve({ data: { success: true, data: { total: 0, this_month: 0, pending_sync: 0 } } });
+      }
+      if (String(url).includes('/api/practices')) {
+        return Promise.resolve({ data: { success: true, data: [] } });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    axios.post.mockImplementation((url) => {
+      if (String(url).includes('/practices/full')) {
+        return Promise.resolve({ data: { success: true, data: { id: Date.now() } } });
+      }
+      if (String(url).includes('/yap/sync')) {
+        return Promise.resolve(DEFAULT_YAP_SYNC_RESPONSE);
+      }
+      if (String(url).includes('/yap/audit')) {
+        return Promise.resolve(DEFAULT_YAP_AUDIT_RESPONSE);
+      }
+      if (String(url).includes('/yap/notify-error')) {
+        return Promise.resolve({ data: { success: true, data: { notified: true } } });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`));
+    });
+
+    mount('/?debug_ui=1');
+
+    const batchButton = await waitFor(() => getButton('Crea 6 pratiche test YAP (CN401MV)'));
+    clickElement(batchButton);
+
+    await waitFor(() => axios.post.mock.calls.filter(([url]) => String(url).includes('/practices/full')).length === 6);
+
+    const createCalls = axios.post.mock.calls.filter(([url]) => String(url).includes('/practices/full'));
+    expect(createCalls).toHaveLength(6);
+    createCalls.forEach(([, payload]) => {
+      expect(payload.practice.plate_confirmed).toBe('CN401MV');
+    });
+  });
+
   test('starts from bot flow and ends on YAP detail with a valid new practice', async () => {
     axios.get.mockImplementation((url) => {
       if (url.includes('/api/practices/stats')) {

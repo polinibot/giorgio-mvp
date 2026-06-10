@@ -1425,6 +1425,207 @@ const DASHBOARD_DEMO_PRACTICES = [
   },
 ];
 
+const YAP_TEST_BATCH_PRACTICES = [
+  {
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T08:00:00',
+      appointment_time: '08:00',
+      practice_type: 'preventivo',
+      contexts: ['officina'],
+      internal_notes: 'TEST YAP BATCH 01 - officina preventivo',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Tagliando completo', 'Verifica fluidi'],
+        man_hours: 5.7,
+        mac_hours: null,
+        materials_amount: null,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Caso test officina preventivo',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Filtro olio', quantity: '1 cf' },
+    ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T08:20:00',
+      appointment_time: '08:20',
+      practice_type: 'ordine_di_lavoro',
+      contexts: ['officina'],
+      internal_notes: 'TEST YAP BATCH 02 - officina odl',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Diagnosi avantreno', 'Sostituzione testina sterzo'],
+        man_hours: 2.5,
+        mac_hours: null,
+        materials_amount: null,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Caso test officina ODL',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Testina sterzo dx', quantity: '1 pz' },
+    ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T08:40:00',
+      appointment_time: '08:40',
+      practice_type: 'preventivo',
+      contexts: ['carrozzeria'],
+      internal_notes: 'TEST YAP BATCH 03 - carrozzeria preventivo',
+    },
+    sections: [
+      {
+        context: 'carrozzeria',
+        description_rows: ['Descr', 'Preparazione pannello'],
+        man_hours: null,
+        mac_hours: 0.8,
+        materials_amount: 333.7,
+        waste_apply: true,
+        waste_percentage: 2,
+        notes: 'Caso test carrozzeria preventivo con smaltimento',
+      },
+    ],
+    parts: [
+      { context: 'carrozzeria', name: 'Trasparente', quantity: '4 L' },
+      { context: 'carrozzeria', name: 'Nastro mascheratura', quantity: '2 cf' },
+    ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T09:00:00',
+      appointment_time: '09:00',
+      practice_type: 'ordine_di_lavoro',
+      contexts: ['carrozzeria'],
+      internal_notes: 'TEST YAP BATCH 04 - carrozzeria odl',
+    },
+    sections: [
+      {
+        context: 'carrozzeria',
+        description_rows: ['Ripristino paraurti', 'Lucidatura finale'],
+        man_hours: null,
+        mac_hours: 1.2,
+        materials_amount: 120,
+        waste_apply: true,
+        waste_percentage: 7.5,
+        notes: 'Caso test carrozzeria ODL con smaltimento',
+      },
+    ],
+    parts: [
+      { context: 'carrozzeria', name: 'Stucco', quantity: '1 cf' },
+      { context: 'carrozzeria', name: 'Primer', quantity: '1 cf' },
+    ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T09:20:00',
+      appointment_time: '09:20',
+      practice_type: 'preventivo',
+      contexts: ['officina', 'carrozzeria'],
+      internal_notes: 'TEST YAP BATCH 05 - mix preventivo',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Controllo freni'],
+        man_hours: 1.5,
+        mac_hours: null,
+        materials_amount: null,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Mix preventivo - officina',
+      },
+      {
+        context: 'carrozzeria',
+        description_rows: ['Lucidatura zona riparata'],
+        man_hours: null,
+        mac_hours: 0.5,
+        materials_amount: 80,
+        waste_apply: true,
+        waste_percentage: 5,
+        notes: 'Mix preventivo - carrozzeria',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Pastiglie freno', quantity: '1 set' },
+      { context: 'carrozzeria', name: 'Trasparente', quantity: '1 L' },
+    ],
+  },
+  {
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T09:40:00',
+      appointment_time: '09:40',
+      practice_type: 'ordine_di_lavoro',
+      contexts: ['officina', 'carrozzeria'],
+      internal_notes: 'TEST YAP BATCH 06 - mix odl',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Diagnosi elettronica'],
+        man_hours: 1,
+        mac_hours: null,
+        materials_amount: null,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Mix ODL - officina',
+      },
+      {
+        context: 'carrozzeria',
+        description_rows: ['Allineamento pannello'],
+        man_hours: null,
+        mac_hours: 0.7,
+        materials_amount: 60,
+        waste_apply: true,
+        waste_percentage: 4,
+        notes: 'Mix ODL - carrozzeria',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Batteria 60Ah', quantity: '1 pz' },
+      { context: 'carrozzeria', name: 'Nastro mascheratura', quantity: '1 cf' },
+    ],
+  },
+];
+
 /** Normalize sections data: ensure description_rows is always an array */
 const normalizeSections = (rawSections) => {
   if (!rawSections || !Array.isArray(rawSections)) return {};
@@ -1469,6 +1670,21 @@ const BROWSER_PREVIEW_PRACTICES = DASHBOARD_DEMO_PRACTICES.map((item, index) => 
     _preview: true,
   };
 });
+
+const buildPreviewPracticeItems = (items, prefix = 'preview-seed') => (
+  (items || []).map((item, index) => ({
+    id: `${prefix}-${index + 1}`,
+    ...item.practice,
+    plate: item.practice.plate_confirmed,
+    synced: false,
+    status: 'preview',
+    created_at: item.practice.appointment_date,
+    sections: item.sections,
+    parts: item.parts,
+    photos: [],
+    _preview: true,
+  }))
+);
 
 const buildPreviewStats = (items) => ({
   total: items.length,
@@ -1987,6 +2203,7 @@ function App() {
   const [dashboardDraftCard, setDashboardDraftCard] = useState(null);
   const [preSyncByPractice, setPreSyncByPractice] = useState({});
   const [seedingDemoPractices, setSeedingDemoPractices] = useState(false);
+  const [seedingYapTestPractices, setSeedingYapTestPractices] = useState(false);
   const [previewPractices, setPreviewPractices] = useState(BROWSER_PREVIEW_PRACTICES);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState({ officina: false, carrozzeria: false, revisione: false, synced: null });
@@ -2729,6 +2946,41 @@ function App() {
       setSeedingDemoPractices(false);
     }
   }, [seedingDemoPractices, browserPreviewMode, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
+
+  const seedYapTestPractices = useCallback(async () => {
+    if (seedingYapTestPractices) return;
+    if (browserPreviewMode) {
+      const seededPreviewItems = buildPreviewPracticeItems(YAP_TEST_BATCH_PRACTICES, 'preview-yap-test');
+      const visibleItems = filterPreviewPractices(seededPreviewItems, searchQuery, activeFilters);
+      setPreviewPractices(seededPreviewItems);
+      setPractices(visibleItems);
+      setStats(buildPreviewStats(seededPreviewItems));
+      setPreSyncByPractice(buildPreviewPreSyncMap(visibleItems));
+      addToast(`Preview caricata con ${YAP_TEST_BATCH_PRACTICES.length} pratiche test YAP su CN401MV`, 'success');
+      return;
+    }
+
+    setSeedingYapTestPractices(true);
+    try {
+      await Promise.all(
+        YAP_TEST_BATCH_PRACTICES.map((payload) =>
+          fetchWithRetry(() =>
+            axios.post(`${API_BASE_URL}/practices/full`, payload, {
+              params: getAuthParams(),
+              headers: getHeaders(),
+              timeout: 30000,
+            })
+          )
+        )
+      );
+      addToast(`Ho creato ${YAP_TEST_BATCH_PRACTICES.length} pratiche test YAP per CN401MV`, 'success');
+      await loadDashboard(searchQuery, activeFilters);
+    } catch (err) {
+      addToast(classifyError(err), 'error');
+    } finally {
+      setSeedingYapTestPractices(false);
+    }
+  }, [seedingYapTestPractices, browserPreviewMode, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
 
   // Load dashboard on view mount
   useEffect(() => {
@@ -5205,6 +5457,17 @@ function App() {
               {browserPreviewMode
                 ? 'Ricarica pratiche demo locali'
                 : (seedingDemoPractices ? 'Creazione pratiche demo...' : `Crea ${DASHBOARD_DEMO_PRACTICES.length} pratiche esempio piene`)}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={seedYapTestPractices}
+              disabled={seedingYapTestPractices}
+              style={{ marginLeft: 8 }}
+            >
+              {browserPreviewMode
+                ? 'Carica pratiche test YAP locali'
+                : (seedingYapTestPractices ? 'Creazione pratiche test YAP...' : `Crea ${YAP_TEST_BATCH_PRACTICES.length} pratiche test YAP (CN401MV)`)}
             </button>
           </div>
         )}
