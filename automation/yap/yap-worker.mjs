@@ -3824,7 +3824,7 @@ async function writeWorkGrid(page, job, args = {}) {
         articleQuery: row.articleQuery || null,
         existingSample: existingRows.slice(0, 8),
       });
-      out.righe.push({ ...row, typed: false, written: true, existing: true });
+      out.righe.push({ ...row, typed: false, written: true, existing: true, article: row.articleQuery ? true : false });
       continue;
     }
     const hasRows = existingRows.length > 0 || addedGridRows > 0;
