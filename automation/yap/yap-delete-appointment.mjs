@@ -91,6 +91,7 @@ function parseArgs(argv) {
 function classifyDeleteFailure(text) {
   const normalized = String(text || "").toLowerCase();
   if (/ordine di lavoro|odl|associat[oa].*lavoro|work order/.test(normalized)) return "blocked_by_odl";
+  if (/preventivo/.test(normalized)) return "blocked_by_preventivo";
   if (/non trov|not found/.test(normalized)) return "not_found";
   if (/permess|autorizz|permission|unauthorized|forbidden/.test(normalized)) return "permission_denied";
   if (normalized.trim()) return "unknown_yap_error";
@@ -385,10 +386,15 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
 
   await page.waitForTimeout(deleteRpcRequest ? 220 : 420);
   visibleMessage = visibleMessage || await visibleYapMessage(page);
+  // I messaggi nei native dialog (alert/confirm) contengono l'errore quando YAP blocca
+  // con "preventivo" o simili. Li uniamo al visibleMessage per la classificazione.
+  const nativeDialogText = dialogMessages.join(" | ");
+  if (!visibleMessage && nativeDialogText) visibleMessage = nativeDialogText;
   trace?.mark("delete_action_wait_completed", {
     rpc_detected: !!deleteRpcRequest,
     confirm_iterations: confirmLoopIterations,
     visible_message: visibleMessage || null,
+    native_dialog_text: nativeDialogText || null,
     dialog_count: dialogMessages.length,
   });
   page.off("request", onRequest);
@@ -444,7 +450,11 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
       script: `node automation/yap/yap-delete-linked-odl.mjs --date ${dateIso} --search ${searchTerm}${expectedTime ? ` --time ${expectedTime}` : ""}`,
       reason: "L'appuntamento e' collegato a un ordine di lavoro. Prima elimina l'ODL, poi rilancia questo script.",
     }
-    : null;
+    : failureStatus === "blocked_by_preventivo"
+      ? {
+        reason: "L'appuntamento e' collegato a un preventivo. Apri la pratica su YAP, elimina il preventivo, poi riprova l'eliminazione.",
+      }
+      : null;
 
   trace?.mark("delete_verification_completed", {
     initial_match_count: initialMatchCount,

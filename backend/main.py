@@ -2632,6 +2632,11 @@ async def delete_practice(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Impossibile cancellare la pratica: l'appuntamento YAP Ã¨ collegato a un ordine di lavoro",
                     )
+                if failure_status == "blocked_by_preventivo":
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Impossibile cancellare la pratica: l'appuntamento YAP Ã¨ collegato a un preventivo. Elimina prima il preventivo su YAP, poi riprova.",
+                    )
                 # Se non trovato su YAP, consideriamo la pratica gia' rimossa lato agenda.
                 if failure_status not in {"not_found"} and result.get("found") is not False:
                     raise HTTPException(

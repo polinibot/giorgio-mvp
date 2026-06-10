@@ -789,6 +789,7 @@ function formatYapPracticeStatus(practice) {
   if (status === 'sync_failed') return 'Sync YAP fallita';
   if (status === 'deleted') return 'Appuntamento eliminato da YAP';
   if (status === 'blocked_by_odl') return 'Eliminazione bloccata da ODL';
+  if (status === 'blocked_by_preventivo') return 'Eliminazione bloccata da preventivo';
   if (status === 'duplicate') return 'Agenda già presente in YAP';
   if (status === 'not_ready') return 'Pratica non pronta per YAP';
   if (status === 'not_found') return 'Appuntamento già assente su YAP';
@@ -3452,6 +3453,9 @@ function App() {
       } else if (data.status === 'blocked_by_odl') {
         finishYapActionProgress(phaseLabel, 'error', 0);
         addToast('Impossibile eliminare: associato a ordine di lavoro', 'warning');
+      } else if (data.status === 'blocked_by_preventivo') {
+        finishYapActionProgress(phaseLabel, 'error', 0);
+        addToast('Impossibile eliminare: presente un preventivo. Eliminalo prima su YAP, poi riprova.', 'warning');
       } else {
         finishYapActionProgress(phaseLabel, 'success', 1200);
         addToast(data.message || `Delete YAP: ${data.status}`, 'info');
