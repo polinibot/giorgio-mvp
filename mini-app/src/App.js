@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef, startTransition } from 'react';
+import React, { useState, useEffect, useCallback, useRef, startTransition } from 'react';
 import { flushSync } from 'react-dom';
 import { useForm, Controller } from 'react-hook-form';
 import axios from 'axios';
