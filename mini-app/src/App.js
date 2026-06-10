@@ -4862,11 +4862,16 @@ function App() {
         setSaving(true);
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         try {
-          await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
-          finishYapActionProgress('Pratica eliminata', 'success', 800);
+          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
+          // Il backend distingue "eliminata anche su YAP" da "eliminata SOLO localmente"
+          // (appuntamento non trovato / dati mancanti): mostra il messaggio vero.
+          const deleteMessage = res?.data?.data?.message || 'Pratica cancellata con successo';
+          const yapInfo = res?.data?.data?.yap;
+          const yapWarning = Boolean(yapInfo && (!yapInfo.attempted || !yapInfo.deleted));
+          finishYapActionProgress(yapWarning ? deleteMessage : 'Pratica eliminata', yapWarning ? 'error' : 'success', yapWarning ? 4000 : 800);
           invalidatePracticeCaches(p.id);
           clearDraft();
-          addToast('Pratica cancellata con successo', 'success');
+          addToast(deleteMessage, yapWarning ? 'error' : 'success');
           await new Promise(r => setTimeout(r, 900));
           setCurrentView('dashboard');
           setNavigationStack([]);

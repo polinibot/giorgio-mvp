@@ -1193,6 +1193,22 @@ def _practice_needs_yap_delete(practice: Any) -> bool:
     )
 
 
+def _write_yap_delete_dump(payload: Dict[str, Any]) -> None:
+    """Persiste l'esito dell'ultima delete YAP (worker log incluso) su file.
+
+    La pratica sparisce dalla mini-app subito dopo la delete, quindi senza questo
+    dump non resta NESSUNA traccia consultabile dell'esito lato YAP.
+    """
+    try:
+        dump_dir = os.path.join(_project_root(), "automation", "artifacts", "yap", "crash-dumps")
+        os.makedirs(dump_dir, exist_ok=True)
+        payload = {"ts": _utc_now_iso(), **payload}
+        with open(os.path.join(dump_dir, "last-delete.json"), "w", encoding="utf-8") as fh:
+            _json.dump(payload, fh, ensure_ascii=False, indent=1)
+    except Exception as exc:
+        logger.warning("Failed to write YAP delete dump: %s", exc)
+
+
 def _yap_session_fernet() -> Fernet:
     secret = settings.secret_key or settings.telegram_bot_token or "dev-yap-session-state-key"
     digest = hashlib.sha256(f"giorgio:yap-session-state:{secret}".encode("utf-8")).digest()
@@ -2615,6 +2631,8 @@ async def delete_practice(
         _ensure_yap_credentials("eliminare l'appuntamento su YAP")
         date_iso = _practice_date_iso(practice)
         search = _safe_search_arg(practice.plate_confirmed or practice.plate_detected or practice.customer_name)
+        yap_summary: Dict[str, Any] = {"attempted": False}
+        message = "Pratica cancellata con successo"
         if date_iso and search:
             time_arg = _safe_practice_yap_time_arg(practice)
             yap_args = ["--date", date_iso, f"--search={search}"]
@@ -2625,8 +2643,22 @@ async def delete_practice(
                 yap_args,
                 db=db,
             )
+            failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
+            yap_summary = {
+                "attempted": True,
+                "deleted": bool(result.get("deleted")),
+                "found": result.get("found"),
+                "status": result.get("status"),
+                "failure_status": failure_status,
+            }
+            _write_yap_delete_dump({
+                "practice_id": practice_id,
+                "args": yap_args,
+                **yap_summary,
+                "deleteAction": result.get("deleteAction"),
+                "worker_phases": result.get("worker_phases"),
+            })
             if not result.get("deleted"):
-                failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
                 if failure_status == "blocked_by_odl":
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
@@ -2637,18 +2669,48 @@ async def delete_practice(
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Impossibile cancellare la pratica: l'appuntamento YAP Ã¨ collegato a un preventivo. Elimina prima il preventivo su YAP, poi riprova.",
                     )
-                # Se non trovato su YAP, consideriamo la pratica gia' rimossa lato agenda.
-                if failure_status not in {"not_found"} and result.get("found") is not False:
+                # Se non trovato su YAP, consideriamo la pratica gia' rimossa lato agenda
+                # MA lo diciamo esplicitamente: era la causa dei "eliminata ma su YAP no"
+                # senza alcuna traccia.
+                if failure_status in {"not_found"} or result.get("found") is False:
+                    message = (
+                        "Pratica eliminata. ATTENZIONE: l'appuntamento NON Ã¨ stato trovato su YAP "
+                        "(forse giÃ  rimosso, o data/ora/targa non corrispondono): verifica l'agenda YAP."
+                    )
+                    logger.warning(
+                        "Practice %d: YAP delete found no appointment (date=%s search=%s status=%s)",
+                        practice_id, date_iso, search, failure_status,
+                    )
+                else:
                     raise HTTPException(
                         status_code=status.HTTP_502_BAD_GATEWAY,
                         detail="Impossibile cancellare l'appuntamento su YAP",
                     )
+            else:
+                message = "Pratica e appuntamento YAP eliminati."
+        else:
+            # Niente skip silenzioso: senza data o targa il worker non puo' cercare
+            # l'appuntamento, e l'utente deve saperlo.
+            message = (
+                "Pratica eliminata localmente. ATTENZIONE: appuntamento YAP NON eliminato "
+                "(data o targa mancanti): rimuovilo a mano dall'agenda YAP."
+            )
+            _write_yap_delete_dump({
+                "practice_id": practice_id,
+                "attempted": False,
+                "reason": "missing_date_or_search",
+                "date_iso": date_iso,
+                "search": search,
+            })
+            logger.warning(
+                "Practice %d: YAP delete skipped (date_iso=%s search=%s)", practice_id, date_iso, search,
+            )
 
         practice.status = PracticeStatus.DELETED
         practice.updated_by_telegram_id = user_data["id"]
         db.commit()
-        logger.info("Practice %d soft-deleted by user %d", practice_id, user_data["id"])
-        return APIResponse(success=True, data={"message": "Pratica cancellata con successo"})
+        logger.info("Practice %d soft-deleted by user %d (yap=%s)", practice_id, user_data["id"], yap_summary)
+        return APIResponse(success=True, data={"message": message, "yap": yap_summary})
     except HTTPException:
         raise
     except Exception as e:
@@ -3368,6 +3430,16 @@ async def delete_practice_yap_appointment(
         args.append("--fresh-login")
 
     result = await _run_yap_script("yap-delete-appointment.mjs", args, db=db)
+    _write_yap_delete_dump({
+        "practice_id": practice_id,
+        "endpoint": "yap_appointment_delete",
+        "args": args,
+        "deleted": bool(result.get("deleted")),
+        "found": result.get("found"),
+        "status": result.get("status"),
+        "deleteAction": result.get("deleteAction"),
+        "worker_phases": result.get("worker_phases"),
+    })
     runtime_telemetry = _extract_yap_runtime_telemetry(result)
     status_value = result.get("status") or ("deleted" if result.get("deleted") else ("not_found" if result.get("found") is False else "not_deleted"))
     delete_succeeded = bool(result.get("deleted") or status_value == "not_found" or result.get("found") is False)
@@ -3527,6 +3599,24 @@ async def get_yap_last_crash(
         return APIResponse(success=True, data={"found": True, **dump})
     except Exception as _e:
         raise HTTPException(status_code=500, detail=f"Errore lettura crash dump: {_e}")
+
+
+@app.get("/yap/last-delete")
+@limiter.limit("30/minute")
+async def get_yap_last_delete(
+    request: Request,
+    _auth: dict = Depends(require_yap_internal_auth),
+):
+    """Restituisce l'esito (worker log incluso) dell'ultima delete YAP."""
+    _dump_path = os.path.join(_project_root(), "automation", "artifacts", "yap", "crash-dumps", "last-delete.json")
+    if not os.path.exists(_dump_path):
+        return APIResponse(success=True, data={"found": False, "message": "Nessuna delete YAP registrata."})
+    try:
+        with open(_dump_path, "r", encoding="utf-8") as _fh:
+            dump = _json.load(_fh)
+        return APIResponse(success=True, data={"found": True, **dump})
+    except Exception as _e:
+        raise HTTPException(status_code=500, detail=f"Errore lettura delete dump: {_e}")
 
 
 @app.get("/yap/error-channel-status")

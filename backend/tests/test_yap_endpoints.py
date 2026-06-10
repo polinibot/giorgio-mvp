@@ -152,9 +152,13 @@ class TestYapSyncEndpoints:
         assert "Configurazione YAP mancante" in data["detail"]["message"]
         assert called["value"] is False
 
-    def test_yap_delete_rejects_missing_credentials(self, client, sample_practice, monkeypatch):
+    def test_yap_delete_rejects_missing_credentials(self, client, sample_practice, db_session, monkeypatch):
         monkeypatch.delenv("YAP_USERNAME", raising=False)
         monkeypatch.delenv("YAP_PASSWORD", raising=False)
+
+        # La pratica deve risultare gia' toccata da YAP: per quelle mai sincronizzate
+        # l'endpoint fa solo la delete locale (200) senza bisogno di credenziali.
+        mark_practice_yap_touched(db_session, sample_practice["id"])
 
         import main
 
@@ -666,7 +670,12 @@ class TestYapSyncEndpoints:
 
         assert response.status_code == 200
         data = response.json()["data"]
-        assert "cancellata" in str(data.get("message", "")).lower()
+        # Delete locale ok, ma il messaggio deve AVVISARE che su YAP non e' stato
+        # trovato nulla (niente piu' successo silenzioso).
+        assert "eliminata" in str(data.get("message", "")).lower()
+        assert "non" in str(data.get("message", "")).lower()
+        assert data.get("yap", {}).get("attempted") is True
+        assert data.get("yap", {}).get("deleted") is False
 
         listed = client.get("/api/practices?user_id=761118078")
         assert listed.status_code == 200
