@@ -180,11 +180,11 @@ export function pickYapTags(mapping) {
   const tags = new Set();
   if (contexts.includes("officina")) tags.add("officina");
   if (contexts.includes("revisione")) tags.add("revisione");
-  if (contexts.includes("carrozzeria")) {
-    tags.add("pneumatici");
-    if (tipo === "preventivo") tags.add("preventivo");
-  }
-  if (!tags.size && contexts.includes("pneumatici")) tags.add("pneumatici");
+  // Non inferiamo piu' "pneumatici" da "carrozzeria": nel gestionale quel tag
+  // finiva anche su pratiche che dovevano restare solo officina. Se in futuro
+  // serve un tag esplicito per carrozzeria, va marcato nel dato sorgente.
+  if (contexts.includes("pneumatici")) tags.add("pneumatici");
+  if (tipo === "preventivo") tags.add("preventivo");
 
   return [...tags];
 }
