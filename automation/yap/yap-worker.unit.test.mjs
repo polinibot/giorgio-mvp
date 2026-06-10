@@ -150,16 +150,9 @@ test("carrozzeria preventivo grid rows include description, part, and labor fiel
     {
       kind: "ricambio",
       reparto: "carrozzeria",
-      tipo: "N",
-      articleQuery: "Vernice metallizzata",
-      text: "Vernice metallizzata",
-      cl: "A",
-      cat: "101",
-      udm: "NR",
-      qta: "1",
-      sconto: null,
-      prezzo: null,
-      iva: "I22",
+      tipo: "D",
+      articleQuery: null,
+      text: "Vernice metallizzata x 1",
     },
     {
       kind: "mac",
@@ -207,7 +200,7 @@ test("mixed officina and carrozzeria grid lines keep reparto context", () => {
 
   assert.deepEqual(lines.map((line) => line.text), [
     "Officina - Tagliando",
-    "Filtro olio",
+    "Officina - Filtro olio x 1",
     "Carrozzeria - Lucidatura",
   ]);
 });

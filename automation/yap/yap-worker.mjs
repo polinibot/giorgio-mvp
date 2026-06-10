@@ -3433,6 +3433,13 @@ function normalizeGridMoney(value) {
   return n == null ? null : String(n).trim();
 }
 
+function buildPartDisplayText(name, qty) {
+  const partName = String(name || "").trim();
+  const partQty = String(qty || "").trim();
+  if (!partName) return "";
+  return partQty ? `${partName} x ${partQty}` : partName;
+}
+
 function parseGridNumber(value) {
   if (value == null || value === "") return null;
   const raw = String(value).trim().replace(/\s+/g, "").replace(/[€]/g, "");
@@ -3544,19 +3551,13 @@ function buildWorkGridRows(job) {
       const name = String(part?.name || part?.nome || "").trim();
       if (!name) continue;
       const qty = normalizeGridQty(part?.quantity ?? part?.quantita);
+      const displayText = withPrefix(section, buildPartDisplayText(name, qty));
       rows.push({
         kind: "ricambio",
         reparto: String(section?.reparto || "").trim().toLowerCase(),
-        tipo: "N",
-        articleQuery: name,
-        text: name,
-        cl: GRID_DEFAULT_ROW_VALUES.cl.part,
-        cat: GRID_DEFAULT_ROW_VALUES.cat,
-        udm: GRID_DEFAULT_ROW_VALUES.udm,
-        qta: qty || "1",
-        sconto: part?.sconto != null ? String(part.sconto).trim() : null,
-        prezzo: normalizeGridMoney(part?.prezzo ?? part?.price ?? part?.unit_price ?? part?.costo ?? null),
-        iva: GRID_DEFAULT_ROW_VALUES.iva,
+        tipo: "D",
+        articleQuery: null,
+        text: displayText || name,
       });
     }
 
@@ -3681,7 +3682,20 @@ async function writeWorkGrid(page, job, args = {}) {
       logAction("grid_row_articolo", { kind: row.kind, query: row.articleQuery, ...art });
     }
 
-    const setDescr = row.text ? await gridTypeDescrizione(page, row.text) : { ok: true, skipped: true };
+    let setDescr = { ok: true, skipped: true };
+    if (row.text) {
+      if (row.tipo === "N") {
+        setDescr = await gridSetCell(page, rowIndex, GRID_COL.descrizione, row.text);
+        logAction("grid_row_descr_cell", {
+          kind: row.kind,
+          text: row.text.slice(0, 60),
+          rowIndex,
+          ...setDescr,
+        });
+      } else {
+        setDescr = await gridTypeDescrizione(page, row.text);
+      }
+    }
     const writeCell = async (field, value) => {
       if (value == null || value === "") return null;
       const res = await gridSetCell(page, rowIndex, GRID_COL[field], value);
