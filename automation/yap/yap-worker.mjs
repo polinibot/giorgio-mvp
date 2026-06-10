@@ -3453,9 +3453,7 @@ async function writeWorkGrid(page, job, args = {}) {
         readback: { found: true, existing: true },
       };
     } else {
-      const hasRows = await safeEvaluate(page, () =>
-        [...document.querySelectorAll("tr")].some((tr) => tr.querySelector("td[yapcolumnid]"))
-      ).catch(() => false);
+      const hasRows = existingRows.length > 0;
       const added = await gridAddRow(page, hasRows);
       out.changed = out.changed || Boolean(added.ok);
       logAction("grid_add_row", added);
@@ -3492,7 +3490,8 @@ async function writeWorkGrid(page, job, args = {}) {
       out.righe.push({ ...line, typed: false, written: true, existing: true });
       continue;
     }
-    const added = await gridAddRow(page, true);
+    const hasRows = existingRows.length > 0 || addedDescrRows > 0;
+    const added = await gridAddRow(page, hasRows);
     out.changed = out.changed || Boolean(added.ok);
     addedDescrRows += 1;
     await page.waitForTimeout(150).catch(() => {}); // gridAddRow ha gia' la sua attesa interna
