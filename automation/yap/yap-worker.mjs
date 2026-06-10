@@ -5844,6 +5844,7 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 4 } = {}) {
   let putResponse = null;
   let saveAttemptsUsed = 0;
   let lastSaveError = null;
+  let alreadyClosed = false;
   logPhase("save_popup", "starting", { maxAttempts: maxSaveAttempts });
 
   const readPopupState = async () => safeEvaluate(page, () => {
@@ -5960,6 +5961,7 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 4 } = {}) {
       if (!popupState?.open) {
         logPhase("save_popup", "already_closed", { attempt });
         putResponse = { status: () => 200, url: () => "local://popup-already-closed" };
+        alreadyClosed = true;
         break;
       }
       // Popup di conferma post-salvataggio: altezza < 80px e nessun input = successo
@@ -6117,7 +6119,7 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 4 } = {}) {
       throw new Error(`Salvataggio YAP non confermato dopo ${maxSaveAttempts} tentativi${detail}`);
     }
   }
-  return { putResponse, saveAttemptsUsed };
+  return { putResponse, saveAttemptsUsed, alreadyClosed };
 }
 
 async function summarizeResponseBody(response, limit = 1200) {
@@ -6549,18 +6551,26 @@ async function runYapAutomation(job, args) {
 
     logPhase("popup", "filled");
     logPhase("save", "starting");
-    const { putResponse, saveAttemptsUsed } = await saveAppointmentPopup(page, { maxSaveAttempts: 4 });
-    logPhase("save", "done", { detected: Boolean(putResponse) });
+    const { putResponse, saveAttemptsUsed, alreadyClosed } = await saveAppointmentPopup(page, { maxSaveAttempts: 4 });
+    logPhase("save", "done", { detected: Boolean(putResponse), alreadyClosed: alreadyClosed || false });
     const putResponseSummary = args.debug ? await summarizeResponseBody(putResponse) : null;
     await page.waitForTimeout(240);
 
-    // VERIFICA VEICOLO AUTOREVOLE: l'evento appena salvato e' ancora in agenda (il
-    // management write naviga via DOPO). Se il titolo mostra info oltre la targa ->
-    // veicolo agganciato davvero. Corregge onestamente lo stato tentativo del popup.
-    if (job.customer?.plate && popupResult) {
-      const vCheck = await verifyVehicleInAgenda(page, job.customer.plate);
-      logAction("vehicle_agenda_verify", vCheck);
-      if (popupResult.vehicleState !== "not_found") {
+    // VERIFICA VEICOLO AUTOREVOLE.
+    // Caso 1: popup già chiuso al momento del salvataggio (alreadyClosed=true).
+    //   YAP auto-salva e naviga alla pratica SOLO quando veicolo+data+ora sono tutti
+    //   confermati. L'auto-chiusura E' prova sufficiente di aggancio -> non serve
+    //   cercare l'evento in agenda (siamo già dentro la pratica, found=false).
+    // Caso 2: popup chiuso dal worker (salvataggio normale).
+    //   L'evento e' ancora visibile in agenda -> verifica dal titolo/tooltip.
+    if (job.customer?.plate && popupResult && popupResult.vehicleState !== "not_found") {
+      if (alreadyClosed && popupResult.vehicleState === "pending_confirmation") {
+        logAction("vehicle_agenda_verify", { linked: true, found: false, source: "auto_close" });
+        popupResult.vehicleState = "linked";
+        popupResult.vehicleLinked = true;
+      } else {
+        const vCheck = await verifyVehicleInAgenda(page, job.customer.plate);
+        logAction("vehicle_agenda_verify", vCheck);
         if (vCheck.linked) {
           popupResult.vehicleState = "linked";
           popupResult.vehicleLinked = true;
