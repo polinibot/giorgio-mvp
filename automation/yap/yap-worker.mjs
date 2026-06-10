@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-10s-odl-tab-cell-commit";
+const WORKER_BUILD = "2026-06-10t-descr-commit-fix";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -3159,13 +3159,39 @@ async function gridTypeDescrizione(page, text) {
   await page.waitForTimeout(120).catch(() => {});
   await page.keyboard.press("Control+A").catch(() => {});
   await page.keyboard.type(String(text), { delay: 40 }).catch(() => {});
-  await page.keyboard.press("Tab").catch(() => {});
+  // Committi la descrizione cliccando la cella tipo della stessa riga (single-click, non dblclick).
+  // Tab sposta il focus fuori dalla riga; il successivo gridAddRow usa JS .click() sull'anchor
+  // che NON genera blur sull'INPUT description → valore perso. Il click sulla cella tipo
+  // (gia' settata, es. "D") genera blur sull'INPUT description → GWT salva il valore.
+  // Single-click non apre il dropdown tipo (serve dblclick).
+  const tipoCell = await safeEvaluate(page, ({ tx, ty }) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const el = document.elementFromPoint(tx, ty);
+    const tr = el && el.closest("tr");
+    if (!tr) return null;
+    const tipoTd = tr.querySelector('td[yapcolumnid="2"]');
+    if (!tipoTd || !isVisible(tipoTd)) return null;
+    const r = tipoTd.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }, { tx: target.x, ty: target.y }).catch(() => null);
+  if (tipoCell) {
+    await page.mouse.click(tipoCell.x, tipoCell.y).catch(() => {});
+  } else {
+    await page.keyboard.press("Tab").catch(() => {});
+  }
   await page.waitForTimeout(200).catch(() => {});
-  // Readback: il valore e' rimasto nell'input?
+  // Readback: INPUT ancora attivo o cella gia' committata (textContent)?
   const value = await safeEvaluate(page, ({ tx, ty }) => {
     const el = document.elementFromPoint(tx, ty);
-    const input = el && el.tagName === "INPUT" ? el : (el ? el.querySelector("input") : null);
-    return input ? (input.value || "") : null;
+    const cell = el && el.closest ? el.closest("td[yapcolumnid]") : null;
+    if (!cell) return null;
+    const inp = cell.querySelector("input");
+    if (inp) return inp.value || "";
+    return (cell.textContent || "").replace(/\s+/g, " ").trim().slice(0, 80);
   }, { tx: target.x, ty: target.y }).catch(() => null);
   return { ok: true, target, value };
 }
@@ -3265,7 +3291,15 @@ async function gridDumpRow(page, rowIndex) {
     const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector("td[yapcolumnid]") && isVisible(tr));
     const row = rows[rowIndex];
     if (!row) return { found: false };
-    const txt = (id) => (row.querySelector(`td[yapcolumnid="${id}"]`)?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40);
+    // Legge textContent + input.value: se la riga e' ancora in edit mode (INPUT visibile),
+    // textContent e' vuoto ma input.value contiene il valore effettivo.
+    const txt = (id) => {
+      const cell = row.querySelector(`td[yapcolumnid="${id}"]`);
+      if (!cell) return "";
+      const inp = cell.querySelector("input");
+      const valPart = inp ? (inp.value || "") : "";
+      return ((cell.textContent || "") + " " + valPart).replace(/\s+/g, " ").trim().slice(0, 40);
+    };
     return {
       found: true,
       tipo: txt(COL.tipo),
