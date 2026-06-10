@@ -1916,10 +1916,14 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 attempt_started_at,
                 timeout_seconds,
             )
+            # Su Linux (Railway) il worker Playwright/Chromium gira sullo stesso
+            # container dell'API e ne satura la CPU: con `nice` il worker cede
+            # priorita' alle richieste HTTP (la mini-app non si "congela" piu').
+            exec_argv = [node_bin, script_path, *args]
+            if os.name == "posix" and _shutil.which("nice"):
+                exec_argv = ["nice", "-n", "10", *exec_argv]
             process = await asyncio.create_subprocess_exec(
-                node_bin,
-                script_path,
-                *args,
+                *exec_argv,
                 cwd=root,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
