@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-10u-tag-cleanup-vehicle-retry";
+const WORKER_BUILD = "2026-06-10v-chip-hover-article-final-check";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -932,47 +932,76 @@ async function removeStaleTagChips(page, wantedTags) {
           && known.includes(norm(el.textContent))
           && !want.includes(norm(el.textContent)));
       if (!chip) return null;
-      const label = norm(chip.textContent);
-      const chipRect = chip.getBoundingClientRect();
-      // Cerca l'icona di rimozione: elemento piccolo (icon-font) vicino al chip,
-      // dentro lo stesso contenitore, a destra della label.
-      let removeIcon = null;
-      let container = chip.parentElement;
-      for (let depth = 0; depth < 3 && container && !removeIcon; depth += 1) {
-        removeIcon = [...container.querySelectorAll("span, div, a, button, i")]
-          .filter(isVisible)
-          .find((el) => {
-            if (el === chip || el.contains(chip)) return false;
-            const r = el.getBoundingClientRect();
-            return r.width > 2 && r.width < 26 && r.height > 2 && r.height < 26
-              && r.x >= chipRect.x - 4
-              && Math.abs((r.y + r.height / 2) - (chipRect.y + chipRect.height / 2)) < 14;
-          });
-        container = container.parentElement;
-      }
-      const iconRect = removeIcon ? removeIcon.getBoundingClientRect() : null;
+      const r = chip.getBoundingClientRect();
       return {
-        label,
-        chip: { x: chipRect.x + chipRect.width / 2, y: chipRect.y + chipRect.height / 2 },
-        icon: iconRect ? { x: iconRect.x + iconRect.width / 2, y: iconRect.y + iconRect.height / 2 } : null,
-        containerHtml: (chip.parentElement?.outerHTML || "").slice(0, 300),
+        label: norm(chip.textContent),
+        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+        chip: { x: r.x + r.width / 2, y: r.y + r.height / 2 },
+        containerHtml: (chip.parentElement?.parentElement?.outerHTML || chip.parentElement?.outerHTML || "").slice(0, 600),
       };
     }, { known: KNOWN_YAP_TAGS, want: [...wanted] }).catch(() => null);
     if (!stale) break;
 
-    if (stale.icon) {
-      await page.mouse.click(stale.icon.x, stale.icon.y).catch(() => {});
-    } else {
+    // L'icona di rimozione dei chip GWT spesso compare solo all'HOVER: prima
+    // hover sul chip, poi ricerca dei candidati-icona vicino al chip.
+    await page.mouse.move(stale.chip.x, stale.chip.y).catch(() => {});
+    await page.waitForTimeout(300).catch(() => {});
+    const icons = await safeEvaluate(page, ({ rect }) => {
+      const isVisible = (node) => {
+        const r = node.getBoundingClientRect();
+        const s = window.getComputedStyle(node);
+        return r.width > 1 && r.height > 1 && s.visibility !== "hidden" && s.display !== "none";
+      };
+      const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+        .find((p) => (p.textContent || "").includes("Dettagli"));
+      if (!popup) return [];
+      // Candidati: elementi piccoli (icon-font) sulla stessa riga del chip, dentro
+      // il chip o subito a destra (max 40px oltre il bordo destro).
+      return [...popup.querySelectorAll("span, div, a, button, i")]
+        .filter(isVisible)
+        .map((el) => ({ el, r: el.getBoundingClientRect() }))
+        .filter(({ el, r }) => el.children.length === 0
+          && r.width < 28 && r.height < 28
+          && Math.abs((r.y + r.height / 2) - (rect.y + rect.h / 2)) < 14
+          && r.x + r.width / 2 > rect.x - 4
+          && r.x < rect.x + rect.w + 40)
+        .map(({ el, r }) => ({
+          x: r.x + r.width / 2, y: r.y + r.height / 2,
+          txt: (el.textContent || "").trim().slice(0, 8),
+          cls: (el.className || "").slice(0, 40),
+        }))
+        .slice(0, 4);
+    }, { rect: stale.rect }).catch(() => []);
+
+    let gone = false;
+    let how = null;
+    // Filtra l'icona che e' il chip stesso (stesso testo del tag).
+    const candidates = icons.filter((c) => c.txt.toLowerCase() !== stale.label);
+    for (const c of candidates) {
+      await page.mouse.click(c.x, c.y).catch(() => {});
+      await page.waitForTimeout(280).catch(() => {});
+      gone = !(await isTagConfirmed(page, stale.label));
+      if (gone) { how = `icon:${c.txt || c.cls}`; break; }
+    }
+    if (!gone) {
       // Fallback: click sul chip + Delete/Backspace.
       await page.mouse.click(stale.chip.x, stale.chip.y).catch(() => {});
-      await page.waitForTimeout(120).catch(() => {});
+      await page.waitForTimeout(150).catch(() => {});
       await page.keyboard.press("Delete").catch(() => {});
       await page.keyboard.press("Backspace").catch(() => {});
+      await page.waitForTimeout(250).catch(() => {});
+      gone = !(await isTagConfirmed(page, stale.label));
+      if (gone) how = "chip_delete";
     }
-    await page.waitForTimeout(250).catch(() => {});
-    const gone = !(await isTagConfirmed(page, stale.label));
+    if (!gone) {
+      // Ultimo tentativo: doppio click sul chip.
+      await page.mouse.dblclick(stale.chip.x, stale.chip.y).catch(() => {});
+      await page.waitForTimeout(280).catch(() => {});
+      gone = !(await isTagConfirmed(page, stale.label));
+      if (gone) how = "dblclick";
+    }
     logAction("tag_chip_removed", {
-      tag: stale.label, viaIcon: Boolean(stale.icon), gone,
+      tag: stale.label, how, gone, iconCandidates: icons,
       containerHtml: gone ? undefined : stale.containerHtml,
     });
     if (gone) removed.push(stale.label);
@@ -3195,15 +3224,22 @@ async function gridSelectArticolo(page, rowIndex, code, options = {}) {
 // Imposta una cella (Qtà/Descrizione). Diagnostica forte: cosa diventa attivo al click,
 // e dove finisce il testo digitato (per capire se la cella entra davvero in modifica).
 async function gridSetCell(page, rowIndex, colId, value) {
-  const cell = await gridCellRect(page, rowIndex, colId);
-  if (!cell) return { ok: false, reason: "cell_not_found" };
-  await page.mouse.dblclick(cell.x, cell.y).catch(() => {});
-  await page.waitForTimeout(220).catch(() => {});
-  // Stato attivo PRIMA di digitare.
-  const before = await safeEvaluate(page, () => {
-    const ae = document.activeElement;
-    return ae ? { tag: ae.tagName, cls: (ae.className || "").slice(0, 40), val: (ae.value || "").slice(0, 20) } : null;
-  }).catch(() => null);
+  // In ODL la selezione articolo committa la riga: il primo dblclick sulla cella
+  // puo' non aprire l'editor (activeElement resta BODY). Riprova fino a 3 volte,
+  // ricalcolando le coordinate (la riga puo' essersi spostata al re-render).
+  let before = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const cell = await gridCellRect(page, rowIndex, colId);
+    if (!cell) return { ok: false, reason: "cell_not_found" };
+    await page.mouse.dblclick(cell.x, cell.y).catch(() => {});
+    await page.waitForTimeout(attempt === 0 ? 220 : 380).catch(() => {});
+    // Stato attivo PRIMA di digitare.
+    before = await safeEvaluate(page, () => {
+      const ae = document.activeElement;
+      return ae ? { tag: ae.tagName, cls: (ae.className || "").slice(0, 40), val: (ae.value || "").slice(0, 20) } : null;
+    }).catch(() => null);
+    if (before?.tag === "INPUT" || before?.tag === "TEXTAREA") break;
+  }
   await page.keyboard.press("Control+A").catch(() => {});
   await page.keyboard.type(String(value), { delay: 45 }).catch(() => {});
   // DOVE e' finito il testo? Leggo il valore dell'elemento attivo DOPO la digitazione.
@@ -4081,8 +4117,20 @@ async function writeWorkGrid(page, job, args = {}) {
   }).catch(() => []);
   for (const r of out.righe) {
     const n = String(r.text || "").toUpperCase();
-    const textWritten = finalRows.some((h) => h.toUpperCase().includes(n));
+    const hit = finalRows.find((h) => h.toUpperCase().includes(n)) || null;
+    const textWritten = Boolean(hit);
+    // Ricalcola `article` dal grid FINALE: il readback fatto a riga ancora in edit
+    // leggeva la cella articolo vuota (falso negativo). Se la riga trovata contiene
+    // anche il codice articolo, l'articolo c'e'.
+    if (r.articleQuery && hit && hit.toUpperCase().includes(String(r.articleQuery).toUpperCase())) {
+      r.article = true;
+    }
     r.written = r.articleQuery ? (textWritten && Boolean(r.article)) : textWritten;
+  }
+  // Aggiorna anche il flag manodopera con il risultato finale (stesso falso negativo).
+  if (out.manodopera && !out.manodopera.articolo) {
+    const lavoro = out.righe.find((r) => r.kind === "man" || r.kind === "mac");
+    if (lavoro?.article) out.manodopera.articolo = true;
   }
   logAction("grid_verify_rows", out.righe.map((row) => ({
     kind: row.kind,
