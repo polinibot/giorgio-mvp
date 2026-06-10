@@ -211,26 +211,6 @@ async function clickDeleteConfirmIfPresent(page) {
   return true;
 }
 
-async function clickDeleteAndAcceptNativeDialog(page, locator) {
-  const dialogMessages = [];
-  const onDialog = async (dialog) => {
-    const message = dialog.message();
-    dialogMessages.push(message);
-    if (/confermi l'eliminazione dell'appuntamento\?/i.test(message)) {
-      await dialog.accept();
-      return;
-    }
-    await dialog.dismiss().catch(() => {});
-  };
-
-  page.on("dialog", onDialog);
-  try {
-    await locator.click();
-    return dialogMessages;
-  } finally {
-    page.off("dialog", onDialog);
-  }
-}
 
 async function listVisibleAgendaEvents(page) {
   await waitForAgendaEventPopulation(page);
@@ -343,14 +323,27 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     trace?.mark("delete_anchor_missing", { screenshot: screenshotPath });
     throw new Error(`Anchor Elimina non trovato nel popup. Screenshot: ${screenshotPath}`);
   }
-  let dialogMessages = [];
+  // Handler dialog PERSISTENTE: attaccato prima del click e rimosso solo dopo
+  // la verifica finale. Cattura sia i dialog sincroni (conferma) sia quelli
+  // asincroni post-RPC (errore "non è possibile eliminare perché preventivo/odl"),
+  // che YAP mostra come alert() dopo la risposta del server.
+  const dialogMessages = [];
+  const onDialog = async (dialog) => {
+    const message = dialog.message();
+    dialogMessages.push(message);
+    if (/confermi l'eliminazione dell'appuntamento\?/i.test(message)) {
+      await dialog.accept();
+    } else {
+      await dialog.dismiss().catch(() => {});
+    }
+  };
+  page.on("dialog", onDialog);
+
   trace?.mark("delete_action_click_started");
   const rpcSeen = waitForYapAction(
     page,
     "PrenotazioneDelAction",
-    async () => {
-      dialogMessages = await clickDeleteAndAcceptNativeDialog(page, elimLocator.first());
-    },
+    () => elimLocator.first().click(),
     4500,
   ).then(() => true).catch(() => false);
 
@@ -372,6 +365,9 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     if (deleteRpcRequest) break;
     visibleMessage = await visibleYapMessage(page);
     if (classifyDeleteFailure(visibleMessage)) break;
+    // controlla anche i dialog nativi già catturati dall'handler persistente
+    const dialogBlock = classifyDeleteFailure(dialogMessages.join(" | "));
+    if (dialogBlock) break;
     const confirmed = await clickDeleteConfirmIfPresent(page);
     if (confirmed) {
       await page.waitForTimeout(180);
@@ -384,10 +380,10 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     await Promise.race([rpcSeen, page.waitForTimeout(2200)]);
   }
 
-  await page.waitForTimeout(deleteRpcRequest ? 220 : 420);
+  // Attesa extra per dialog asincroni post-RPC (es. errore "preventivo" che YAP
+  // mostra come alert() dopo la risposta del server, fuori dal confirm loop).
+  await page.waitForTimeout(deleteRpcRequest ? 220 : 600);
   visibleMessage = visibleMessage || await visibleYapMessage(page);
-  // I messaggi nei native dialog (alert/confirm) contengono l'errore quando YAP blocca
-  // con "preventivo" o simili. Li uniamo al visibleMessage per la classificazione.
   const nativeDialogText = dialogMessages.join(" | ");
   if (!visibleMessage && nativeDialogText) visibleMessage = nativeDialogText;
   trace?.mark("delete_action_wait_completed", {
@@ -399,6 +395,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   });
   page.off("request", onRequest);
   page.off("response", onResponse);
+  page.off("dialog", onDialog);
 
   let afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
   let remainingMatches = afterEvents.filter(matchesNeedle).length;
