@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-10t-descr-commit-fix";
+const WORKER_BUILD = "2026-06-10u-tag-cleanup-vehicle-retry";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -902,6 +902,85 @@ async function isTagConfirmed(page, tag) {
   }, tag).catch(() => false);
 }
 
+// Vocabolario dei tag YAP conosciuti: serve a distinguere un chip-tag dalle altre
+// label del popup ("Cosa", "Quando", "Tag", ...) quando si rimuovono i residui.
+const KNOWN_YAP_TAGS = ["officina", "revisione", "pneumatici", "preventivo", "carrozzeria", "gommista"];
+
+// Rimuove i chip-tag PRE-ESISTENTI non richiesti. YAP pre-compila il popup del nuovo
+// appuntamento con i tag dell'ultimo appuntamento creato nella sessione browser
+// (profilo persistente): senza pulizia l'appuntamento eredita tag spuri (es.
+// "pneumatici" su una pratica solo officina).
+async function removeStaleTagChips(page, wantedTags) {
+  const wanted = new Set(wantedTags.map((t) => String(t).trim().toLowerCase()));
+  const removed = [];
+  const failedRemove = [];
+  for (let pass = 0; pass < KNOWN_YAP_TAGS.length; pass += 1) {
+    const stale = await safeEvaluate(page, ({ known, want }) => {
+      const norm = (v) => String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
+      const isVisible = (node) => {
+        const r = node.getBoundingClientRect();
+        const s = window.getComputedStyle(node);
+        return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none";
+      };
+      const popup = [...document.querySelectorAll(".gwt-DecoratedPopupPanel")]
+        .find((p) => (p.textContent || "").includes("Dettagli"));
+      if (!popup) return null;
+      const chip = [...popup.querySelectorAll("span, div, td, li")]
+        .filter(isVisible)
+        .find((el) => el.children.length === 0
+          && el.tagName !== "INPUT"
+          && known.includes(norm(el.textContent))
+          && !want.includes(norm(el.textContent)));
+      if (!chip) return null;
+      const label = norm(chip.textContent);
+      const chipRect = chip.getBoundingClientRect();
+      // Cerca l'icona di rimozione: elemento piccolo (icon-font) vicino al chip,
+      // dentro lo stesso contenitore, a destra della label.
+      let removeIcon = null;
+      let container = chip.parentElement;
+      for (let depth = 0; depth < 3 && container && !removeIcon; depth += 1) {
+        removeIcon = [...container.querySelectorAll("span, div, a, button, i")]
+          .filter(isVisible)
+          .find((el) => {
+            if (el === chip || el.contains(chip)) return false;
+            const r = el.getBoundingClientRect();
+            return r.width > 2 && r.width < 26 && r.height > 2 && r.height < 26
+              && r.x >= chipRect.x - 4
+              && Math.abs((r.y + r.height / 2) - (chipRect.y + chipRect.height / 2)) < 14;
+          });
+        container = container.parentElement;
+      }
+      const iconRect = removeIcon ? removeIcon.getBoundingClientRect() : null;
+      return {
+        label,
+        chip: { x: chipRect.x + chipRect.width / 2, y: chipRect.y + chipRect.height / 2 },
+        icon: iconRect ? { x: iconRect.x + iconRect.width / 2, y: iconRect.y + iconRect.height / 2 } : null,
+        containerHtml: (chip.parentElement?.outerHTML || "").slice(0, 300),
+      };
+    }, { known: KNOWN_YAP_TAGS, want: [...wanted] }).catch(() => null);
+    if (!stale) break;
+
+    if (stale.icon) {
+      await page.mouse.click(stale.icon.x, stale.icon.y).catch(() => {});
+    } else {
+      // Fallback: click sul chip + Delete/Backspace.
+      await page.mouse.click(stale.chip.x, stale.chip.y).catch(() => {});
+      await page.waitForTimeout(120).catch(() => {});
+      await page.keyboard.press("Delete").catch(() => {});
+      await page.keyboard.press("Backspace").catch(() => {});
+    }
+    await page.waitForTimeout(250).catch(() => {});
+    const gone = !(await isTagConfirmed(page, stale.label));
+    logAction("tag_chip_removed", {
+      tag: stale.label, viaIcon: Boolean(stale.icon), gone,
+      containerHtml: gone ? undefined : stale.containerHtml,
+    });
+    if (gone) removed.push(stale.label);
+    else { failedRemove.push(stale.label); break; }
+  }
+  return { removed, failedRemove };
+}
+
 // Scrive i tag in modo AFFIDABILE: focus reale sul campo, digitazione con eventi
 // veri (così l'oracle GWT del SuggestBox si attiva), click sul suggerimento
 // corrispondente (o Enter), poi readback di conferma per ogni tag.
@@ -909,6 +988,12 @@ async function addYapTagChips(page, tags) {
   if (!tags.length) return { ok: true, added: [], failed: [] };
   const added = [];
   const failed = [];
+
+  // Prima la pulizia dei tag spuri ereditati dalla sessione, poi l'aggiunta.
+  const cleanup = await removeStaleTagChips(page, tags).catch(() => ({ removed: [], failedRemove: [] }));
+  if (cleanup.removed.length || cleanup.failedRemove.length) {
+    logAction("tags_cleanup", { removed: cleanup.removed, failedRemove: cleanup.failedRemove });
+  }
 
   for (const tag of tags) {
     // Se è già presente, salta.
@@ -5390,16 +5475,29 @@ async function fillAppointmentPopup(page, job) {
         const r = el.getBoundingClientRect();
         return { state: "match", x: r.x + Math.min(r.width / 2, 120), y: r.y + (r.height / 2), label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 50) };
       }
-      const sawContent = allPanels.some((p) => (p.textContent || "").trim().length > 0);
+      // sawContent SOLO dai suggest panel veri: allPanels include il popup appuntamento
+      // stesso (sempre con testo) e produceva vehicleState=failed anche quando il
+      // dropdown non era mai comparso (caso reale: not_found / query mai partita).
+      const sawContent = suggestPanels.some((p) => (p.textContent || "").trim().length > 0);
       return { state: "pending", sawContent, suggestPanelCount: suggestPanels.length };
     }, plate).catch(() => ({ state: "pending" }));
 
     let sug = { state: "pending" };
     let sawPopup = false;
-    for (let i = 0; i < 16; i += 1) {
+    let retriggers = 0;
+    for (let i = 0; i < 24; i += 1) {
       sug = await findSuggestion();
       if (sug.state === "match" || sug.state === "not_found") break;
       if (sug.sawContent) sawPopup = true;
+      // Se dopo ~1.5s il dropdown non e' mai comparso, la query GWT potrebbe non
+      // essere partita (keyup perso): Backspace + ridigito ultimo carattere per
+      // ritriggerare l'oracle del SuggestBox. Massimo 2 nudge.
+      if (!sawPopup && (i === 7 || i === 15) && retriggers < 2) {
+        retriggers += 1;
+        await page.keyboard.press("Backspace").catch(() => {});
+        await page.waitForTimeout(160).catch(() => {});
+        await page.keyboard.type(plate.slice(-1), { delay: 45 }).catch(() => {});
+      }
       await page.waitForTimeout(220).catch(() => {});
     }
     const steps = [];
@@ -5426,9 +5524,12 @@ async function fillAppointmentPopup(page, job) {
     } else if (sug.state === "not_found") {
       vehicleState = "not_found";
     } else {
-      vehicleState = sawPopup ? "failed" : "not_found";
+      // "not_found" SOLO dal messaggio esplicito "nessun risultato": se il dropdown
+      // non compare (o compare senza match) non sappiamo se il veicolo esiste, e
+      // l'audit tratta not_found come ok — un flaky diventerebbe un falso "tutto ok".
+      vehicleState = "failed";
     }
-    logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, sug: sug.state, label: sug.label || null, steps, vehicleState, suggestPanelCount: sug.suggestPanelCount ?? null });
+    logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, sug: sug.state, label: sug.label || null, steps, vehicleState, suggestPanelCount: sug.suggestPanelCount ?? null, retriggers });
   } else {
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
