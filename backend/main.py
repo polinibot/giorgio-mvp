@@ -2677,8 +2677,8 @@ async def delete_practice(
                 # senza alcuna traccia.
                 if failure_status in {"not_found"} or result.get("found") is False:
                     message = (
-                        "Pratica eliminata. ATTENZIONE: l'appuntamento NON Ã¨ stato trovato su YAP "
-                        "(forse giÃ  rimosso, o data/ora/targa non corrispondono): verifica l'agenda YAP."
+                        "Pratica eliminata. ATTENZIONE: l'appuntamento NON e' stato trovato su YAP "
+                        "(forse gia' rimosso, o data/ora/targa non corrispondono): verifica l'agenda YAP."
                     )
                     logger.warning(
                         "Practice %d: YAP delete found no appointment (date=%s search=%s status=%s)",
