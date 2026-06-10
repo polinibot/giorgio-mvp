@@ -58,6 +58,23 @@ async function waitForNextPaint() {
   await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
+async function probeApiConnection() {
+  try {
+    const res = await axios.get(`${API_BASE_URL}/test-connection`, { timeout: 5000 });
+    return {
+      ok: Boolean(res?.data?.status === 'ok'),
+      status: res?.status || null,
+      data: res?.data || null,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: err?.response?.status || null,
+      error: err?.message || null,
+    };
+  }
+}
+
 /** Classify error for user-friendly messages */
 function extractErrorDetail(detail) {
   if (!detail) return '';
@@ -2914,13 +2931,24 @@ function App() {
       loadPreSyncChecks(practiceItems);
       rememberResponse('dashboard.list');
     } catch (err) {
-      rememberError('dashboard.list', err);
-      addToast(classifyError(err), 'error');
+      let diagnosticExtra = {};
+      let errorMessage = classifyError(err);
+      if (!err?.response) {
+        const connectionProbe = await probeApiConnection();
+        diagnosticExtra.connectionProbe = connectionProbe;
+        if (connectionProbe.ok) {
+          errorMessage = initData
+            ? 'Backend raggiungibile, ma la richiesta della Mini App non e\' passata. Chiudi e riapri la Mini App dal bot.'
+            : 'Backend raggiungibile, ma la richiesta del browser non e\' passata. Riprova o riapri la Mini App.';
+        }
+      }
+      rememberError('dashboard.list', err, diagnosticExtra);
+      addToast(errorMessage, 'error');
       refreshDashboardDraftCard(search, filters, []);
     } finally {
       setDashboardLoading(false);
     }
-  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, loadPreSyncChecks, refreshDashboardDraftCard, rememberRequest, rememberResponse, rememberError]);
+  }, [browserPreviewMode, previewPractices, getAuthParams, getHeaders, addToast, loadPreSyncChecks, refreshDashboardDraftCard, rememberRequest, rememberResponse, rememberError, initData]);
 
   const seedDemoPractices = useCallback(async () => {
     if (seedingDemoPractices) return;
