@@ -330,6 +330,26 @@ async function clickAgendaEventRobust(page, searchTerms, expectedTime, dateIso) 
     const ranked = rankAgendaEvents(lastEvents, searchTerms, expectedTime);
 
     const best = ranked[0]?.event || null;
+
+    // Pass 1: Playwright locator per .fc-time (robusto anche quando .fc-title mostra icone "V")
+    if (best?.time) {
+      const timeDot = String(best.time).trim().split(" ")[0].replace(":", ".");
+      try {
+        const evLoc = page
+          .locator(".fc-time-grid-event:visible, .fc-event:visible")
+          .filter({ has: page.locator(".fc-time").filter({ hasText: timeDot }) })
+          .first();
+        if (await evLoc.count()) {
+          await evLoc.dblclick({ timeout: 2000 });
+          await page.waitForTimeout(800);
+          if (await appointmentPopupVisible(page)) {
+            return { success: true, text: best.title, time: best.time, method: "locator_time_click", score: ranked[0]?.score || 0, events: lastEvents };
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Pass 2: coordinate click fallback
     if (best && Number.isFinite(best.x) && Number.isFinite(best.y)) {
       await page.mouse.dblclick(best.x, best.y).catch(() => {});
       await page.waitForTimeout(800);
@@ -338,6 +358,7 @@ async function clickAgendaEventRobust(page, searchTerms, expectedTime, dateIso) 
       }
     }
 
+    // Pass 3: text-term fallback (funziona solo se il titolo contiene testo cercabile)
     const fallback = await clickAgendaEvent(page, searchTerms).catch(() => ({ success: false }));
     await page.waitForTimeout(800);
     if (fallback?.success && await appointmentPopupVisible(page)) {
