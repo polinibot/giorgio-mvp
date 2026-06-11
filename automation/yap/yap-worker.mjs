@@ -6167,8 +6167,20 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
     }
   }
   if (job.customer?.plate) {
-    const vstate = popupResult?.vehicleState || (popupResult?.vehicleLinked ? "linked" : "failed");
-    const vehicleLinked = vstate === "linked";
+    let vstate = popupResult?.vehicleState || (popupResult?.vehicleLinked ? "linked" : "failed");
+    let vehicleLinked = vstate === "linked";
+    // Fallback AUTOREVOLE: su re-sync (dedup:hit) il popup riporta "failed" perché il
+    // veicolo è GIÀ agganciato alla pratica (niente da fare, suggestPanelCount=0). La
+    // fonte di verità è il campo Targa della pratica aperta: se combacia, è agganciato.
+    if (!vehicleLinked && vstate !== "not_found" && odlRequested) {
+      const practiceCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate).catch(() => null);
+      logAction("vehicle_practice_fallback", { plate: job.customer.plate, linked: practiceCheck?.linked ?? false, value: practiceCheck?.value ?? null, source: practiceCheck?.source ?? null });
+      if (practiceCheck?.linked) {
+        vstate = "linked";
+        vehicleLinked = true;
+        if (popupResult) { popupResult.vehicleState = "linked"; popupResult.vehicleLinked = true; }
+      }
+    }
     if (vehicleLinked) {
       present.push({ field: "veicolo", expected: `veicolo agganciato (${job.customer.plate})` });
     } else if (vstate === "not_found") {
