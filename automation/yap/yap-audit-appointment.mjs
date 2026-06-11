@@ -332,21 +332,26 @@ async function clickAgendaEventRobust(page, searchTerms, expectedTime, dateIso) 
     const best = ranked[0]?.event || null;
 
     // Pass 1: Playwright locator per .fc-time (robusto anche quando .fc-title mostra icone "V")
+    // best.time viene dal textContent del DOM (es. "10:00 - 10:20" oppure "10.00 - 10.20"):
+    // usiamo il formato raw (split su spazio) perché corrisponde esattamente a ciò che hasText cerca.
     if (best?.time) {
-      const timeDot = String(best.time).trim().split(" ")[0].replace(":", ".");
-      try {
-        const evLoc = page
-          .locator(".fc-time-grid-event:visible, .fc-event:visible")
-          .filter({ has: page.locator(".fc-time").filter({ hasText: timeDot }) })
-          .first();
-        if (await evLoc.count()) {
-          await evLoc.dblclick({ timeout: 2000 });
-          await page.waitForTimeout(800);
-          if (await appointmentPopupVisible(page)) {
-            return { success: true, text: best.title, time: best.time, method: "locator_time_click", score: ranked[0]?.score || 0, events: lastEvents };
+      const timePart = String(best.time).trim().split(" ")[0]; // "10:00" o "10.00", com'è nel DOM
+      const timeAlt = timePart.includes(":") ? timePart.replace(":", ".") : timePart.replace(".", ":");
+      for (const t of [timePart, timeAlt]) {
+        try {
+          const evLoc = page
+            .locator(".fc-time-grid-event:visible, .fc-event:visible")
+            .filter({ has: page.locator(".fc-time").filter({ hasText: t }) })
+            .first();
+          if (await evLoc.count()) {
+            await evLoc.dblclick({ timeout: 2000 });
+            await page.waitForTimeout(800);
+            if (await appointmentPopupVisible(page)) {
+              return { success: true, text: best.title, time: best.time, method: "locator_time_click", score: ranked[0]?.score || 0, events: lastEvents };
+            }
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
     }
 
     // Pass 2: coordinate click fallback

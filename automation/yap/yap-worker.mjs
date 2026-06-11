@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-11e-odl-dedup-fix";
+const WORKER_BUILD = "2026-06-11f-timefmt-fix";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1724,20 +1724,24 @@ async function openPracticeFromAppointment(page, job) {
   // Pass 2: clickAgendaEvent (text-based, fallback legacy)
   const ensurePopup = async () => {
     if (await waitForAppointmentPopup(page, 600)) return true;
-    // Prova prima con locator .fc-time se abbiamo l'orario
+    // Prova prima con locator .fc-time se abbiamo l'orario.
+    // YAP può mostrare "10:00" o "10.00" a seconda del locale → prova entrambi.
     if (job.appointment?.time) {
-      const timeDot = String(job.appointment.time).trim().replace(":", ".").slice(0, 5);
-      try {
-        const evLoc = page
-          .locator(".fc-time-grid-event:visible, .fc-event:visible")
-          .filter({ has: page.locator(".fc-time").filter({ hasText: timeDot }) })
-          .first();
-        if (await evLoc.count()) {
-          await evLoc.dblclick({ timeout: 2000 });
-          await page.waitForTimeout(800);
-          if (await waitForAppointmentPopup(page, 1500)) return true;
-        }
-      } catch (_) {}
+      const timeRaw = String(job.appointment.time).trim().slice(0, 5); // "10:00"
+      const timeAlt = timeRaw.includes(":") ? timeRaw.replace(":", ".") : timeRaw.replace(".", ":");
+      for (const t of [timeRaw, timeAlt]) {
+        try {
+          const evLoc = page
+            .locator(".fc-time-grid-event:visible, .fc-event:visible")
+            .filter({ has: page.locator(".fc-time").filter({ hasText: t }) })
+            .first();
+          if (await evLoc.count()) {
+            await evLoc.dblclick({ timeout: 2000 });
+            await page.waitForTimeout(800);
+            if (await waitForAppointmentPopup(page, 1500)) return true;
+          }
+        } catch (_) {}
+      }
     }
     for (let i = 0; i < 3; i += 1) {
       const reopened = await clickAgendaEvent(page, searchTerms).catch(() => ({ success: false }));
