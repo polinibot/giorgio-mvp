@@ -431,7 +431,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   let remainingMatches = afterEvents.filter(matchesNeedle).length;
   let deletedCount = Math.max(0, initialMatchCount - remainingMatches);
   let targetDeleted = deletedCount >= 1;
-  if (!targetDeleted || !page.url().includes("#!agenda")) {
+  if (!targetDeleted) {
     trace?.mark("reopening_agenda_for_verification", {
       remaining_matches_before_reopen: remainingMatches,
       deleted_count_before_reopen: deletedCount,

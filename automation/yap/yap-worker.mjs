@@ -5666,9 +5666,13 @@ async function fillAppointmentPopup(page, job) {
 // Criterio forte: hover sull'evento e verifica del tooltip #agendaTip con
 // Targa / Veicolo / Intestatario / Cellulare. Fallback: titolo evento piu' ricco
 // della sola targa.
-async function verifyVehicleInAgenda(page, plate) {
+async function verifyVehicleInAgenda(page, plate, expectedTime = "") {
   const norm = (s) => String(s || "").toUpperCase().replace(/\s+/g, "");
   const P = norm(plate);
+  const expectedMatch = String(expectedTime || "").match(/^(\d{1,2})[:.](\d{2})$/);
+  const expectedMinutes = expectedMatch
+    ? Number(expectedMatch[1]) * 60 + Number(expectedMatch[2])
+    : NaN;
   if (!P) return { linked: false, found: false };
   let last = { linked: false, found: false };
   // Polling breve: il re-render dell'evento puo' arrivare con un attimo di ritardo.
@@ -5676,7 +5680,13 @@ async function verifyVehicleInAgenda(page, plate) {
   for (let i = 0; i < 4; i += 1) {
     try {
       const events = await scanVisibleAgendaEventTargets(page, { includeStyle: true }); // [{time, title, repartoClass, x, y, bgColor...}]
-      const ev = events.find((e) => norm(e.title).includes(P));
+      const ev = events.find((e) => {
+        if (!norm(e.title).includes(P)) return false;
+        if (!Number.isFinite(expectedMinutes)) return true;
+        const start = String(e.time || "").match(/(\d{1,2})[:.](\d{2})/);
+        if (!start) return false;
+        return (Number(start[1]) * 60 + Number(start[2])) === expectedMinutes;
+      });
       if (ev) {
         await page.mouse.move(ev.x, ev.y).catch(() => {});
         await page.waitForTimeout(600).catch(() => {});
@@ -6631,14 +6641,19 @@ async function runYapAutomation(job, args) {
     if (job.customer?.plate && popupResult && popupResult.vehicleState !== "not_found") {
       if (alreadyClosed && popupResult.vehicleState === "pending_confirmation") {
         let vCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate);
-        if (!vCheck.found && vCheck.source === "agenda") {
-          vCheck = await verifyVehicleInAgenda(page, job.customer.plate);
+        if (!vCheck.linked) {
+          await openAgendaWithRecovery(page, {
+            dateIso: job.appointment.date,
+            username: process.env.YAP_USERNAME,
+            password: process.env.YAP_PASSWORD,
+          }).catch(() => {});
+          vCheck = await verifyVehicleInAgenda(page, job.customer.plate, job.appointment.time);
         }
         logAction("vehicle_auto_close_verify", vCheck);
         popupResult.vehicleState = vCheck.linked ? "linked" : "failed";
         popupResult.vehicleLinked = vCheck.linked;
       } else {
-        const vCheck = await verifyVehicleInAgenda(page, job.customer.plate);
+        const vCheck = await verifyVehicleInAgenda(page, job.customer.plate, job.appointment.time);
         logAction("vehicle_agenda_verify", vCheck);
         if (vCheck.linked) {
           popupResult.vehicleState = "linked";
