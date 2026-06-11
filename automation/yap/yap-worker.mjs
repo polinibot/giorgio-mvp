@@ -5719,7 +5719,19 @@ async function fillAppointmentPopup(page, job) {
         steps.push({ how: "dblclick", gone: await gone() });
       }
       await page.waitForTimeout(500).catch(() => {});
-      vehicleState = "pending_confirmation";
+      const widgetLinked = await safeEvaluate(page, (targetPlate) => {
+        const popup = document.querySelector(".popupMiddleCenter, .popupContent");
+        if (!popup) return false;
+        const plateUpper = String(targetPlate || "").toUpperCase();
+        const plateNode = [...popup.querySelectorAll("span, div, td")]
+          .find((el) => String(el.textContent || "").trim().toUpperCase() === plateUpper);
+        if (!plateNode) return false;
+        const vehicleArea = plateNode.closest(".JMFB34B-ib-y, .JMFB34B-hb-c") || plateNode.parentElement;
+        const text = String(vehicleArea?.textContent || "").toUpperCase();
+        return text.includes(plateUpper) && !/NESSUN VEICOLO SELEZIONATO/i.test(text);
+      }, plate).catch(() => false);
+      vehicleState = widgetLinked ? "linked" : "pending_confirmation";
+      steps.push({ how: "widget_confirmation", linked: widgetLinked });
     } else if (sug.state === "not_found") {
       vehicleState = "not_found";
     } else {
@@ -6140,10 +6152,18 @@ async function saveAppointmentPopup(page, { maxSaveAttempts = 4 } = {}) {
         const rect = confirmPopup.getBoundingClientRect();
         return { h: Math.round(rect.height), txt: (confirmPopup.textContent || "").trim().slice(0, 60) };
       }).catch(() => null);
-      if (confirmPopupCheck) {
+      const confirmText = String(confirmPopupCheck?.txt || "");
+      const saveCompleted = /appuntamento salvato|salvataggio completato/i.test(confirmText)
+        && !/in corso/i.test(confirmText);
+      if (confirmPopupCheck && saveCompleted) {
         logPhase("save_popup", "confirm_popup_detected", { attempt, ...confirmPopupCheck });
         putResponse = { status: () => 200, url: () => "local://confirm-popup" };
         break;
+      }
+      if (confirmPopupCheck) {
+        logPhase("save_popup", "progress_popup_detected", { attempt, ...confirmPopupCheck });
+        await page.waitForTimeout(700).catch(() => {});
+        continue;
       }
       const candidateCount = popupState?.saveCandidates?.length || 0;
       const candidateIndex = Math.min(Math.max(0, attempt - 1), Math.max(0, candidateCount - 1));
