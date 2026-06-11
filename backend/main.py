@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import signal
 import uuid
 import shutil
 import shutil as _shutil
@@ -1958,6 +1959,7 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
+                start_new_session=(os.name == "posix"),
             )
             _stdout_chunks: list = []
             _stderr_chunks: list = []
@@ -1974,15 +1976,27 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
 
             _drain_task_out = asyncio.ensure_future(_drain_stdout())
             _drain_task_err = asyncio.ensure_future(_drain_stderr())
+
+            async def _kill_worker_tree() -> None:
+                if process.returncode is not None:
+                    return
+                try:
+                    if os.name == "posix":
+                        os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.wait()
+
             try:
                 await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
                 await asyncio.gather(_drain_task_out, _drain_task_err, return_exceptions=True)
                 stdout = b"".join(_stdout_chunks)
                 stderr = b"".join(_stderr_chunks)
             except asyncio.TimeoutError:
-                process.kill()
+                await _kill_worker_tree()
                 await asyncio.gather(_drain_task_out, _drain_task_err, return_exceptions=True)
-                await process.wait()
                 stdout = b"".join(_stdout_chunks)
                 stderr = b"".join(_stderr_chunks)
                 out_text = stdout.decode("utf-8", errors="replace").strip()
@@ -2046,6 +2060,10 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                         "stdout_tail": out_text[-2000:],
                     }
                 )
+            except asyncio.CancelledError:
+                await _kill_worker_tree()
+                await asyncio.gather(_drain_task_out, _drain_task_err, return_exceptions=True)
+                raise
             attempt_finished_at = _utc_now_iso()
             duration_ms = int((time.perf_counter() - attempt_started_monotonic) * 1000)
             out_text = stdout.decode("utf-8", errors="replace").strip()
