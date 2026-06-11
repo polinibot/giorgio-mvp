@@ -3651,7 +3651,9 @@ async function saveWorkDocument(page, args = {}) {
 
   // RPC di salvataggio (best-effort, secondario rispetto al bottone che si disabilita).
   const saveRpc = page.waitForResponse(
-    (r) => /\/yap\/action\/\w+Action/i.test(r.url()) && r.request().method() === "POST" && r.status() === 200,
+    (r) => /\/yap\/action\/(?:Odl|Preventivo)(?:Put|Save|Update)\w*Action/i.test(r.url())
+      && r.request().method() === "POST"
+      && r.status() === 200,
     { timeout: 9000 },
   ).then((r) => (r.url().split("/action/")[1] || "").slice(0, 44)).catch(() => null);
 
@@ -4354,10 +4356,61 @@ async function writeWorkGrid(page, job, args = {}) {
   });
   logAction("grid_snapshot_before_save", await snapshotWorkGrid(page));
 
+  const incompleteRows = out.righe.filter((row) => !row.written);
+  if (incompleteRows.length) {
+    out.ok = false;
+    out.saved = {
+      ok: false,
+      reason: "incomplete_rows_not_saved",
+      incomplete: incompleteRows.map((row) => ({
+        kind: row.kind,
+        articleQuery: row.articleQuery || null,
+        text: String(row.text || "").slice(0, 100),
+      })),
+    };
+    logAction("grid_save_blocked", out.saved);
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 12000 }).catch(() => {});
+    await waitForPracticeWorkspaceReady(page, 2500).catch(() => {});
+    return out;
+  }
+
   // SALVA il documento: senza questo le righe restano solo client-side e si perdono
   // (su YAP "Preventivi" risultava vuoto). Il bottone Salva che si disabilita conferma.
   out.saved = out.changed ? await saveWorkDocument(page, args) : { ok: true, reason: "already_written", disabled: true };
   logAction("grid_snapshot_after_save", { saved: out.saved?.ok || false, ...(await snapshotWorkGrid(page)) });
+
+  if (out.saved?.ok && out.changed) {
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 12000 }).catch(() => {});
+    await waitForPracticeWorkspaceReady(page, 2500).catch(() => {});
+    await waitForPracticeLoadingToFinish(page, 8000).catch(() => {});
+    const persisted = await readWorkGridTexts(page);
+    for (const row of out.righe) {
+      row.written = row.articleQuery
+        ? gridRowsIncludeText(persisted, row.articleQuery) && gridRowsIncludeText(persisted, row.text)
+        : gridRowsIncludeText(persisted, row.text);
+      if (row.articleQuery) row.article = gridRowsIncludeText(persisted, row.articleQuery);
+    }
+    const missingAfterReload = out.righe.filter((row) => !row.written);
+    out.persistence = {
+      verified: true,
+      persisted: out.righe.length - missingAfterReload.length,
+      expected: out.righe.length,
+      missing: missingAfterReload.map((row) => row.kind),
+    };
+    if (missingAfterReload.length) {
+      out.ok = false;
+      out.saved.ok = false;
+      out.saved.reason = "rows_missing_after_reload";
+    }
+    if (out.manodopera) {
+      const workRow = out.righe.find((row) => row.kind === "man" || row.kind === "mac");
+      out.manodopera.articolo = Boolean(workRow?.article && workRow?.written);
+    }
+    logAction("grid_persistence_verify", {
+      ...out.persistence,
+      sample: persisted.slice(0, 14),
+    });
+  }
   return out;
 }
 
