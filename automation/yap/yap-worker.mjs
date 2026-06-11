@@ -3884,6 +3884,14 @@ function formatGridAmount(value) {
   return parsed.toFixed(2);
 }
 
+// Formato importo italiano per i campi GWT (virgola decimale): "333.7" -> "333,70".
+// I campi soldi YAP rifiutano il punto come separatore decimale ("valori non validi").
+function formatItalianAmount(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return String(value ?? "");
+  return parsed.toFixed(2).replace(".", ",");
+}
+
 function sectionKnownPriceTotal(section) {
   let total = 0;
   const manHours = parseGridNumber(section?.ore_man ?? section?.man_hours);
@@ -3979,32 +3987,44 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
       }
       return depth;
     };
-    let best = inputs[0];
-    let bestScore = -1;
-    let bestDepth = -1;
-    for (const inp of inputs) {
+    const scored = inputs.map((inp) => {
       // Cerca il container più specifico (tab panel, flex table) per ridurre il rumore
       const container = inp.closest(
         ".gwt-TabLayoutPanelContent, .gwt-TabLayoutPanelDeckPanel, .gwt-FlexTable, tr, td"
       ) || inp.closest("div") || inp.parentElement;
       const text = norm(container?.textContent || "");
-      const score = kws.filter((kw) => text.includes(kw)).length;
-      const depth = tabDepth(inp);
-      // 1° criterio: profondità nel pannello-tab; 2° criterio: match keyword
-      if (depth > bestDepth || (depth === bestDepth && score > bestScore)) {
-        bestDepth = depth; bestScore = score; best = inp;
-      }
-    }
-    const r = best.getBoundingClientRect();
+      const cls = String(inp.className || "");
+      const r = inp.getBoundingClientRect();
+      return {
+        inp,
+        depth: tabDepth(inp),
+        // Il combo modalità ("Importo Fisso"/"Percentuale") è un gwt-SuggestBox: i campi
+        // importo/percentuale sono gwt-TextBox SEMPLICI. Scrivere un numero nel combo
+        // produce "valori non validi". Preferiamo quindi il TextBox semplice.
+        notSuggest: /gwt-SuggestBox/.test(cls) ? 0 : 1,
+        kw: kws.filter((k) => text.includes(k)).length,
+        x: Math.round(r.x + r.width / 2),
+        y: Math.round(r.y + r.height / 2),
+        cls: cls.slice(0, 60),
+        currentValue: (inp.value || "").slice(0, 40),
+        placeholder: inp.getAttribute("placeholder") || "",
+      };
+    });
+    // Ranking: 1° profondità (dentro il sub-tab attivo), 2° TextBox semplice vs combo,
+    // 3° match keyword. A parità, il primo in ordine DOM.
+    scored.sort((a, b) => (b.depth - a.depth) || (b.notSuggest - a.notSuggest) || (b.kw - a.kw));
+    const best = scored[0];
     return {
-      x: Math.round(r.x + r.width / 2),
-      y: Math.round(r.y + r.height / 2),
-      score: bestScore,
-      depth: bestDepth,
+      x: best.x,
+      y: best.y,
+      score: best.kw,
+      depth: best.depth,
+      notSuggest: best.notSuggest,
       totalInputs: inputs.length,
-      placeholder: best.getAttribute("placeholder") || "",
-      currentValue: (best.value || "").slice(0, 40),
-      cls: (best.className || "").slice(0, 60),
+      placeholder: best.placeholder,
+      currentValue: best.currentValue,
+      cls: best.cls,
+      candidates: scored.slice(0, 8).map((c) => ({ x: c.x, y: c.y, depth: c.depth, notSuggest: c.notSuggest, kw: c.kw, cls: c.cls, currentValue: c.currentValue, placeholder: c.placeholder })),
     };
   }, contextKeywords).catch(() => null);
   logAction("tab_input_pick", {
@@ -4013,12 +4033,14 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
     found: Boolean(result),
     score: result?.score ?? null,
     depth: result?.depth ?? null,
+    notSuggest: result?.notSuggest ?? null,
     totalInputs: result?.totalInputs ?? 0,
     placeholder: result?.placeholder ?? null,
     currentValue: result?.currentValue ?? null,
     cls: result?.cls ?? null,
     x: result?.x ?? null,
     y: result?.y ?? null,
+    candidates: result?.candidates ?? null,
   });
   if (!result) return false;
   await page.mouse.click(result.x, result.y).catch(() => {});
@@ -4061,7 +4083,7 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
       // ignorato da GWT, lasciando il campo materiali vuoto come per lo smaltimento.
       const matOkResult = await typeIntoVisibleTabInput(
         page,
-        String(section.materiali_euro),
+        formatItalianAmount(section.materiali_euro),
         [...repartoKeys, "materiali", "consumo", "importo", "euro"],
       );
       const matOk = materialsTabReady && Boolean(matOkResult);
@@ -4103,34 +4125,23 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         ...(smaltOkResult?.debug || {}),
       };
 
+      // NON scriviamo l'importo smaltimento a mano: YAP lo CALCOLA da solo dalla
+      // percentuale (es. 2% × 364,10 = 7,28). Scriverlo a mano finiva nel combo
+      // "Importo Fisso" (gwt-SuggestBox) → "valori non validi" e Salva bloccato.
+      // L'importo atteso resta verificato dall'audit leggendo il valore calcolato a DOM.
       const smaltAmount = sectionWasteAmount(section);
       if (smaltAmount != null) {
         writeReport.waste.amountAttempted = true;
-        const smaltAmountText = formatGridAmount(smaltAmount);
-        logAction("waste_amount_write", {
+        // Consideriamo l'importo riuscito se la percentuale è stata scritta: YAP lo deriva.
+        writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltOk;
+        if (smaltOk) writeReport.waste.amountError = null;
+        logAction("waste_amount_auto", {
           reparto,
-          amount: smaltAmountText,
+          amount: formatGridAmount(smaltAmount),
           percent: wasteDetails?.percent ?? null,
           subtotal: wasteDetails?.subtotal ?? null,
+          note: "auto-calcolato da YAP dalla percentuale",
         });
-        const smaltAmountResult = await typeIntoVisibleTabInput(
-          page,
-          smaltAmountText,
-          [reparto, "smaltimento", "importo", "euro", "rifiuti"],
-        );
-        const smaltAmountOk = wasteTabReady && Boolean(smaltAmountResult);
-        writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltAmountOk;
-        writeReport.waste.success = writeReport.waste.success || smaltAmountOk;
-        if (smaltAmountOk) {
-          writeReport.waste.amountError = null;
-          writeReport.waste.error = null;
-        } else if (!writeReport.waste.amountError) {
-          writeReport.waste.amountError = wasteTabReady
-            ? "waste_amount_field_not_found"
-            : "waste_tab_not_found";
-        }
-        out.wroteAny = out.wroteAny || smaltAmountOk;
-        if (sectionDebug) sectionDebug.fields.smaltimentoImporto = smaltAmountResult?.debug || null;
       }
     }
     if (sectionDebug && Object.keys(sectionDebug.fields).length) {
@@ -6116,11 +6127,20 @@ async function verifyVehicleInOpenedPractice(page, plate) {
       if (!inPractice) {
         return { linked: false, found: false, value: "", source: "agenda" };
       }
+      // Segnale 1: campo Targa (presente solo nella pagina VEICOLO/Dettagli pratica).
       const plateInput = [...document.querySelectorAll("input")].find(
         (el) => String(el.getAttribute("placeholder") || "").trim().toLowerCase() === "targa",
       );
-      const value = String(plateInput?.value || "").trim().toUpperCase();
-      return { linked: value === target, found: Boolean(plateInput), value, source: "opened_practice" };
+      const inputValue = String(plateInput?.value || "").trim().toUpperCase();
+      if (inputValue === target) return { linked: true, found: true, value: inputValue, source: "targa_input" };
+      // Segnale 2: intestazione pratica "PRATICA VEICOLO 'CN401MV'" — presente su
+      // qualsiasi pagina (Preventivo, ODL, ...). Una pratica VEICOLO con la targa giusta
+      // implica che il veicolo È agganciato (altrimenti non sarebbe una pratica veicolo).
+      const bodyText = String(document.body?.innerText || "").toUpperCase();
+      const headingMatch = bodyText.includes(`PRATICA VEICOLO '${target}'`)
+        || bodyText.includes(`PRATICA VEICOLO "${target}"`);
+      if (headingMatch) return { linked: true, found: true, value: target, source: "practice_heading" };
+      return { linked: false, found: Boolean(plateInput), value: inputValue, source: "opened_practice" };
     }, expected).catch(() => ({ linked: false, found: false, value: "", source: "opened_practice" }));
     if (result.linked) return result;
     await page.waitForTimeout(350).catch(() => {});
@@ -6173,7 +6193,18 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
     // veicolo è GIÀ agganciato alla pratica (niente da fare, suggestPanelCount=0). La
     // fonte di verità è il campo Targa della pratica aperta: se combacia, è agganciato.
     if (!vehicleLinked && vstate !== "not_found" && odlRequested) {
-      const practiceCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate).catch(() => null);
+      // Segnale già pronto: l'intestazione pratica verificata durante la scrittura ODL.
+      // Una "PRATICA VEICOLO '<targa>'" implica veicolo agganciato.
+      const expectedPlate = String(job.customer.plate || "").trim().toUpperCase();
+      const identity = managementWrite?.practiceIdentity;
+      const identityPlate = String(identity?.actual?.plate || "").trim().toUpperCase();
+      const identityHeading = String(identity?.actual?.heading || "").toUpperCase();
+      const identityLinked = Boolean(identity?.ok) && expectedPlate
+        && (identityPlate === expectedPlate || identityHeading.includes(`PRATICA VEICOLO '${expectedPlate}'`));
+      let practiceCheck = identityLinked ? { linked: true, value: expectedPlate, source: "practice_identity" } : null;
+      if (!practiceCheck?.linked) {
+        practiceCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate).catch(() => null);
+      }
       logAction("vehicle_practice_fallback", { plate: job.customer.plate, linked: practiceCheck?.linked ?? false, value: practiceCheck?.value ?? null, source: practiceCheck?.source ?? null });
       if (practiceCheck?.linked) {
         vstate = "linked";
