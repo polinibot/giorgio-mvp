@@ -3916,6 +3916,7 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
     const inputs = [...document.querySelectorAll(
       'input[type="text"], input[type="number"], input:not([type]), textarea'
     )].filter(isVisible)
+      .filter((el) => !el.readOnly && !el.disabled)
       .filter((el) => !el.closest("tr[__gwt_row]") && !el.closest("td[yapcolumnid]") && !el.closest(".gwt-DecoratedPopupPanel"));
     if (!inputs.length) return null;
     let best = inputs[0];
