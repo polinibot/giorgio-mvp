@@ -1703,15 +1703,22 @@ async function clickExactAgendaEvent(page, { plate, time }) {
   if (!targetPlate || !targetTime) return { success: false, reason: "missing_identity" };
 
   return safeEvaluate(page, ({ expectedPlate, expectedTime }) => {
+    const toMinutes = (value) => {
+      const match = String(value || "").match(/(\d{1,2})[.:](\d{2})/);
+      if (!match) return null;
+      return (Number(match[1]) * 60) + Number(match[2]);
+    };
+    const expectedMinutes = toMinutes(expectedTime);
     const events = [...document.querySelectorAll(".fc-time-grid-event, .fc-event")].filter((el) => {
       const rect = el.getBoundingClientRect();
       return rect.width > 2 && rect.height > 2;
     });
     const match = events.find((el) => {
       const title = String((el.querySelector(".fc-title") || el).textContent || "").toUpperCase();
-      const shownTime = String(el.querySelector(".fc-time")?.textContent || "")
-        .trim().slice(0, 5).replace(".", ":");
-      return title.includes(expectedPlate) && shownTime === expectedTime;
+      const shownMinutes = toMinutes(el.querySelector(".fc-time")?.textContent || "");
+      return title.includes(expectedPlate)
+        && expectedMinutes != null
+        && shownMinutes === expectedMinutes;
     });
     if (!match) return { success: false, reason: "exact_event_not_found" };
 
