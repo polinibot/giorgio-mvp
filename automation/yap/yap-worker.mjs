@@ -3278,6 +3278,52 @@ async function gridAddRow(page, hasRows) {
   return { ok: false, via: target.via, reason: "row_count_not_increased", before: target.before };
 }
 
+// Elimina la riga tipo "I" (Intestazione) vuota auto-inserita da YAP in ODL nuovi.
+// Preventivo non ha questa riga; la funzione è no-op se non trova righe "I" vuote.
+async function gridDeleteEmptyIntestazione(page) {
+  const target = await safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const rows = [...document.querySelectorAll("tr")]
+      .filter((tr) => tr.querySelector("td[yapcolumnid]") && isVisible(tr));
+    for (const row of rows) {
+      const tipoCell = row.querySelector('td[yapcolumnid="2"]');
+      if (!tipoCell) continue;
+      const tipoText = (tipoCell.textContent || "").trim().toUpperCase();
+      if (tipoText !== "I") continue;
+      const articoloText = (row.querySelector('td[yapcolumnid="3"]')?.textContent || "").trim();
+      const descrizioneText = (row.querySelector('td[yapcolumnid="4"]')?.textContent || "").trim();
+      if (articoloText || descrizioneText) continue;
+      // Riga "I" vuota trovata: clicca il delete anchor (ultimo gwt-Anchor della riga, esclude col 13 = add)
+      const addAnchor = row.querySelector('td[yapcolumnid="13"] a.gwt-Anchor');
+      const anchors = [...row.querySelectorAll("a.gwt-Anchor")].filter(isVisible);
+      const deleteAnchor = [...anchors].reverse().find((a) => a !== addAnchor);
+      if (!deleteAnchor) continue;
+      const r = deleteAnchor.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, rowCount: rows.length };
+    }
+    return null;
+  }).catch(() => null);
+
+  if (!target) return { deleted: false, reason: "no_empty_I_row" };
+
+  await page.mouse.click(target.x, target.y).catch(() => {});
+  const reduced = await page.waitForFunction((before) => {
+    const rows = [...document.querySelectorAll("tr")].filter((tr) => {
+      const r = tr.getBoundingClientRect();
+      const s = window.getComputedStyle(tr);
+      return tr.querySelector("td[yapcolumnid]") && r.width > 1 && r.height > 1
+        && s.display !== "none" && s.visibility !== "hidden";
+    });
+    return rows.length < before;
+  }, target.rowCount, { timeout: 1500 }).then(() => true).catch(() => false);
+
+  return { deleted: reduced, reason: reduced ? null : "row_count_not_decreased" };
+}
+
 // Seleziona un articolo per CODICE ESATTO dal catalogo autocomplete.
 async function gridSelectArticolo(page, rowIndex, code, options = {}) {
   const cell = await gridCellRect(page, rowIndex, GRID_COL.articolo);
@@ -4419,6 +4465,11 @@ async function writeWorkGrid(page, job, args = {}) {
     await waitForPracticeWorkspaceReady(page, 2500).catch(() => {});
     return out;
   }
+
+  // Elimina righe tipo "I" (Intestazione) vuote auto-inserite da YAP in ODL nuovi.
+  const intCleanup = await gridDeleteEmptyIntestazione(page);
+  logAction("grid_intestazione_cleanup", intCleanup);
+  if (intCleanup.deleted) out.changed = true;
 
   // SALVA il documento: senza questo le righe restano solo client-side e si perdono
   // (su YAP "Preventivi" risultava vuoto). Il bottone Salva che si disabilita conferma.
