@@ -5740,11 +5740,33 @@ async function fillAppointmentPopup(page, job) {
   let vehicleState = "skipped"; // skipped|linked|not_found|failed
   const cosaX = cosaInput.x + Math.min(cosaInput.width / 2, 60);
   const cosaY = cosaInput.y + (cosaInput.height / 2);
-  await page.mouse.click(cosaX, cosaY).catch(() => {});
-  await page.waitForTimeout(120).catch(() => {});
-  await page.keyboard.press("Control+A").catch(() => {});
-  await page.keyboard.press("Delete").catch(() => {});
   if (plate) {
+    const currentVehicle = await readAppointmentVehicleText(page);
+    if (currentVehicle?.linked) {
+      vehicleState = "linked";
+      logAction("vehicle_existing_link", { plate, text: currentVehicle.text || null });
+    } else {
+      const directVehicle = await selectVehicleByPlate(page, plate, { skipInputFallback: true });
+      logAction("vehicle_direct_pick", {
+        plate,
+        found: Boolean(directVehicle?.found),
+        selected: Boolean(directVehicle?.selected),
+        confirmed: Boolean(directVehicle?.confirmed),
+        strategy: directVehicle?.strategy || null,
+        reason: directVehicle?.reason || null,
+        vehicleText: directVehicle?.vehicleText || null,
+      });
+      if (directVehicle?.confirmed) vehicleState = "linked";
+    }
+  }
+
+  // Fallback legacy: alcuni layout YAP non espongono il selettore Veicolo separato
+  // e accettano la targa soltanto tramite l'autocomplete del campo Cosa.
+  if (plate && vehicleState !== "linked") {
+    await page.mouse.click(cosaX, cosaY).catch(() => {});
+    await page.waitForTimeout(120).catch(() => {});
+    await page.keyboard.press("Control+A").catch(() => {});
+    await page.keyboard.press("Delete").catch(() => {});
     await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
 
     // Trova la RIGA-suggerimento (CellList GWT) con la targa, fuori dall'agenda di sfondo.
@@ -5893,7 +5915,11 @@ async function fillAppointmentPopup(page, job) {
       vehicleState = "failed";
     }
     logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, sug: sug.state, label: sug.label || null, steps, vehicleState, suggestPanelCount: sug.suggestPanelCount ?? null, retriggers });
-  } else {
+  } else if (!plate) {
+    await page.mouse.click(cosaX, cosaY).catch(() => {});
+    await page.waitForTimeout(120).catch(() => {});
+    await page.keyboard.press("Control+A").catch(() => {});
+    await page.keyboard.press("Delete").catch(() => {});
     await page.keyboard.type(cosaValue, { delay: 25 }).catch(() => {});
   }
   // Retry tag SOLO se il popup e' ancora aperto: dopo l'aggancio veicolo YAP puo'
