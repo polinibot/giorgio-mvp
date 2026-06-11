@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Request, status, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func, extract
@@ -2692,51 +2692,102 @@ async def delete_practice(
         if time_arg:
             yap_args.extend(["--time", time_arg])
 
-        # Segna la pratica come DELETED subito e risponde immediatamente:
-        # il worker YAP gira in background per non colpire il timeout HTTP ~30s di Railway.
-        practice.status = PracticeStatus.DELETED
-        practice.updated_by_telegram_id = user_data["id"]
-        db.commit()
-        logger.info("Practice %d soft-deleted by user %d (YAP delete async)", practice_id, user_data["id"])
+        # StreamingResponse: invia \n immediatamente (evita l'idle-timeout di Railway ~30s)
+        # poi heartbeat ogni 8s mentre il worker gira, infine il JSON reale.
+        # Giorgio viene segnato DELETED SOLO dopo la conferma YAP — 100% consistente.
+        # JSON.parse() accetta whitespace/newline iniziali, quindi il client non cambia nulla.
+        captured_pid = practice_id
+        captured_uid = user_data["id"]
+        captured_date_iso = date_iso
+        captured_search = search
 
-        async def _bg_yap_delete() -> None:
-            bg_db = SessionLocal()
+        async def _delete_stream():
+            import json as _json
+            yield b"\n"  # apertura immediata stream — Railway non va in timeout
+            gen_db = SessionLocal()
             try:
-                result = await _run_yap_script(
-                    "yap-delete-appointment.mjs",
-                    yap_args,
-                    timeout_seconds=230,
-                    db=bg_db,
+                delete_task = asyncio.ensure_future(
+                    _run_yap_script("yap-delete-appointment.mjs", yap_args, timeout_seconds=230, db=gen_db)
                 )
-                failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
-                _write_yap_delete_dump({
-                    "practice_id": practice_id,
-                    "args": yap_args,
-                    "attempted": True,
-                    "deleted": bool(result.get("deleted")),
-                    "found": result.get("found"),
-                    "status": result.get("status"),
-                    "failure_status": failure_status,
-                    "deleteAction": result.get("deleteAction"),
-                    "worker_phases": result.get("worker_phases"),
-                })
-                if result.get("deleted"):
-                    logger.info("BG YAP delete OK practice %d (date=%s search=%s)", practice_id, date_iso, search)
-                else:
-                    logger.warning(
-                        "BG YAP delete NOK practice %d (date=%s search=%s status=%s)",
-                        practice_id, date_iso, search, failure_status,
-                    )
-            except Exception as bg_err:
-                logger.error("BG YAP delete exception practice %d: %s", practice_id, bg_err)
-            finally:
-                bg_db.close()
+                # heartbeat ogni 8s mentre il task gira
+                while not delete_task.done():
+                    try:
+                        await asyncio.wait_for(asyncio.shield(delete_task), timeout=8.0)
+                    except asyncio.TimeoutError:
+                        yield b"\n"
+                result = await delete_task
+            except Exception as exc:
+                gen_db.close()
+                logger.error("YAP delete stream exception practice %d: %s", captured_pid, exc)
+                yield _json.dumps({"success": False, "data": None, "errors": str(exc)}).encode()
+                return
 
-        asyncio.create_task(_bg_yap_delete())
-        return APIResponse(success=True, data={
-            "message": "Pratica cancellata. Pulizia agenda YAP in corso.",
-            "yap": {"async": True, "attempted": True},
-        })
+            failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
+            _write_yap_delete_dump({
+                "practice_id": captured_pid,
+                "args": yap_args,
+                "attempted": True,
+                "deleted": bool(result.get("deleted")),
+                "found": result.get("found"),
+                "status": result.get("status"),
+                "failure_status": failure_status,
+                "deleteAction": result.get("deleteAction"),
+                "worker_phases": result.get("worker_phases"),
+            })
+
+            if not result.get("deleted"):
+                gen_db.close()
+                if failure_status == "blocked_by_odl":
+                    yield _json.dumps({"success": False, "data": None, "errors": {
+                        "code": "HTTP_ERROR",
+                        "detail": "Impossibile cancellare la pratica: l'appuntamento YAP è collegato a un ordine di lavoro",
+                    }}).encode()
+                    return
+                if failure_status == "blocked_by_preventivo":
+                    yield _json.dumps({"success": False, "data": None, "errors": {
+                        "code": "HTTP_ERROR",
+                        "detail": "Impossibile cancellare la pratica: l'appuntamento YAP è collegato a un preventivo. Elimina prima il preventivo su YAP, poi riprova.",
+                    }}).encode()
+                    return
+                if failure_status in {"not_found"} or result.get("found") is False:
+                    # Non trovato su YAP = gia' rimosso; segniamo comunque deleted in Giorgio
+                    msg = (
+                        "Pratica eliminata. ATTENZIONE: l'appuntamento NON e' stato trovato su YAP "
+                        "(forse gia' rimosso, o data/ora/targa non corrispondono): verifica l'agenda YAP."
+                    )
+                    logger.warning(
+                        "Practice %d: YAP delete found no appointment (date=%s search=%s status=%s)",
+                        captured_pid, captured_date_iso, captured_search, failure_status,
+                    )
+                else:
+                    yield _json.dumps({"success": False, "data": None, "errors": {
+                        "code": "HTTP_ERROR",
+                        "detail": "Impossibile cancellare l'appuntamento su YAP",
+                    }}).encode()
+                    return
+            else:
+                msg = "Pratica e appuntamento YAP eliminati."
+
+            # YAP ha confermato (o non trovato): segna DELETED in Giorgio
+            try:
+                p = gen_db.query(Practice).filter(Practice.id == captured_pid).first()
+                if p:
+                    p.status = PracticeStatus.DELETED
+                    p.updated_by_telegram_id = captured_uid
+                    gen_db.commit()
+                    logger.info("Practice %d soft-deleted after YAP confirmed (status=%s)", captured_pid, failure_status or "deleted")
+            except Exception as db_exc:
+                logger.error("DB commit failed after YAP delete practice %d: %s", captured_pid, db_exc)
+            finally:
+                gen_db.close()
+
+            yield _json.dumps({
+                "success": True,
+                "data": {"message": msg, "yap": {"deleted": bool(result.get("deleted")), "status": result.get("status")}},
+                "errors": None,
+            }).encode()
+
+        return StreamingResponse(_delete_stream(), media_type="application/json")
     except HTTPException:
         raise
     except Exception as e:
