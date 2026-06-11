@@ -1697,6 +1697,42 @@ async function waitForPracticeTransition(page, timeout = 6000) {
   return await getPracticeWorkspaceState(page);
 }
 
+async function clickExactAgendaEvent(page, { plate, time }) {
+  const targetPlate = String(plate || "").trim().toUpperCase();
+  const targetTime = String(time || "").trim().slice(0, 5).replace(".", ":");
+  if (!targetPlate || !targetTime) return { success: false, reason: "missing_identity" };
+
+  return safeEvaluate(page, ({ expectedPlate, expectedTime }) => {
+    const events = [...document.querySelectorAll(".fc-time-grid-event, .fc-event")].filter((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 2 && rect.height > 2;
+    });
+    const match = events.find((el) => {
+      const title = String((el.querySelector(".fc-title") || el).textContent || "").toUpperCase();
+      const shownTime = String(el.querySelector(".fc-time")?.textContent || "")
+        .trim().slice(0, 5).replace(".", ":");
+      return title.includes(expectedPlate) && shownTime === expectedTime;
+    });
+    if (!match) return { success: false, reason: "exact_event_not_found" };
+
+    const rect = match.getBoundingClientRect();
+    const center = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    for (const type of ["click", "dblclick"]) {
+      match.dispatchEvent(new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: center.x,
+        clientY: center.y,
+      }));
+    }
+    return { success: true, time: expectedTime };
+  }, { expectedPlate: targetPlate, expectedTime: targetTime }).catch(() => ({
+    success: false,
+    reason: "exact_event_click_failed",
+  }));
+}
+
 async function openPracticeFromAppointment(page, job) {
   // Quando YAP auto-chiude il popup (alreadyClosed=true) naviga direttamente alla pagina
   // pratica: in quel caso siamo già a destinazione, non serve riaprire nulla.
@@ -3822,9 +3858,13 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
     if (section.materiali_euro != null) {
       out.attempted = true;
       writeReport.materials.attempted = true;
+      const materialsTabReady = await clickBottomSectionTab(page, "Materiali di consumo").catch(() => false);
+      await page.waitForTimeout(180).catch(() => {});
       const matOkResult = await fillWithRetry(
         page,
         [
+          ["materiali di consumo", "importo"],
+          ["materiali di consumo", "euro"],
           [...repartoKeys, "materiali", "consumo", "euro"],
           [...repartoKeys, "materiali di consumo", "materiali"],
           [...repartoKeys, "materiali"],
@@ -3833,15 +3873,23 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         {},
         { debug: args.debug, fieldId: `odl.${reparto}.materiali`, returnDebug: args.debug },
       );
-      const matOk = Boolean(matOkResult?.ok ?? matOkResult);
+      const matOk = materialsTabReady && Boolean(matOkResult?.ok ?? matOkResult);
       writeReport.materials.success = writeReport.materials.success || matOk;
-      if (!matOk && !writeReport.materials.error) writeReport.materials.error = "materials_field_not_found";
+      if (matOk) writeReport.materials.error = null;
+      else if (!writeReport.materials.error) {
+        writeReport.materials.error = materialsTabReady ? "materials_field_not_found" : "materials_tab_not_found";
+      }
       out.wroteAny = out.wroteAny || matOk;
-      if (sectionDebug) sectionDebug.fields.materiali = matOkResult?.debug || null;
+      if (sectionDebug) sectionDebug.fields.materiali = {
+        tabReady: materialsTabReady,
+        ...(matOkResult?.debug || {}),
+      };
     }
     if (section.smaltimento_applica) {
       out.attempted = true;
       writeReport.waste.attempted = true;
+      const wasteTabReady = await clickBottomSectionTab(page, "Smaltimento rifiuti").catch(() => false);
+      await page.waitForTimeout(180).catch(() => {});
       const wasteDetails = sectionWasteDetails(section);
       logAction("waste_calc", wasteDetails || {
         reparto,
@@ -3861,11 +3909,17 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         {},
         { debug: args.debug, fieldId: `odl.${reparto}.smaltimento`, returnDebug: args.debug },
       );
-      const smaltOk = Boolean(smaltOkResult?.ok ?? smaltOkResult);
+      const smaltOk = wasteTabReady && Boolean(smaltOkResult?.ok ?? smaltOkResult);
       writeReport.waste.success = writeReport.waste.success || smaltOk;
-      if (!smaltOk && !writeReport.waste.error) writeReport.waste.error = "waste_field_not_found";
+      if (smaltOk) writeReport.waste.error = null;
+      else if (!writeReport.waste.error) {
+        writeReport.waste.error = wasteTabReady ? "waste_field_not_found" : "waste_tab_not_found";
+      }
       out.wroteAny = out.wroteAny || smaltOk;
-      if (sectionDebug) sectionDebug.fields.smaltimento = smaltOkResult?.debug || null;
+      if (sectionDebug) sectionDebug.fields.smaltimento = {
+        tabReady: wasteTabReady,
+        ...(smaltOkResult?.debug || {}),
+      };
 
       const smaltAmount = sectionWasteAmount(section);
       if (smaltAmount != null) {
@@ -3891,10 +3945,17 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
           {},
           { debug: args.debug, fieldId: `odl.${reparto}.smaltimento_importo`, returnDebug: args.debug },
         );
-        const smaltAmountOk = Boolean(smaltAmountResult?.ok ?? smaltAmountResult);
+        const smaltAmountOk = wasteTabReady && Boolean(smaltAmountResult?.ok ?? smaltAmountResult);
         writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltAmountOk;
         writeReport.waste.success = writeReport.waste.success || smaltAmountOk;
-        if (!smaltAmountOk && !writeReport.waste.amountError) writeReport.waste.amountError = "waste_amount_field_not_found";
+        if (smaltAmountOk) {
+          writeReport.waste.amountError = null;
+          writeReport.waste.error = null;
+        } else if (!writeReport.waste.amountError) {
+          writeReport.waste.amountError = wasteTabReady
+            ? "waste_amount_field_not_found"
+            : "waste_tab_not_found";
+        }
         out.wroteAny = out.wroteAny || smaltAmountOk;
         if (sectionDebug) sectionDebug.fields.smaltimentoImporto = smaltAmountResult?.debug || null;
       }
@@ -6518,25 +6579,18 @@ async function runYapAutomation(job, args) {
     logPhase("dedup", "done", { hit: dedup.hit });
     if (dedup.hit) {
       // Upsert su duplicato: apriamo l'evento esistente, riallineiamo popup/tag e continuiamo con ODL.
-      const dedupTitle = dedup?.event?.title || "";
-      const dedupTime = dedup?.event?.time || "";
-      const preferredTerms = [
-        job.customer.plate,
-        dedupTitle,
-        pickCosaFromJob(job),
-        job.customer.name,
-        dedupTime,
-      ].filter(Boolean);
-      let openExisting = await clickAgendaEvent(page, preferredTerms);
-      if (!openExisting?.success) {
-        openExisting = await clickAgendaEvent(page, [job.customer.plate].filter(Boolean));
-      }
+      // Il fallback per sola targa puo' aprire un altro appuntamento dello stesso
+      // veicolo e il resync finirebbe per spostarlo. Serve identita' targa + ora.
+      const openExisting = await clickExactAgendaEvent(page, {
+        plate: job.customer.plate,
+        time: job.appointment.time,
+      });
       if (!openExisting?.success) {
         return {
           saved: false,
           mode: "commit-blocked-duplicate",
           dedup,
-          message: "Commit bloccato: appuntamento duplicato rilevato in agenda.",
+          message: "Commit bloccato: impossibile identificare con certezza lo slot YAP esatto.",
         };
       }
       await page.waitForTimeout(700);

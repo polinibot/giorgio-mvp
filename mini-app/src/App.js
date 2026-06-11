@@ -394,64 +394,20 @@ function formatProgressElapsed(startedAt) {
 }
 
 function getYapProgressPercent(action, startedAt) {
-  const elapsed = formatProgressElapsed(startedAt);
-  const pointsByAction = {
-    sync: [[0, 4], [6, 10], [16, 22], [28, 38], [42, 56], [58, 70], [78, 82], [98, 89], [130, 93], [190, 95]],
-    audit: [[0, 4], [7, 12], [18, 26], [34, 44], [52, 60], [76, 74], [110, 82], [150, 88], [210, 92]],
-    delete: [[0, 4], [6, 14], [18, 32], [30, 50], [44, 66], [62, 78], [90, 86], [140, 91]],
-  };
-  const points = pointsByAction[action] || pointsByAction.audit;
-  if (elapsed <= points[0][0]) return points[0][1];
-  for (let i = 1; i < points.length; i += 1) {
-    const [prevTime, prevPercent] = points[i - 1];
-    const [nextTime, nextPercent] = points[i];
-    if (elapsed <= nextTime) {
-      const ratio = (elapsed - prevTime) / Math.max(1, nextTime - prevTime);
-      return Number((prevPercent + ((nextPercent - prevPercent) * ratio)).toFixed(1));
-    }
-  }
-  return points[points.length - 1][1];
+  // Il backend non trasmette fasi live durante il POST lungo. Qualsiasi percentuale
+  // intermedia basata sul tempo sarebbe inventata: 0 = nessun completamento ancora
+  // confermato, 100 viene impostato esclusivamente alla risposta terminale.
+  return 0;
 }
 
 function getYapProgressLabel(action, startedAt, fallback = '') {
   const elapsed = formatProgressElapsed(startedAt);
-  const hints = {
-    sync: [
-      [0,   'YAP: avvio browser...'],
-      [6,   'YAP: ripristino sessione...'],
-      [14,  'YAP: accesso al portale...'],
-      [26,  'YAP: apertura agenda...'],
-      [38,  'YAP: controllo duplicati...'],
-      [50,  'YAP: salvataggio appuntamento...'],
-      [64,  'YAP: scrittura pratica e ODL...'],
-      [82,  'YAP: verifica automatica campi...'],
-      [110, 'YAP: conferma finale della verifica...'],
-      [150, 'YAP: portale lento, attendere ancora...'],
-    ],
-    audit: [
-      [0,  'YAP: avvio browser...'],
-      [7,  'YAP: ripristino sessione...'],
-      [18, 'YAP: apertura appuntamento in agenda...'],
-      [34, 'YAP: lettura campi e tag...'],
-      [52, 'YAP: confronto con i dati della pratica...'],
-      [76, 'YAP: verifica finale campi...'],
-      [110, 'YAP: chiusura verifica...'],
-      [150, 'YAP: portale lento, attendere ancora...'],
-    ],
-    delete: [
-      [0,  'YAP: avvio browser...'],
-      [6,  'YAP: ripristino sessione...'],
-      [18, 'YAP: ricerca appuntamento in agenda...'],
-      [30, 'YAP: apertura dettagli...'],
-      [44, 'YAP: conferma eliminazione...'],
-      [62, 'YAP: verifica rimozione...'],
-    ],
-  };
-  const actionHints = hints[action] || [];
-  const picked = actionHints.reduce((label, [threshold, text]) => (
-    elapsed >= threshold ? text : label
-  ), fallback || 'Operazione YAP in corso...');
-  return picked;
+  const actionLabel = {
+    sync: 'Sincronizzazione YAP',
+    audit: 'Verifica YAP',
+    delete: 'Eliminazione YAP',
+  }[action] || fallback || 'Operazione YAP';
+  return `${actionLabel} in esecuzione sul server. Fase live non disponibile (${elapsed}s trascorsi).`;
 }
 
 function getYapSyncScope(result) {
@@ -2358,11 +2314,13 @@ function App() {
           validate: 18,
           save: 45,
           photos: 72,
-          sync: 92,
+          sync: 58,
         };
         const cap = caps[current.stage] ?? 92;
         const increment = current.percent < 20 ? 3.5 : current.percent < 60 ? 1.6 : 0.6;
-        const nextPercent = Math.min(cap, Number((current.percent + increment).toFixed(1)));
+        const nextPercent = current.stage === 'sync'
+          ? current.percent
+          : Math.min(cap, Number((current.percent + increment).toFixed(1)));
         const nextLabel = current.stage === 'sync'
           ? getYapProgressLabel('sync', current.stageStartedAt || current.startedAt, current.label)
           : current.label;
@@ -2424,7 +2382,7 @@ function App() {
       practiceId,
       label,
       status: 'running',
-      percent: 4,
+      percent: 0,
       startedAt: now,
     });
     yapActionProgressTimerRef.current = setInterval(() => {
@@ -3306,7 +3264,7 @@ function App() {
       return { status: 'synced', simulated: true };
     }
     if (!silent) {
-      startYapActionProgress('sync', id, 'YAP: avvio browser e ripristino sessione...');
+      startYapActionProgress('sync', id, 'Sincronizzazione YAP avviata. In attesa dell’esito reale dal server...');
     }
     yapSyncRequestRef.current = { practiceId: id, promise: true };
     setYapSyncLoading(true);
@@ -3327,7 +3285,7 @@ function App() {
       if (!silent) {
         const phaseLabel = workerPhasesToLabel(data.worker_phases)
           || summarizePhaseTimeline(data.phase_timeline, 'YAP: scrittura completata...');
-        updateYapActionProgress({ percent: 90, label: phaseLabel });
+        updateYapActionProgress({ percent: 100, label: phaseLabel });
       }
       if (['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(data.status)) {
         invalidatePracticeCaches(id);
@@ -3372,7 +3330,7 @@ function App() {
         && (err?.code === 'ERR_NETWORK' || err?.code === 'ECONNABORTED'
             || /network|timeout/i.test(String(err?.message || '')));
       if (isNetworkError) {
-        if (!silent) updateYapActionProgress({ percent: 92, label: 'Rete interrotta: recupero esito dal server...' });
+        if (!silent) updateYapActionProgress({ percent: 0, label: 'Risposta interrotta: operazione non conclusa lato app. Recupero dell’esito reale dal server...' });
         const recovered = await recoverPersistedSyncResult(id, syncStartedAtMs);
         if (recovered) {
           setYapLastResult(recovered);
@@ -3414,12 +3372,12 @@ function App() {
       return { status: 'deleted', simulated: true };
     }
     flushSync(() => {
-      startYapActionProgress('delete', id, 'Eliminazione appuntamento YAP in corso...');
+      startYapActionProgress('delete', id, 'Eliminazione YAP avviata. In attesa dell’esito reale dal server...');
       setYapDeleteLoading(true);
       setYapLastResult(null);
       setYapLastPracticeId(id);
     });
-    updateYapActionProgress({ percent: 10, label: 'YAP: avvio browser e ripristino sessione...' });
+    updateYapActionProgress({ percent: 0, label: 'Eliminazione YAP in esecuzione sul server. Fase live non disponibile.' });
     await waitForNextPaint();
     try {
       const listPractice = Array.isArray(practices)
@@ -3431,7 +3389,6 @@ function App() {
         || '';
       const requestOptions = inferredTime ? { ...options, time: inferredTime } : { ...options };
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
-      updateYapActionProgress({ percent: 22, label: 'YAP: accesso al portale in corso...' });
       // NON ritentare in automatico: la delete e' non idempotente lato YAP.
       // 340s: attesa lock (100s) + worker con cascata preventivo/ODL (230s).
       const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 340000 });
@@ -3554,7 +3511,9 @@ function App() {
             {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
             <span className="save-progress-label">{yapActionProgress.label}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-              <span className="save-progress-percent">{Math.round(yapActionProgress.percent)}%</span>
+              <span className="save-progress-percent">
+                {Math.round(yapActionProgress.percent)}% {yapActionProgress.status === 'running' ? 'confermato' : 'completato'}
+              </span>
               {yapActionProgress.status === 'running' && (
                 <button
                   type="button"
@@ -5076,28 +5035,11 @@ function App() {
           await uploadQueuedPhotos(practiceId, (patch) => updateSaveProgress(patch));
         }
 
-        const syncStageStartedAt = Date.now();
         updateSaveProgress({
-          label: getYapProgressLabel('sync', syncStageStartedAt, 'YAP: precheck e avvio sincronizzazione...'),
+          label: 'Pratica salvata. Sincronizzazione YAP in esecuzione; percentuale live non disponibile.',
           stage: 'sync',
-          percent: 72,
+          percent: 58,
           status: 'running',
-        });
-        [
-          [12000, 82],
-          [30000, 88],
-          [55000, 91],
-          [85000, 92],
-          [120000, 92],
-        ].forEach(([delay, percent]) => {
-          saveHintTimers.push(setTimeout(() => {
-            updateSaveProgress({
-              label: getYapProgressLabel('sync', syncStageStartedAt, 'YAP: sync in corso...'),
-              stage: 'sync',
-              percent,
-              status: 'running',
-            });
-          }, delay));
         });
         addToast('Salvataggio completato. Sync YAP avviata...', 'info');
 
