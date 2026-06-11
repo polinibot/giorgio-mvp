@@ -331,35 +331,50 @@ async function clickAgendaEventRobust(page, searchTerms, expectedTime, dateIso) 
 
     const best = ranked[0]?.event || null;
 
-    // Pass 1: Playwright locator per .fc-time (robusto anche quando .fc-title mostra icone "V")
-    // best.time viene dal textContent del DOM (es. "10:00 - 10:20" oppure "10.00 - 10.20"):
-    // usiamo il formato raw (split su spazio) perché corrisponde esattamente a ciò che hasText cerca.
+    // Pass 1: DOM dispatchEvent per .fc-time (stesso meccanismo di clickAgendaEvent, ma per orario
+    // invece che per testo — funziona anche quando .fc-title mostra icone "V").
     if (best?.time) {
-      const timePart = String(best.time).trim().split(" ")[0]; // "10:00" o "10.00", com'è nel DOM
+      const timePart = String(best.time).trim().split(" ")[0];
       const timeAlt = timePart.includes(":") ? timePart.replace(":", ".") : timePart.replace(".", ":");
-      for (const t of [timePart, timeAlt]) {
-        try {
-          const evLoc = page
-            .locator(".fc-time-grid-event:visible, .fc-event:visible")
-            .filter({ has: page.locator(".fc-time").filter({ hasText: t }) })
-            .first();
-          if (await evLoc.count()) {
-            await evLoc.dblclick({ timeout: 2000 });
-            await page.waitForTimeout(800);
-            if (await appointmentPopupVisible(page)) {
-              return { success: true, text: best.title, time: best.time, method: "locator_time_click", score: ranked[0]?.score || 0, events: lastEvents };
+      const clicked = await page.evaluate((candidates) => {
+        const events = [...document.querySelectorAll(".fc-time-grid-event, .fc-event")].filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 2 && r.height > 2;
+        });
+        for (const el of events) {
+          const timeEl = el.querySelector(".fc-time");
+          const t = (timeEl?.textContent || "").trim();
+          if (candidates.some((c) => t.startsWith(c))) {
+            const r = el.getBoundingClientRect();
+            const cx = r.left + r.width / 2;
+            const cy = r.top + r.height / 2;
+            for (const type of ["click", "dblclick"]) {
+              el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy }));
             }
+            return true;
           }
-        } catch (_) {}
+        }
+        return false;
+      }, [timePart, timeAlt]).catch(() => false);
+      if (clicked) {
+        await page.waitForTimeout(900);
+        if (await appointmentPopupVisible(page)) {
+          return { success: true, text: best.title, time: best.time, method: "dom_time_dispatch", score: ranked[0]?.score || 0, events: lastEvents };
+        }
       }
     }
 
-    // Pass 2: coordinate click fallback
+    // Pass 2: coordinate click via Playwright mouse (fisico)
     if (best && Number.isFinite(best.x) && Number.isFinite(best.y)) {
+      await page.mouse.click(best.x, best.y).catch(() => {});
+      await page.waitForTimeout(600);
+      if (await appointmentPopupVisible(page)) {
+        return { success: true, text: best.title, time: best.time, method: "mouse_click", score: ranked[0]?.score || 0, events: lastEvents };
+      }
       await page.mouse.dblclick(best.x, best.y).catch(() => {});
       await page.waitForTimeout(800);
       if (await appointmentPopupVisible(page)) {
-        return { success: true, text: best.title, time: best.time, method: "mouse_best_event", score: ranked[0]?.score || 0, events: lastEvents };
+        return { success: true, text: best.title, time: best.time, method: "mouse_dblclick", score: ranked[0]?.score || 0, events: lastEvents };
       }
     }
 
