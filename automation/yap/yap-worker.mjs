@@ -3963,10 +3963,25 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
       'input[type="text"], input[type="number"], input:not([type]), textarea'
     )].filter(isVisible)
       .filter((el) => !el.readOnly && !el.disabled)
-      .filter((el) => !el.closest("tr[__gwt_row]") && !el.closest("td[yapcolumnid]") && !el.closest(".gwt-DecoratedPopupPanel"));
+      .filter((el) => !el.closest("tr[__gwt_row]") && !el.closest("td[yapcolumnid]") && !el.closest(".gwt-DecoratedPopupPanel"))
+      // GUARD: mai scrivere in un campo data (dd/mm/yyyy) — scriverci dentro corrompe la
+      // data documento e blocca il Salva con "valori non validi".
+      .filter((el) => !/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(String(el.value || "").trim()));
     if (!inputs.length) return null;
+    // Profondità = quanti pannelli-tab GWT contengono il campo. Il sub-tab attivo
+    // (Smaltimento rifiuti / Materiali) è ANNIDATO dentro il tab Preventivi/ODL, quindi
+    // i suoi campi hanno profondità maggiore del campo Data documento (che sta nel solo
+    // tab Preventivi). Preferire la profondità evita di scrivere nel campo Data.
+    const tabDepth = (el) => {
+      let depth = 0;
+      for (let n = el.parentElement; n; n = n.parentElement) {
+        if (n.classList && n.classList.contains("gwt-TabLayoutPanelContent")) depth += 1;
+      }
+      return depth;
+    };
     let best = inputs[0];
     let bestScore = -1;
+    let bestDepth = -1;
     for (const inp of inputs) {
       // Cerca il container più specifico (tab panel, flex table) per ridurre il rumore
       const container = inp.closest(
@@ -3974,13 +3989,18 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
       ) || inp.closest("div") || inp.parentElement;
       const text = norm(container?.textContent || "");
       const score = kws.filter((kw) => text.includes(kw)).length;
-      if (score > bestScore) { bestScore = score; best = inp; }
+      const depth = tabDepth(inp);
+      // 1° criterio: profondità nel pannello-tab; 2° criterio: match keyword
+      if (depth > bestDepth || (depth === bestDepth && score > bestScore)) {
+        bestDepth = depth; bestScore = score; best = inp;
+      }
     }
     const r = best.getBoundingClientRect();
     return {
       x: Math.round(r.x + r.width / 2),
       y: Math.round(r.y + r.height / 2),
       score: bestScore,
+      depth: bestDepth,
       totalInputs: inputs.length,
       placeholder: best.getAttribute("placeholder") || "",
       currentValue: (best.value || "").slice(0, 40),
@@ -3992,6 +4012,7 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
     value: String(value),
     found: Boolean(result),
     score: result?.score ?? null,
+    depth: result?.depth ?? null,
     totalInputs: result?.totalInputs ?? 0,
     placeholder: result?.placeholder ?? null,
     currentValue: result?.currentValue ?? null,
@@ -4036,30 +4057,21 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
       writeReport.materials.attempted = true;
       const materialsTabReady = await clickBottomSectionTab(page, "Materiali di consumo").catch(() => false);
       await page.waitForTimeout(180).catch(() => {});
-      const matOkResult = await fillWithRetry(
+      // Eventi tastiera REALI (isTrusted=true): il DOM-dispatch di fillWithRetry viene
+      // ignorato da GWT, lasciando il campo materiali vuoto come per lo smaltimento.
+      const matOkResult = await typeIntoVisibleTabInput(
         page,
-        [
-          ["materiali di consumo", "importo"],
-          ["materiali di consumo", "euro"],
-          [...repartoKeys, "materiali", "consumo", "euro"],
-          [...repartoKeys, "materiali di consumo", "materiali"],
-          [...repartoKeys, "materiali"],
-        ],
         String(section.materiali_euro),
-        {},
-        { debug: args.debug, fieldId: `odl.${reparto}.materiali`, returnDebug: args.debug },
+        [...repartoKeys, "materiali", "consumo", "importo", "euro"],
       );
-      const matOk = materialsTabReady && Boolean(matOkResult?.ok ?? matOkResult);
+      const matOk = materialsTabReady && Boolean(matOkResult);
       writeReport.materials.success = writeReport.materials.success || matOk;
       if (matOk) writeReport.materials.error = null;
       else if (!writeReport.materials.error) {
         writeReport.materials.error = materialsTabReady ? "materials_field_not_found" : "materials_tab_not_found";
       }
       out.wroteAny = out.wroteAny || matOk;
-      if (sectionDebug) sectionDebug.fields.materiali = {
-        tabReady: materialsTabReady,
-        ...(matOkResult?.debug || {}),
-      };
+      if (sectionDebug) sectionDebug.fields.materiali = { tabReady: materialsTabReady };
     }
     if (section.smaltimento_applica) {
       out.attempted = true;
