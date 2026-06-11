@@ -3899,6 +3899,42 @@ function buildWorkGridDescriptionLines(job) {
   return buildWorkGridRows(job);
 }
 
+// Scrive un valore in un INPUT visibile nel tab correntemente attivo usando eventi
+// tastiera REALI (isTrusted=true). Necessario per i tab GWT (Smaltimento rifiuti,
+// Materiali di consumo) che ignorano i DOM-dispatch sintetici di fillWithRetry.
+async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
+  const coords = await safeEvaluate(page, (keywords) => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 8 && r.height > 8 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const kws = (keywords || []).map((k) => norm(k));
+    const inputs = [...document.querySelectorAll('input[type="text"], input:not([type])')].filter(isVisible)
+      .filter((el) => !el.closest("tr[__gwt_row]") && !el.closest("td[yapcolumnid]") && !el.closest(".gwt-DecoratedPopupPanel"));
+    if (!inputs.length) return null;
+    let best = inputs[0];
+    let bestScore = -1;
+    for (const inp of inputs) {
+      const container = inp.closest(".gwt-TabLayoutPanelDeckPanel, .gwt-FlexTable, tr, td, div") || inp.parentElement;
+      const text = norm(container?.textContent || "");
+      const score = kws.filter((kw) => text.includes(kw)).length;
+      if (score > bestScore) { bestScore = score; best = inp; }
+    }
+    const r = best.getBoundingClientRect();
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  }, contextKeywords).catch(() => null);
+  if (!coords) return false;
+  await page.mouse.click(coords.x, coords.y).catch(() => {});
+  await page.waitForTimeout(120).catch(() => {});
+  await page.keyboard.press("Control+A").catch(() => {});
+  await page.keyboard.type(String(value), { delay: 30 }).catch(() => {});
+  await page.keyboard.press("Tab").catch(() => {});
+  await page.waitForTimeout(200).catch(() => {});
+  return true;
+}
+
 async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
   const sections = Array.isArray(job?.sections) ? job.sections : [];
   const out = {
@@ -3964,18 +4000,12 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         amount: null,
         reason: "missing_numeric_basis",
       });
-      const smaltOkResult = await fillWithRetry(
+      const smaltOkResult = await typeIntoVisibleTabInput(
         page,
-        [
-          [...repartoKeys, "smaltimento", "rifiuti", "%"],
-          [...repartoKeys, "smaltimento rifiuti", "smaltimento"],
-          [...repartoKeys, "rifiuti", "percentuale"],
-        ],
         String(section.smaltimento_percentuale ?? 2),
-        {},
-        { debug: args.debug, fieldId: `odl.${reparto}.smaltimento`, returnDebug: args.debug },
+        [reparto, "smaltimento", "rifiuti", "%", "percentuale"],
       );
-      const smaltOk = wasteTabReady && Boolean(smaltOkResult?.ok ?? smaltOkResult);
+      const smaltOk = wasteTabReady && Boolean(smaltOkResult);
       writeReport.waste.success = writeReport.waste.success || smaltOk;
       if (smaltOk) writeReport.waste.error = null;
       else if (!writeReport.waste.error) {
@@ -3997,21 +4027,12 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
           percent: wasteDetails?.percent ?? null,
           subtotal: wasteDetails?.subtotal ?? null,
         });
-        const smaltAmountResult = await fillWithRetry(
+        const smaltAmountResult = await typeIntoVisibleTabInput(
           page,
-          [
-            [...repartoKeys, "smaltimento", "importo"],
-            [...repartoKeys, "smaltimento", "prezzo"],
-            [...repartoKeys, "smaltimento", "euro"],
-            [...repartoKeys, "smaltimento rifiuti", "importo"],
-            [...repartoKeys, "smaltimento rifiuti", "prezzo"],
-            [...repartoKeys, "rifiuti", "totale"],
-          ],
           smaltAmountText,
-          {},
-          { debug: args.debug, fieldId: `odl.${reparto}.smaltimento_importo`, returnDebug: args.debug },
+          [reparto, "smaltimento", "importo", "euro", "rifiuti"],
         );
-        const smaltAmountOk = wasteTabReady && Boolean(smaltAmountResult?.ok ?? smaltAmountResult);
+        const smaltAmountOk = wasteTabReady && Boolean(smaltAmountResult);
         writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltAmountOk;
         writeReport.waste.success = writeReport.waste.success || smaltAmountOk;
         if (smaltAmountOk) {
@@ -4234,9 +4255,6 @@ async function writeWorkGrid(page, job, args = {}) {
       return res;
     };
 
-    await writeCell("cl", row.cl);
-    await writeCell("cat", row.cat);
-    await writeCell("udm", row.udm);
     await writeCell("qta", row.qta);
     await writeCell("prezzo", row.prezzo);
     await writeCell("sconto", row.sconto);
@@ -4855,6 +4873,10 @@ async function writePracticeAndOdl(page, job, args) {
         let extraFieldsResult = { attempted: false, wroteAny: false };
         if (docSaved) {
           extraFieldsResult = await writeGridFlowExtraFields(page, job, writeReport, args).catch((e) => ({ attempted: true, wroteAny: false, error: e?.message || String(e) }));
+          if (extraFieldsResult.wroteAny) {
+            const extraSave = await saveWorkDocument(page, args).catch(() => ({ ok: false }));
+            logAction("extra_fields_save", { ok: extraSave?.ok ?? false, reason: extraSave?.reason ?? null });
+          }
         }
         const materialsExpected = (job.sections || []).some((section) => section?.materiali_euro != null);
         const materialsOk = !materialsExpected || Boolean(writeReport?.materials?.success);
