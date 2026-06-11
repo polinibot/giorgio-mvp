@@ -31,6 +31,7 @@ export function findExistingAppointment(events, { plate, date, time, toleranceMi
   const targetPlate = plate.toUpperCase();
   const [targetH, targetM] = time.replace(".", ":").split(":").map(Number);
 
+  // Pass 1: matching preciso targa+ora (titolo contiene la targa).
   for (const ev of events || []) {
     const title = String(ev.title || "");
     if (!title.toUpperCase().includes(targetPlate)) continue;
@@ -47,6 +48,22 @@ export function findExistingAppointment(events, { plate, date, time, toleranceMi
       return { hit: true, reason: "plate_time_match", event: ev, key, diffMinutes: diff };
     }
   }
+
+  // Pass 2 (fallback): YAP mostra icone al posto del testo nel .fc-title (titolo tronco/icona).
+  // Se c'è un evento esattamente alla stessa ora, consideralo un potenziale duplicato.
+  // Il worker aprirà il popup per verificare i dettagli.
+  for (const ev of events || []) {
+    const timeStr = String(ev.time || "");
+    const startMatch = timeStr.match(/(\d{1,2})[.:](\d{2})/);
+    if (!startMatch) continue;
+    const evH = Number(startMatch[1]);
+    const evM = Number(startMatch[2]);
+    const diff = Math.abs(evH * 60 + evM - (targetH * 60 + targetM));
+    if (diff <= toleranceMinutes) {
+      return { hit: true, reason: "time_match_no_plate_in_title", event: ev, key, diffMinutes: diff };
+    }
+  }
+
   return { hit: false, reason: "not_found", key };
 }
 
