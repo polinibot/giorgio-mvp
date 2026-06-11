@@ -3198,26 +3198,51 @@ async function gridCellRect(page, rowIndex, colId) {
 
 // Clicca "Aggiungi prima riga" (1ª) oppure l'anchor "T" (yapcolumnid=13) per le successive.
 async function gridAddRow(page, hasRows) {
-  const clicked = await safeEvaluate(page, (hasRows) => {
+  const target = await safeEvaluate(page, (hasRows) => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
       const s = window.getComputedStyle(el);
       return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
     };
+    const currentRows = [...document.querySelectorAll("tr")]
+      .filter((tr) => tr.querySelector("td[yapcolumnid]") && isVisible(tr));
     if (!hasRows) {
       const btn = [...document.querySelectorAll("button.gwt-Button, button")]
         .find((b) => /aggiungi prima riga/i.test(b.textContent || ""));
-      if (btn && isVisible(btn)) { btn.click(); return { ok: true, via: "first_row_button" }; }
+      if (btn && isVisible(btn)) {
+        const r = btn.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, via: "first_row_button", before: currentRows.length };
+      }
     }
     // righe esistenti: clicca l'anchor "T" (aggiungi) nell'ultima riga, colonna 13
-    const rows = [...document.querySelectorAll("tr")].filter((tr) => tr.querySelector('td[yapcolumnid="13"]') && isVisible(tr));
+    const rows = currentRows.filter((tr) => tr.querySelector('td[yapcolumnid="13"]'));
     const last = rows[rows.length - 1];
     const addAnchor = last?.querySelector('td[yapcolumnid="13"] a.gwt-Anchor');
-    if (addAnchor) { addAnchor.click(); return { ok: true, via: "add_anchor" }; }
-    return { ok: false };
+    if (addAnchor && isVisible(addAnchor)) {
+      addAnchor.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      const r = addAnchor.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, via: "add_anchor", before: currentRows.length };
+    }
+    return null;
   }, hasRows).catch(() => ({ ok: false }));
-  await page.waitForTimeout(280).catch(() => {});
-  return clicked;
+  if (!target?.x && target?.x !== 0) return { ok: false, reason: "add_control_not_found" };
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await page.mouse.click(target.x, target.y).catch(() => {});
+    const added = await page.waitForFunction((before) => {
+      const rows = [...document.querySelectorAll("tr")].filter((tr) => {
+        const r = tr.getBoundingClientRect();
+        const s = window.getComputedStyle(tr);
+        return tr.querySelector("td[yapcolumnid]")
+          && r.width > 1 && r.height > 1
+          && s.display !== "none" && s.visibility !== "hidden";
+      });
+      return rows.length > before;
+    }, target.before, { timeout: 900 }).then(() => true).catch(() => false);
+    if (added) return { ok: true, via: target.via, attempt, before: target.before };
+    await page.waitForTimeout(180).catch(() => {});
+  }
+  return { ok: false, via: target.via, reason: "row_count_not_increased", before: target.before };
 }
 
 // Seleziona un articolo per CODICE ESATTO dal catalogo autocomplete.
@@ -4121,6 +4146,16 @@ async function writeWorkGrid(page, job, args = {}) {
     const hasRows = existingRows.length > 0 || addedGridRows > 0;
     const added = await gridAddRow(page, hasRows);
     out.changed = out.changed || Boolean(added.ok);
+    if (!added.ok) {
+      logAction("grid_row_add_failed", {
+        kind: row.kind,
+        text: row.text.slice(0, 60),
+        ...added,
+      });
+      out.ok = false;
+      out.righe.push({ ...row, typed: false, written: false, article: false, error: added.reason || "row_add_failed" });
+      continue;
+    }
     addedGridRows += 1;
     await page.waitForTimeout(150).catch(() => {}); // gridAddRow ha gia' la sua attesa interna
     const tipo = await gridSetLastRowTipo(page, row.tipo || "D");
