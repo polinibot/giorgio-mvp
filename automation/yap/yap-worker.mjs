@@ -807,6 +807,7 @@ async function inputSnapshot(page) {
         index,
         value: node.value || "",
         placeholder: node.getAttribute("placeholder") || "",
+        maxlength: node.getAttribute("maxlength") || "",
         x: rect.x,
         y: rect.y,
         width: rect.width,
@@ -3903,7 +3904,7 @@ function buildWorkGridDescriptionLines(job) {
 // tastiera REALI (isTrusted=true). Necessario per i tab GWT (Smaltimento rifiuti,
 // Materiali di consumo) che ignorano i DOM-dispatch sintetici di fillWithRetry.
 async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
-  const coords = await safeEvaluate(page, (keywords) => {
+  const result = await safeEvaluate(page, (keywords) => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
       const s = window.getComputedStyle(el);
@@ -3911,22 +3912,48 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
     };
     const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
     const kws = (keywords || []).map((k) => norm(k));
-    const inputs = [...document.querySelectorAll('input[type="text"], input:not([type])')].filter(isVisible)
+    // Includiamo anche input[type="number"] e textarea per widget GWT non-standard
+    const inputs = [...document.querySelectorAll(
+      'input[type="text"], input[type="number"], input:not([type]), textarea'
+    )].filter(isVisible)
       .filter((el) => !el.closest("tr[__gwt_row]") && !el.closest("td[yapcolumnid]") && !el.closest(".gwt-DecoratedPopupPanel"));
     if (!inputs.length) return null;
     let best = inputs[0];
     let bestScore = -1;
     for (const inp of inputs) {
-      const container = inp.closest(".gwt-TabLayoutPanelDeckPanel, .gwt-FlexTable, tr, td, div") || inp.parentElement;
+      // Cerca il container più specifico (tab panel, flex table) per ridurre il rumore
+      const container = inp.closest(
+        ".gwt-TabLayoutPanelContent, .gwt-TabLayoutPanelDeckPanel, .gwt-FlexTable, tr, td"
+      ) || inp.closest("div") || inp.parentElement;
       const text = norm(container?.textContent || "");
       const score = kws.filter((kw) => text.includes(kw)).length;
       if (score > bestScore) { bestScore = score; best = inp; }
     }
     const r = best.getBoundingClientRect();
-    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    return {
+      x: Math.round(r.x + r.width / 2),
+      y: Math.round(r.y + r.height / 2),
+      score: bestScore,
+      totalInputs: inputs.length,
+      placeholder: best.getAttribute("placeholder") || "",
+      currentValue: (best.value || "").slice(0, 40),
+      cls: (best.className || "").slice(0, 60),
+    };
   }, contextKeywords).catch(() => null);
-  if (!coords) return false;
-  await page.mouse.click(coords.x, coords.y).catch(() => {});
+  logAction("tab_input_pick", {
+    keywords: contextKeywords,
+    value: String(value),
+    found: Boolean(result),
+    score: result?.score ?? null,
+    totalInputs: result?.totalInputs ?? 0,
+    placeholder: result?.placeholder ?? null,
+    currentValue: result?.currentValue ?? null,
+    cls: result?.cls ?? null,
+    x: result?.x ?? null,
+    y: result?.y ?? null,
+  });
+  if (!result) return false;
+  await page.mouse.click(result.x, result.y).catch(() => {});
   await page.waitForTimeout(120).catch(() => {});
   await page.keyboard.press("Control+A").catch(() => {});
   await page.keyboard.type(String(value), { delay: 30 }).catch(() => {});
@@ -5719,9 +5746,11 @@ async function fillAppointmentPopup(page, job) {
     throw new Error(`Popup YAP non riconosciuto. Input visibili: ${JSON.stringify(inputs)}`);
   }
 
-  const cosaInput = inputs
-    .filter((item) => item.index < dateIndex && item.width > 80)
-    .sort((a, b) => a.y - b.y)[0] || inputs.find((item) => item.index < dateIndex);
+  // Il campo Cosa/veicolo è il GWT SuggestBox con maxlength=25. La logica index<dateIndex
+  // fallisce perché nel DOM il Cosa SuggestBox arriva DOPO la data (DOM-order != visual-order).
+  const cosaInput = inputs.find((item) => item.maxlength === "25" && item.width > 80)
+    || inputs.filter((item) => item.index < dateIndex && item.width > 80).sort((a, b) => a.y - b.y)[0]
+    || inputs.find((item) => item.index < dateIndex);
 
   if (!cosaInput) {
     throw new Error("Non trovo il campo 'Cosa' nel popup YAP");
