@@ -1748,6 +1748,28 @@ async function openPracticeFromAppointment(page, job) {
       if (reopened?.success && await waitForAppointmentPopup(page, 1500)) return true;
       await page.waitForTimeout(700).catch(() => {});
     }
+
+    // Dopo la verifica automatica del veicolo FullCalendar puo' essere stato
+    // ridisegnato: i locator precedenti diventano stale e l'evento ricompare con
+    // qualche secondo di ritardo. Ricarica una sola volta la data e cerca l'evento
+    // esatto per targa + orario prima di dichiarare la pratica irraggiungibile.
+    await openAgenda(page, job.appointment?.date).catch(() => {});
+    const plate = String(job.customer?.plate || "").trim().toUpperCase();
+    const expectedTime = String(job.appointment?.time || "").trim().slice(0, 5).replace(".", ":");
+    const exactEvent = page.locator(".fc-time-grid-event:visible, .fc-event:visible").filter({
+      hasText: plate,
+    }).filter({
+      has: page.locator(".fc-time"),
+    });
+    const count = await exactEvent.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const event = exactEvent.nth(i);
+      const shownTime = String(await event.locator(".fc-time").first().textContent().catch(() => ""))
+        .trim().slice(0, 5).replace(".", ":");
+      if (expectedTime && shownTime !== expectedTime) continue;
+      await event.dblclick({ timeout: 3000 }).catch(() => {});
+      if (await waitForAppointmentPopup(page, 2000)) return true;
+    }
     return false;
   };
 
