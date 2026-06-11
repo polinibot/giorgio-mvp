@@ -1740,6 +1740,36 @@ async function clickExactAgendaEvent(page, { plate, time }) {
   }));
 }
 
+async function verifyOpenPracticeIdentity(page, job) {
+  const plate = String(job.customer?.plate || "").trim().toUpperCase();
+  const date = String(job.appointment?.date || "").trim();
+  const time = String(job.appointment?.time || "").trim().slice(0, 5).replace(".", ":");
+  if (!plate || !date || !time) return { ok: false, reason: "missing_expected_identity" };
+
+  const [year, month, day] = date.split("-").map(Number);
+  const months = ["GEN", "FEB", "MAR", "APR", "MAG", "GIU", "LUG", "AGO", "SET", "OTT", "NOV", "DIC"];
+  const expectedDate = `${day} ${months[month - 1]} ${year}`;
+  const identity = await safeEvaluate(page, () => {
+    const text = String(document.body?.innerText || "").replace(/\s+/g, " ").trim().toUpperCase();
+    const match = text.match(/PRATICA VEICOLO(?:\s+'([^']+)')?\s+DEL\s+(\d{1,2}\s+[A-Z]{3}\s+\d{4}),\s*(\d{1,2}:\d{2})(?::\d{2})?/);
+    return match ? {
+      heading: match[0],
+      plate: match[1] || "",
+      date: match[2],
+      time: match[3].padStart(5, "0"),
+    } : null;
+  }).catch(() => null);
+
+  if (!identity) return { ok: false, reason: "practice_heading_not_found" };
+  const ok = identity.plate === plate && identity.date === expectedDate && identity.time === time;
+  return {
+    ok,
+    reason: ok ? null : "practice_identity_mismatch",
+    expected: { plate, date: expectedDate, time },
+    actual: identity,
+  };
+}
+
 async function openPracticeFromAppointment(page, job) {
   // Quando YAP auto-chiude il popup (alreadyClosed=true) naviga direttamente alla pagina
   // pratica: in quel caso siamo già a destinazione, non serve riaprire nulla.
@@ -1750,7 +1780,6 @@ async function openPracticeFromAppointment(page, job) {
     }
   } catch (_) {}
 
-  const searchTerms = [job.customer?.plate, pickCosaFromJob(job)].filter(Boolean);
   // "text" (click sul link "Gestione pratica") PRIMA: e' piu' affidabile del click a
   // coordinate sul footer. Il footer resta come fallback.
   const strategies = [
@@ -1787,7 +1816,10 @@ async function openPracticeFromAppointment(page, job) {
       }
     }
     for (let i = 0; i < 3; i += 1) {
-      const reopened = await clickAgendaEvent(page, searchTerms).catch(() => ({ success: false }));
+      const reopened = await clickExactAgendaEvent(page, {
+        plate: job.customer?.plate,
+        time: job.appointment?.time,
+      }).catch(() => ({ success: false }));
       if (reopened?.success && await waitForAppointmentPopup(page, 1500)) return true;
       await page.waitForTimeout(700).catch(() => {});
     }
@@ -4530,6 +4562,16 @@ async function writePracticeAndOdl(page, job, args) {
   await waitForPracticeWorkspaceReady(page, 1800);
   const practiceLoadingDone = await waitForPracticeLoadingToFinish(page, Number(process.env.YAP_PRACTICE_LOADING_MS) || 8000);
   if (args.debug) writeReport.practiceLoadingDone = practiceLoadingDone;
+  const practiceIdentity = await verifyOpenPracticeIdentity(page, job);
+  writeReport.practiceIdentity = practiceIdentity;
+  if (!practiceIdentity.ok) {
+    writeReport.attempted = false;
+    writeReport.openedPractice = false;
+    writeReport.reason = practiceIdentity.reason;
+    logPhase("odl_practice", "identity_rejected", practiceIdentity);
+    _detachRpcTrace();
+    return writeReport;
+  }
   const vehicleOverlayDismissed = await dismissVehicleSearchOverlay(page);
   if (args.debug) writeReport.vehicleOverlayDismissed = vehicleOverlayDismissed;
   // F2-ter: pausa per automatismi YAP (creazione ODL in background) - adaptive, env-tunable.

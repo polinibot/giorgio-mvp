@@ -406,7 +406,7 @@ function getYapProgressLabel(action, startedAt, fallback = '') {
     sync: 'Sincronizzazione YAP',
     audit: 'Verifica YAP',
     delete: 'Eliminazione YAP',
-  }[action] || fallback || 'Operazione YAP';
+  }[action] || 'Operazione YAP';
   return `${actionLabel} in esecuzione sul server. Fase live non disponibile (${elapsed}s trascorsi).`;
 }
 
