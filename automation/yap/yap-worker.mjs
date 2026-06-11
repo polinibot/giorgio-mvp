@@ -3259,7 +3259,14 @@ async function gridSetCell(page, rowIndex, colId, value) {
   // ricalcolando le coordinate (la riga puo' essersi spostata al re-render).
   // Il retry vale solo per la descrizione: cat/udm sono derivate dall'articolo e
   // non diventano mai INPUT — ritentarle sprecherebbe ~5s a riga articolo.
-  const maxAttempts = colId === GRID_COL.descrizione ? 3 : 1;
+  const editableCols = new Set([
+    GRID_COL.descrizione,
+    GRID_COL.qta,
+    GRID_COL.prezzo,
+    GRID_COL.sconto,
+    GRID_COL.iva,
+  ]);
+  const maxAttempts = editableCols.has(colId) ? 3 : 1;
   let before = null;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const cell = await gridCellRect(page, rowIndex, colId);
@@ -3272,6 +3279,9 @@ async function gridSetCell(page, rowIndex, colId, value) {
       return ae ? { tag: ae.tagName, cls: (ae.className || "").slice(0, 40), val: (ae.value || "").slice(0, 20) } : null;
     }).catch(() => null);
     if (before?.tag === "INPUT" || before?.tag === "TEXTAREA") break;
+  }
+  if (before?.tag !== "INPUT" && before?.tag !== "TEXTAREA") {
+    return { ok: false, reason: "editor_not_opened", before, afterType: null, typedInActive: false };
   }
   await page.keyboard.press("Control+A").catch(() => {});
   await page.keyboard.type(String(value), { delay: 45 }).catch(() => {});
@@ -4150,7 +4160,10 @@ async function writeWorkGrid(page, job, args = {}) {
   }).catch(() => []);
   for (const r of out.righe) {
     const n = String(r.text || "").toUpperCase();
-    const hit = finalRows.find((h) => h.toUpperCase().includes(n)) || null;
+    const articleNeedle = String(r.articleQuery || "").toUpperCase();
+    const hit = r.articleQuery
+      ? (finalRows.find((h) => h.toUpperCase().includes(articleNeedle)) || null)
+      : (finalRows.find((h) => h.toUpperCase().includes(n)) || null);
     const textWritten = Boolean(hit);
     // Ricalcola `article` dal grid FINALE: il readback fatto a riga ancora in edit
     // leggeva la cella articolo vuota (falso negativo). Se la riga trovata contiene
@@ -4158,7 +4171,7 @@ async function writeWorkGrid(page, job, args = {}) {
     if (r.articleQuery && hit && hit.toUpperCase().includes(String(r.articleQuery).toUpperCase())) {
       r.article = true;
     }
-    r.written = r.articleQuery ? (textWritten && Boolean(r.article)) : textWritten;
+    r.written = r.articleQuery ? Boolean(r.article) : textWritten;
   }
   // Aggiorna anche il flag manodopera con il risultato finale (stesso falso negativo).
   if (out.manodopera && !out.manodopera.articolo) {
