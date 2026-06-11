@@ -1991,6 +1991,14 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
 
             try:
                 await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+                # Node puo' terminare lasciando processi Chromium figli ancora vivi.
+                # Il worker gira in una sessione POSIX dedicata: ripulisci sempre il
+                # gruppo dopo l'uscita, non solo in caso di timeout.
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                 await asyncio.gather(_drain_task_out, _drain_task_err, return_exceptions=True)
                 stdout = b"".join(_stdout_chunks)
                 stderr = b"".join(_stderr_chunks)

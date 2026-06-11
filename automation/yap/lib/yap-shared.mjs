@@ -457,9 +457,18 @@ export async function createYapRuntime(
   }) + "\n");
 
   const close = async () => {
-    await context?.close().catch(() => {});
-    if (browser) await browser.close().catch(() => {});
-    if (profileLease) await profileLease.release().catch(() => {});
+    const closeTimeoutMs = Number(process.env.YAP_BROWSER_CLOSE_TIMEOUT_MS) || 5000;
+    try {
+      await Promise.race([
+        (async () => {
+          await context?.close().catch(() => {});
+          if (browser) await browser.close().catch(() => {});
+        })(),
+        new Promise((resolve) => setTimeout(resolve, closeTimeoutMs)),
+      ]);
+    } finally {
+      if (profileLease) await profileLease.release().catch(() => {});
+    }
   };
 
   return {
