@@ -99,7 +99,7 @@ function buildExpected(mapping) {
   const plan = buildManagementPlan({ mapping });
   const agenda = plan.agenda;
   const fields = [
-    { group: "agenda", field: "agenda.cosa", label: "Cosa", expected: agenda.cosa, kind: "exact" },
+    { group: "agenda", field: "agenda.cosa", label: "Cosa", expected: agenda.cosa, kind: "exact_prefix" },
     { group: "agenda", field: "agenda.quando", label: "Quando", expected: agenda.quando, kind: "date" },
     { group: "agenda", field: "agenda.dalle", label: "Dalle", expected: agenda.dalle, kind: "time" },
     { group: "agenda", field: "agenda.alle", label: "Alle", expected: agenda.alle, kind: "time" },
@@ -229,6 +229,13 @@ function valueMatches(expected, found, kind) {
   if (kind === "date") return normalizeDateValue(expected) === normalizeDateValue(found);
   if (kind === "number_contains") return numericContains(expected, found);
   if (kind === "contains") return comparable(found).includes(comparable(expected));
+  // YAP salva spesso solo il prefisso del valore atteso (es. solo targa invece di targa+nome):
+  // "exact_prefix" accetta se uno dei due è prefisso dell'altro.
+  if (kind === "exact_prefix") {
+    const e = comparable(expected);
+    const f = comparable(found);
+    return e === f || e.startsWith(f) || f.startsWith(e);
+  }
   return comparable(expected) === comparable(found);
 }
 
