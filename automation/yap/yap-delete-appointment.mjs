@@ -243,11 +243,30 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   const events = await listVisibleAgendaEvents(page);
   trace?.mark("agenda_scan_completed", { event_count: events.length });
 
-  const matchingEvents = events.filter(matchesNeedle);
+  let matchingEvents = events.filter(matchesNeedle);
+  let timeOnlyFallback = false;
+  // Fallback: YAP mostra icone (titolo "V") al posto del testo nel .fc-title.
+  // Se non c'è match per targa+ora, usa solo l'orario quando expectedTime è presente.
+  if (matchingEvents.length === 0 && normalizedExpectedTime) {
+    const toMin = (s) => { const [h, m] = String(s || "").replace(".", ":").split(":").map(Number); return isNaN(h) ? null : h * 60 + (m || 0); };
+    const expMin = toMin(normalizedExpectedTime);
+    if (expMin !== null) {
+      matchingEvents = events.filter((ev) => {
+        const evTime = normalizeText(ev.time || "").replace(".", ":");
+        const startM = evTime.match(/(\d{1,2}):(\d{2})/);
+        if (!startM) return false;
+        return Math.abs(Number(startM[1]) * 60 + Number(startM[2]) - expMin) === 0;
+      });
+      if (matchingEvents.length) timeOnlyFallback = true;
+    }
+  }
   const match = matchingEvents[0];
   if (!match) {
     trace?.mark("appointment_not_found_in_visible_events", { visible_titles: events.map((event) => event.title).slice(0, 12) });
     return { found: false, searched: searchTerm, events: events.map((e) => e.title) };
+  }
+  if (timeOnlyFallback) {
+    trace?.mark("time_only_fallback_used", { matched_title: match.title, matched_time: match.time });
   }
   const initialMatchCount = matchingEvents.length;
   trace?.mark("appointment_match_found", {
