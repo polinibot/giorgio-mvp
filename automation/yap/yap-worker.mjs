@@ -5741,28 +5741,6 @@ async function fillAppointmentPopup(page, job) {
   const cosaX = cosaInput.x + Math.min(cosaInput.width / 2, 60);
   const cosaY = cosaInput.y + (cosaInput.height / 2);
   if (plate) {
-    const currentVehicle = await readAppointmentVehicleText(page);
-    if (currentVehicle?.linked) {
-      vehicleState = "linked";
-      logAction("vehicle_existing_link", { plate, text: currentVehicle.text || null });
-    } else {
-      const directVehicle = await selectVehicleByPlate(page, plate, { skipInputFallback: true });
-      logAction("vehicle_direct_pick", {
-        plate,
-        found: Boolean(directVehicle?.found),
-        selected: Boolean(directVehicle?.selected),
-        confirmed: Boolean(directVehicle?.confirmed),
-        strategy: directVehicle?.strategy || null,
-        reason: directVehicle?.reason || null,
-        vehicleText: directVehicle?.vehicleText || null,
-      });
-      if (directVehicle?.confirmed) vehicleState = "linked";
-    }
-  }
-
-  // Fallback legacy: alcuni layout YAP non espongono il selettore Veicolo separato
-  // e accettano la targa soltanto tramite l'autocomplete del campo Cosa.
-  if (plate && vehicleState !== "linked") {
     await page.mouse.click(cosaX, cosaY).catch(() => {});
     await page.waitForTimeout(120).catch(() => {});
     await page.keyboard.press("Control+A").catch(() => {});
@@ -5915,7 +5893,7 @@ async function fillAppointmentPopup(page, job) {
       vehicleState = "failed";
     }
     logAction("cosa_vehicle_pick", { plate, writtenValue: cosaWrittenValue, sug: sug.state, label: sug.label || null, steps, vehicleState, suggestPanelCount: sug.suggestPanelCount ?? null, retriggers });
-  } else if (!plate) {
+  } else {
     await page.mouse.click(cosaX, cosaY).catch(() => {});
     await page.waitForTimeout(120).catch(() => {});
     await page.keyboard.press("Control+A").catch(() => {});
