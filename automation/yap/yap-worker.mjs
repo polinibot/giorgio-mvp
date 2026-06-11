@@ -5723,6 +5723,10 @@ async function verifyVehicleInOpenedPractice(page, plate) {
   if (!expected) return { linked: false, found: false, source: "opened_practice" };
   for (let i = 0; i < 8; i += 1) {
     const result = await safeEvaluate(page, (target) => {
+      const inPractice = String(window.location.hash || "").includes("pratica");
+      if (!inPractice) {
+        return { linked: false, found: false, value: "", source: "agenda" };
+      }
       const plateInput = [...document.querySelectorAll("input")].find(
         (el) => String(el.getAttribute("placeholder") || "").trim().toLowerCase() === "targa",
       );
@@ -6626,8 +6630,11 @@ async function runYapAutomation(job, args) {
     //   L'evento e' ancora visibile in agenda -> verifica dal titolo/tooltip.
     if (job.customer?.plate && popupResult && popupResult.vehicleState !== "not_found") {
       if (alreadyClosed && popupResult.vehicleState === "pending_confirmation") {
-        const vCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate);
-        logAction("vehicle_practice_verify", vCheck);
+        let vCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate);
+        if (!vCheck.found && vCheck.source === "agenda") {
+          vCheck = await verifyVehicleInAgenda(page, job.customer.plate);
+        }
+        logAction("vehicle_auto_close_verify", vCheck);
         popupResult.vehicleState = vCheck.linked ? "linked" : "failed";
         popupResult.vehicleLinked = vCheck.linked;
       } else {
