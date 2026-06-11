@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-10w-descr-only-retry";
+const WORKER_BUILD = "2026-06-11a-dedup-diag";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -6357,6 +6357,7 @@ async function runYapAutomation(job, args) {
       events: existingEvents.length,
       plate: job.customer.plate,
       time: job.appointment.time,
+      scanSample: existingEvents.slice(0, 6).map((e) => ({ time: e.time, title: String(e.title || "").slice(0, 60) })),
     });
 
     if (args.dryRun) {
