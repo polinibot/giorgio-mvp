@@ -6640,14 +6640,13 @@ async function runYapAutomation(job, args) {
     //   L'evento e' ancora visibile in agenda -> verifica dal titolo/tooltip.
     if (job.customer?.plate && popupResult && popupResult.vehicleState !== "not_found") {
       if (alreadyClosed && popupResult.vehicleState === "pending_confirmation") {
-        let vCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate);
+        let vCheck = await verifyVehicleInAgenda(
+          page,
+          job.customer.plate,
+          job.appointment.time,
+        );
         if (!vCheck.linked) {
-          await openAgendaWithRecovery(page, {
-            dateIso: job.appointment.date,
-            username: process.env.YAP_USERNAME,
-            password: process.env.YAP_PASSWORD,
-          }).catch(() => {});
-          vCheck = await verifyVehicleInAgenda(page, job.customer.plate, job.appointment.time);
+          vCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate);
         }
         logAction("vehicle_auto_close_verify", vCheck);
         popupResult.vehicleState = vCheck.linked ? "linked" : "failed";
