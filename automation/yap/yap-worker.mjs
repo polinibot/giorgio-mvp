@@ -5603,10 +5603,12 @@ async function fillAppointmentPopup(page, job) {
       steps.push({ how: "click", gone: clickGone, vehicleUnlinked: needsKeyboardRetry || undefined });
       if (!clickGone || needsKeyboardRetry) {
         if (needsKeyboardRetry) {
-          // Riapri il dropdown ridigitando l'ultimo carattere della targa
-          await page.keyboard.press("Backspace").catch(() => {});
-          await page.waitForTimeout(180).catch(() => {});
-          await page.keyboard.type(plate.slice(-1), { delay: 50 }).catch(() => {});
+          // Il click fallito puo' lasciare il focus fuori dal Cosa: riscrivi la
+          // targa completa, altrimenti l'ultimo carattere resta come nota (es. "- V").
+          await page.mouse.click(cosaX, cosaY).catch(() => {});
+          await page.waitForTimeout(120).catch(() => {});
+          await page.keyboard.press("Control+A").catch(() => {});
+          await page.keyboard.type(plate, { delay: 45 }).catch(() => {});
           await page.waitForTimeout(420).catch(() => {});
         }
         await page.keyboard.press("ArrowDown").catch(() => {});
@@ -5714,6 +5716,23 @@ async function verifyVehicleInAgenda(page, plate) {
     await page.waitForTimeout(450).catch(() => {});
   }
   return last;
+}
+
+async function verifyVehicleInOpenedPractice(page, plate) {
+  const expected = String(plate || "").trim().toUpperCase();
+  if (!expected) return { linked: false, found: false, source: "opened_practice" };
+  for (let i = 0; i < 8; i += 1) {
+    const result = await safeEvaluate(page, (target) => {
+      const plateInput = [...document.querySelectorAll("input")].find(
+        (el) => String(el.getAttribute("placeholder") || "").trim().toLowerCase() === "targa",
+      );
+      const value = String(plateInput?.value || "").trim().toUpperCase();
+      return { linked: value === target, found: Boolean(plateInput), value, source: "opened_practice" };
+    }, expected).catch(() => ({ linked: false, found: false, value: "", source: "opened_practice" }));
+    if (result.linked) return result;
+    await page.waitForTimeout(350).catch(() => {});
+  }
+  return { linked: false, found: true, value: "", source: "opened_practice" };
 }
 
 // Audit inline: verifica i dati appena salvati senza aprire nuovo browser
@@ -6607,9 +6626,10 @@ async function runYapAutomation(job, args) {
     //   L'evento e' ancora visibile in agenda -> verifica dal titolo/tooltip.
     if (job.customer?.plate && popupResult && popupResult.vehicleState !== "not_found") {
       if (alreadyClosed && popupResult.vehicleState === "pending_confirmation") {
-        logAction("vehicle_agenda_verify", { linked: true, found: false, source: "auto_close" });
-        popupResult.vehicleState = "linked";
-        popupResult.vehicleLinked = true;
+        const vCheck = await verifyVehicleInOpenedPractice(page, job.customer.plate);
+        logAction("vehicle_practice_verify", vCheck);
+        popupResult.vehicleState = vCheck.linked ? "linked" : "failed";
+        popupResult.vehicleLinked = vCheck.linked;
       } else {
         const vCheck = await verifyVehicleInAgenda(page, job.customer.plate);
         logAction("vehicle_agenda_verify", vCheck);
