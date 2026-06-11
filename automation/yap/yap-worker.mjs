@@ -4380,9 +4380,22 @@ async function writeWorkGrid(page, job, args = {}) {
   logAction("grid_snapshot_after_save", { saved: out.saved?.ok || false, ...(await snapshotWorkGrid(page)) });
 
   if (out.saved?.ok && out.changed) {
-    await page.reload({ waitUntil: "domcontentloaded", timeout: 12000 }).catch(() => {});
+    const savedDocumentUrl = page.url();
+    const pageEnum = String(job?.appointment?.type || "").trim().toLowerCase() === "preventivo"
+      ? "PREVENTIVO"
+      : "ODL";
+    const reloadResult = await openOdlByFullReload(page, savedDocumentUrl, pageEnum);
     await waitForPracticeWorkspaceReady(page, 2500).catch(() => {});
     await waitForPracticeLoadingToFinish(page, 8000).catch(() => {});
+    let gridReady = false;
+    for (let i = 0; i < 20 && !gridReady; i += 1) {
+      gridReady = await safeEvaluate(page, () => {
+        const hasRows = Boolean(document.querySelector("td[yapcolumnid]"));
+        const hasEmpty = /il documento non ha righe/i.test(document.body?.innerText || "");
+        return hasRows || hasEmpty;
+      }).catch(() => false);
+      if (!gridReady) await page.waitForTimeout(300).catch(() => {});
+    }
     const persisted = await readWorkGridTexts(page);
     for (const row of out.righe) {
       row.written = row.articleQuery
@@ -4393,6 +4406,8 @@ async function writeWorkGrid(page, job, args = {}) {
     const missingAfterReload = out.righe.filter((row) => !row.written);
     out.persistence = {
       verified: true,
+      routeReloaded: Boolean(reloadResult?.navigated),
+      gridReady,
       persisted: out.righe.length - missingAfterReload.length,
       expected: out.righe.length,
       missing: missingAfterReload.map((row) => row.kind),
