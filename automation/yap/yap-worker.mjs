@@ -56,7 +56,7 @@ const WORKSPACE_STATES = Object.freeze({
 // Se dopo un deploy questo valore NON cambia nei log di produzione, il deploy NON e'
 // andato a buon fine (Railway non ha ricompilato il worker). Aggiornarlo ad ogni fix
 // rilevante per il flusso YAP.
-const WORKER_BUILD = "2026-06-11d-audit-locator-click";
+const WORKER_BUILD = "2026-06-11e-odl-dedup-fix";
 const _workerStart = Date.now();
 // --- Timeline super-dettagliata (orari + azioni) ----------------------------
 // Ogni azione viene loggata con: ts wall-clock, ms dall'avvio worker, delta ms
@@ -1698,6 +1698,15 @@ async function waitForPracticeTransition(page, timeout = 6000) {
 }
 
 async function openPracticeFromAppointment(page, job) {
+  // Quando YAP auto-chiude il popup (alreadyClosed=true) naviga direttamente alla pagina
+  // pratica: in quel caso siamo già a destinazione, non serve riaprire nulla.
+  try {
+    const currentUrl = page.url();
+    if (/pratica/i.test(currentUrl) && /IdCompanyFolder/i.test(currentUrl)) {
+      return { clicked: true, label: null, strategy: "already_on_practice_page", attempts: [] };
+    }
+  } catch (_) {}
+
   const searchTerms = [job.customer?.plate, pickCosaFromJob(job)].filter(Boolean);
   // "text" (click sul link "Gestione pratica") PRIMA: e' piu' affidabile del click a
   // coordinate sul footer. Il footer resta come fallback.
@@ -1711,8 +1720,25 @@ async function openPracticeFromAppointment(page, job) {
 
   // Riapertura popup robusta: dopo un salvataggio (path creazione) il popup si chiude;
   // l'evento appena creato puo' metterci un attimo a comparire in agenda -> ritenta.
+  // Pass 1: locator per .fc-time (funziona anche quando .fc-title mostra icone "V")
+  // Pass 2: clickAgendaEvent (text-based, fallback legacy)
   const ensurePopup = async () => {
     if (await waitForAppointmentPopup(page, 600)) return true;
+    // Prova prima con locator .fc-time se abbiamo l'orario
+    if (job.appointment?.time) {
+      const timeDot = String(job.appointment.time).trim().replace(":", ".").slice(0, 5);
+      try {
+        const evLoc = page
+          .locator(".fc-time-grid-event:visible, .fc-event:visible")
+          .filter({ has: page.locator(".fc-time").filter({ hasText: timeDot }) })
+          .first();
+        if (await evLoc.count()) {
+          await evLoc.dblclick({ timeout: 2000 });
+          await page.waitForTimeout(800);
+          if (await waitForAppointmentPopup(page, 1500)) return true;
+        }
+      } catch (_) {}
+    }
     for (let i = 0; i < 3; i += 1) {
       const reopened = await clickAgendaEvent(page, searchTerms).catch(() => ({ success: false }));
       if (reopened?.success && await waitForAppointmentPopup(page, 1500)) return true;
@@ -6344,6 +6370,17 @@ async function runYapAutomation(job, args) {
           2,
         ),
       );
+    }
+    // Scrolla all'orario target prima del dedup scan: waitForAgendaEventPopulation ritorna
+    // al primo evento visibile, ma l'evento target potrebbe essere fuori viewport.
+    if (job.appointment?.time) {
+      const targetHour = String(job.appointment.time).split(":")[0].replace(/^0/, "");
+      await page.evaluate((h) => {
+        const rows = [...document.querySelectorAll("td.fc-axis.fc-time, .fc-time")];
+        const target = rows.find((r) => (r.textContent || "").trim().startsWith(h));
+        if (target) target.scrollIntoView({ block: "center", behavior: "instant" });
+      }, targetHour).catch(() => {});
+      await page.waitForTimeout(300).catch(() => {});
     }
     logPhase("dedup", "scanning");
     const existingEvents = await scanVisibleAgendaEventsWithRecovery(job.appointment.date);
