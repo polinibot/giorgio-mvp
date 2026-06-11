@@ -4240,25 +4240,50 @@ async function writeWorkGrid(page, job, args = {}) {
   const manSection = workSections.find((s) => sectionNumber(s?.ore_man ?? s?.man_hours) != null);
   const manHours = sectionNumber(manSection?.ore_man ?? manSection?.man_hours);
 
-  // Rileva la griglia anche se il documento e' VUOTO (niente righe yapcolumnid):
-  // bottone "Aggiungi prima riga" / header colonne / testo "documento non ha righe".
-  let onGrid = false;
-  for (let i = 0; i < 16 && !onGrid; i += 1) {
-    onGrid = await safeEvaluate(page, () => {
-      const hasRows = !!document.querySelector("td[yapcolumnid]");
-      const hasAddBtn = [...document.querySelectorAll("button")].some((b) => /aggiungi prima riga/i.test(b.textContent || ""));
-      const hasEmpty = /il documento non ha righe/i.test(document.body?.innerText || "");
-      const hasHeader = [...document.querySelectorAll("th")].some((th) => /articolo/i.test(th.textContent || ""));
-      return hasRows || hasAddBtn || hasEmpty || hasHeader;
-    }).catch(() => false);
-    if (!onGrid) await page.waitForTimeout(400).catch(() => {});
+  // La griglia è AZIONABILE solo se: ci sono righe esistenti (td[yapcolumnid]) OPPURE
+  // è visibile il bottone "Aggiungi prima riga". I segnali deboli (testo "documento non
+  // ha righe", header colonne) NON bastano: il GWT a volte mostra l'header pratica senza
+  // aver renderizzato la toolbar del preventivo → tutte le righe fallivano con
+  // "add_control_not_found". Aspettiamo il segnale azionabile e, se non arriva, ricarichiamo.
+  const detectGridActionable = () => safeEvaluate(page, () => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 1 && r.height > 1 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const hasRows = [...document.querySelectorAll("td[yapcolumnid]")].some(isVisible);
+    const hasAddBtn = [...document.querySelectorAll("button")].some((b) => isVisible(b) && /aggiungi prima riga/i.test(b.textContent || ""));
+    const hasSalva = [...document.querySelectorAll("button")].some((b) => isVisible(b) && /^salva$/i.test((b.textContent || "").trim()));
+    // azionabile = posso aggiungere/leggere righe; richiede anche la toolbar (Salva) pronta
+    return { actionable: (hasRows || hasAddBtn) && hasSalva, hasRows, hasAddBtn, hasSalva };
+  }).catch(() => ({ actionable: false }));
+
+  let gridState = { actionable: false };
+  let reloaded = false;
+  for (let attempt = 0; attempt < 2 && !gridState.actionable; attempt += 1) {
+    for (let i = 0; i < 24 && !gridState.actionable; i += 1) {
+      gridState = await detectGridActionable();
+      if (!gridState.actionable) await page.waitForTimeout(500).catch(() => {});
+    }
+    if (!gridState.actionable && attempt === 0) {
+      // Reload della pagina preventivo: il deck GWT non ha renderizzato la toolbar.
+      reloaded = true;
+      logAction("grid_reload_retry", { reason: "grid_not_actionable", ...gridState });
+      await page.reload({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      await waitForPracticeWorkspaceReady(page, 4000).catch(() => {});
+      await waitForPracticeLoadingToFinish(page, 10000).catch(() => {});
+    }
   }
   logAction("grid_check", {
-    onGrid,
+    onGrid: gridState.actionable,
+    reloaded,
+    hasRows: gridState.hasRows ?? null,
+    hasAddBtn: gridState.hasAddBtn ?? null,
+    hasSalva: gridState.hasSalva ?? null,
     sections: workSections.map((s) => String(s?.reparto || "").trim()).filter(Boolean),
     manHours: manHours ?? null,
   });
-  if (!onGrid) return { ok: false, reason: "not_on_grid" };
+  if (!gridState.actionable) return { ok: false, reason: "grid_not_actionable" };
   const existingRows = await readWorkGridTexts(page);
   logAction("grid_existing_rows", { count: existingRows.length, sample: existingRows.slice(0, 10) });
   logAction("grid_snapshot_before", await snapshotWorkGrid(page));
