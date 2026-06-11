@@ -4123,29 +4123,21 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         amount: null,
         reason: "missing_numeric_basis",
       });
-      const smaltOkResult = await typeIntoVisibleTabInput(
+      // Struttura REALE del tab Smaltimento (modalità "Importo Fisso"):
+      //   Tipo di calcolo = Importo Fisso (combo) | Costo fisso = 0,00 (IMPORTO) |
+      //   Categoria | Profilo IVA | % sconto = 0 (sconto sulla RIGA, non la percentuale).
+      // Il fee smaltimento è "Costo fisso" (importo). Scrivere il valore come "percentuale"
+      // finiva nel campo "% sconto" → smaltimento 0,00 € + sconto spurio del 2%.
+      // Azzeriamo "% sconto" (ripulisce le run precedenti) e scriviamo il fee in "Costo fisso".
+      await typeIntoVisibleTabInput(
         page,
-        String(section.smaltimento_percentuale ?? 2),
-        [reparto, "smaltimento", "rifiuti", "%", "percentuale"],
+        "0",
+        [reparto, "smaltimento", "sconto"],
         { prefer: "integer" },
-      );
-      const smaltOk = wasteTabReady && Boolean(smaltOkResult);
-      writeReport.waste.success = writeReport.waste.success || smaltOk;
-      if (smaltOk) writeReport.waste.error = null;
-      else if (!writeReport.waste.error) {
-        writeReport.waste.error = wasteTabReady ? "waste_field_not_found" : "waste_tab_not_found";
-      }
-      out.wroteAny = out.wroteAny || smaltOk;
-      if (sectionDebug) sectionDebug.fields.smaltimento = {
-        tabReady: wasteTabReady,
-        ...(smaltOkResult?.debug || {}),
-      };
+      ).catch(() => false);
 
-      // Il combo modalità del tab Smaltimento è "Importo Fisso" di default: YAP usa il
-      // campo IMPORTO (TextBox "0,00") e ignora la percentuale. La sola percentuale
-      // lasciava lo smaltimento a 0,00 € nei Totali. Scriviamo quindi anche l'importo
-      // calcolato (percent × subtotale) nel campo importo, distinto per formato valore.
       const smaltAmount = sectionWasteAmount(section);
+      let smaltOk = false;
       if (smaltAmount != null) {
         writeReport.waste.amountAttempted = true;
         const smaltAmountText = formatItalianAmount(smaltAmount);
@@ -4158,13 +4150,13 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         const smaltAmountResult = await typeIntoVisibleTabInput(
           page,
           smaltAmountText,
-          [reparto, "smaltimento", "importo", "euro", "rifiuti"],
+          [reparto, "smaltimento", "importo", "euro", "costo", "fisso"],
           { prefer: "amount" },
         );
-        const smaltAmountOk = wasteTabReady && Boolean(smaltAmountResult);
-        writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltAmountOk;
-        writeReport.waste.success = writeReport.waste.success || smaltAmountOk;
-        if (smaltAmountOk) {
+        smaltOk = wasteTabReady && Boolean(smaltAmountResult);
+        writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltOk;
+        writeReport.waste.success = writeReport.waste.success || smaltOk;
+        if (smaltOk) {
           writeReport.waste.amountError = null;
           writeReport.waste.error = null;
         } else if (!writeReport.waste.amountError) {
@@ -4172,8 +4164,12 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
             ? "waste_amount_field_not_found"
             : "waste_tab_not_found";
         }
-        out.wroteAny = out.wroteAny || smaltAmountOk;
       }
+      if (!smaltOk && !writeReport.waste.error) {
+        writeReport.waste.error = wasteTabReady ? "waste_field_not_found" : "waste_tab_not_found";
+      }
+      out.wroteAny = out.wroteAny || smaltOk;
+      if (sectionDebug) sectionDebug.fields.smaltimento = { tabReady: wasteTabReady };
     }
     if (sectionDebug && Object.keys(sectionDebug.fields).length) {
       writeReport.debug.sections.push(sectionDebug);
