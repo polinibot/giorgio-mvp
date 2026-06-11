@@ -3957,8 +3957,12 @@ function buildWorkGridDescriptionLines(job) {
 // Scrive un valore in un INPUT visibile nel tab correntemente attivo usando eventi
 // tastiera REALI (isTrusted=true). Necessario per i tab GWT (Smaltimento rifiuti,
 // Materiali di consumo) che ignorano i DOM-dispatch sintetici di fillWithRetry.
-async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
-  const result = await safeEvaluate(page, (keywords) => {
+// opts.prefer: "amount" preferisce il campo importo (valore tipo "0,00" con virgola),
+// "integer" preferisce il campo percentuale/intero (valore tipo "0"). Nei tab Smaltimento/
+// Materiali i due TextBox sono indistinguibili per keyword: il formato del valore corrente
+// è l'unico discriminante affidabile.
+async function typeIntoVisibleTabInput(page, value, contextKeywords = [], opts = {}) {
+  const result = await safeEvaluate(page, ({ keywords, prefer }) => {
     const isVisible = (el) => {
       const r = el.getBoundingClientRect();
       const s = window.getComputedStyle(el);
@@ -3995,6 +3999,12 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
       const text = norm(container?.textContent || "");
       const cls = String(inp.className || "");
       const r = inp.getBoundingClientRect();
+      const val = String(inp.value || "").trim();
+      // Formato del valore corrente: i campi importo GWT mostrano "0,00" (virgola+2 dec),
+      // i campi percentuale mostrano un intero ("0"). Unico modo per distinguerli.
+      let preferMatch = 0;
+      if (prefer === "amount") preferMatch = /,\d{2}$/.test(val) ? 1 : 0;
+      else if (prefer === "integer") preferMatch = /^\d+$/.test(val) ? 1 : 0;
       return {
         inp,
         depth: tabDepth(inp),
@@ -4002,6 +4012,7 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
         // importo/percentuale sono gwt-TextBox SEMPLICI. Scrivere un numero nel combo
         // produce "valori non validi". Preferiamo quindi il TextBox semplice.
         notSuggest: /gwt-SuggestBox/.test(cls) ? 0 : 1,
+        preferMatch,
         kw: kws.filter((k) => text.includes(k)).length,
         x: Math.round(r.x + r.width / 2),
         y: Math.round(r.y + r.height / 2),
@@ -4011,8 +4022,8 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
       };
     });
     // Ranking: 1° profondità (dentro il sub-tab attivo), 2° TextBox semplice vs combo,
-    // 3° match keyword. A parità, il primo in ordine DOM.
-    scored.sort((a, b) => (b.depth - a.depth) || (b.notSuggest - a.notSuggest) || (b.kw - a.kw));
+    // 3° formato valore atteso (importo vs percentuale), 4° match keyword.
+    scored.sort((a, b) => (b.depth - a.depth) || (b.notSuggest - a.notSuggest) || (b.preferMatch - a.preferMatch) || (b.kw - a.kw));
     const best = scored[0];
     return {
       x: best.x,
@@ -4020,20 +4031,23 @@ async function typeIntoVisibleTabInput(page, value, contextKeywords = []) {
       score: best.kw,
       depth: best.depth,
       notSuggest: best.notSuggest,
+      preferMatch: best.preferMatch,
       totalInputs: inputs.length,
       placeholder: best.placeholder,
       currentValue: best.currentValue,
       cls: best.cls,
-      candidates: scored.slice(0, 8).map((c) => ({ x: c.x, y: c.y, depth: c.depth, notSuggest: c.notSuggest, kw: c.kw, cls: c.cls, currentValue: c.currentValue, placeholder: c.placeholder })),
+      candidates: scored.slice(0, 8).map((c) => ({ x: c.x, y: c.y, depth: c.depth, notSuggest: c.notSuggest, preferMatch: c.preferMatch, kw: c.kw, cls: c.cls, currentValue: c.currentValue, placeholder: c.placeholder })),
     };
-  }, contextKeywords).catch(() => null);
+  }, { keywords: contextKeywords, prefer: opts.prefer || null }).catch(() => null);
   logAction("tab_input_pick", {
     keywords: contextKeywords,
+    prefer: opts.prefer || null,
     value: String(value),
     found: Boolean(result),
     score: result?.score ?? null,
     depth: result?.depth ?? null,
     notSuggest: result?.notSuggest ?? null,
+    preferMatch: result?.preferMatch ?? null,
     totalInputs: result?.totalInputs ?? 0,
     placeholder: result?.placeholder ?? null,
     currentValue: result?.currentValue ?? null,
@@ -4085,6 +4099,7 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         page,
         formatItalianAmount(section.materiali_euro),
         [...repartoKeys, "materiali", "consumo", "importo", "euro"],
+        { prefer: "amount" },
       );
       const matOk = materialsTabReady && Boolean(matOkResult);
       writeReport.materials.success = writeReport.materials.success || matOk;
@@ -4112,6 +4127,7 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         page,
         String(section.smaltimento_percentuale ?? 2),
         [reparto, "smaltimento", "rifiuti", "%", "percentuale"],
+        { prefer: "integer" },
       );
       const smaltOk = wasteTabReady && Boolean(smaltOkResult);
       writeReport.waste.success = writeReport.waste.success || smaltOk;
@@ -4125,23 +4141,38 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
         ...(smaltOkResult?.debug || {}),
       };
 
-      // NON scriviamo l'importo smaltimento a mano: YAP lo CALCOLA da solo dalla
-      // percentuale (es. 2% × 364,10 = 7,28). Scriverlo a mano finiva nel combo
-      // "Importo Fisso" (gwt-SuggestBox) → "valori non validi" e Salva bloccato.
-      // L'importo atteso resta verificato dall'audit leggendo il valore calcolato a DOM.
+      // Il combo modalità del tab Smaltimento è "Importo Fisso" di default: YAP usa il
+      // campo IMPORTO (TextBox "0,00") e ignora la percentuale. La sola percentuale
+      // lasciava lo smaltimento a 0,00 € nei Totali. Scriviamo quindi anche l'importo
+      // calcolato (percent × subtotale) nel campo importo, distinto per formato valore.
       const smaltAmount = sectionWasteAmount(section);
       if (smaltAmount != null) {
         writeReport.waste.amountAttempted = true;
-        // Consideriamo l'importo riuscito se la percentuale è stata scritta: YAP lo deriva.
-        writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltOk;
-        if (smaltOk) writeReport.waste.amountError = null;
-        logAction("waste_amount_auto", {
+        const smaltAmountText = formatItalianAmount(smaltAmount);
+        logAction("waste_amount_write", {
           reparto,
-          amount: formatGridAmount(smaltAmount),
+          amount: smaltAmountText,
           percent: wasteDetails?.percent ?? null,
           subtotal: wasteDetails?.subtotal ?? null,
-          note: "auto-calcolato da YAP dalla percentuale",
         });
+        const smaltAmountResult = await typeIntoVisibleTabInput(
+          page,
+          smaltAmountText,
+          [reparto, "smaltimento", "importo", "euro", "rifiuti"],
+          { prefer: "amount" },
+        );
+        const smaltAmountOk = wasteTabReady && Boolean(smaltAmountResult);
+        writeReport.waste.amountSuccess = writeReport.waste.amountSuccess || smaltAmountOk;
+        writeReport.waste.success = writeReport.waste.success || smaltAmountOk;
+        if (smaltAmountOk) {
+          writeReport.waste.amountError = null;
+          writeReport.waste.error = null;
+        } else if (!writeReport.waste.amountError) {
+          writeReport.waste.amountError = wasteTabReady
+            ? "waste_amount_field_not_found"
+            : "waste_tab_not_found";
+        }
+        out.wroteAny = out.wroteAny || smaltAmountOk;
       }
     }
     if (sectionDebug && Object.keys(sectionDebug.fields).length) {
