@@ -3409,8 +3409,9 @@ function App() {
       const requestOptions = inferredTime ? { ...options, time: inferredTime } : { ...options };
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
       // NON ritentare in automatico: la delete e' non idempotente lato YAP.
-      // 340s: attesa lock (100s) + worker con cascata preventivo/ODL (230s).
-      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 340000 });
+      // 260s: il backend ha timeout script 230s + lock wait 100s = max 330s,
+      // ma il proxy Railway taglia prima. Meglio fallire e recuperare che aspettare.
+      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 260000 });
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
@@ -3448,17 +3449,22 @@ function App() {
       const hadResponse = Boolean(err?.response);
       if (!hadResponse) {
         updateYapActionProgress({ percent: 95, label: 'Connessione interrotta: recupero l\u2019esito dal server\u2026' });
-        for (let attempt = 0; attempt < 12 && !recovered; attempt += 1) {
-          await new Promise(r => setTimeout(r, attempt === 0 ? 3000 : 8000));
+        for (let attempt = 0; attempt < 6 && !recovered; attempt += 1) {
+          await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 10000));
           try {
             const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
             const dump = dumpRes?.data?.data;
             const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
             const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
             if (dump?.has_dump !== false && String(dump.practice_id) === String(id) && fresh) {
+              // Se il dump e' "pending" (script ancora in esecuzione), aspetta
+              // ancora un po' per vedere se arriva il risultato finale.
+              if (dump.status === 'pending' && attempt < 4) continue;
               recovered = normalizeYapResult({
-                status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
-                message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
+                status: dump.status === 'pending' ? 'delete_failed' : (dump.status || (dump.deleted ? 'deleted' : 'delete_failed')),
+                message: dump.status === 'pending'
+                  ? 'Delete YAP ancora in esecuzione sul server. L\u2019operazione potrebbe essere completata: verifica su YAP prima di riprovare.'
+                  : (dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).')),
                 action_target: 'delete',
                 worker_phases: dump.worker_phases || [],
                 stderr_tail: dump.stderr_tail || '',
@@ -4880,11 +4886,10 @@ function App() {
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         const reqStartMs = Date.now();
         try {
-          // 400s: attesa lock YAP (fino a 100s) + worker delete con cascata
-          // preventivo/ODL (fino a 230s, SENZA retry safe-mode lato server) + margine.
-          // Con un timeout piu' corto del caso peggiore il client mollava mentre il
-          // server lavorava ancora -> falso "Errore di rete" e log vuoto.
-          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 400000 });
+          // 280s: il backend ha timeout script 230s + lock wait 100s, ma il proxy
+          // Railway taglia le connessioni molto prima. Meglio fallire e recuperare
+          // dal dump che aspettare un timeout infinito.
+          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 280000 });
           // L'endpoint e' uno STREAM (heartbeat \n + JSON finale): axios a volte consegna
           // res.data come stringa. Normalizziamo a oggetto.
           let body = res?.data;
@@ -4944,12 +4949,11 @@ function App() {
           let recovered = null;
           const hadResponse = Boolean(err?.response);
           if (!hadResponse) {
-            updateYapActionProgress({ percent: 95, label: 'Connessione interrotta: recupero l’esito dal server…' });
-            // Il task server-side ora scrive SEMPRE last-delete.json anche a client
-            // disconnesso: il dump arriva al massimo entro il timeout script (230s).
-            // Poll fino a ~90s per coprire la coda piu' lunga.
-            for (let attempt = 0; attempt < 12 && !recovered; attempt += 1) {
-              await new Promise(r => setTimeout(r, attempt === 0 ? 3000 : 8000));
+            updateYapActionProgress({ percent: 95, label: 'Connessione interrotta: recupero l\u2019esito dal server\u2026' });
+            // Il backend scrive un pending dump PRIMA dello script e il dump
+            // finale quando finisce. Poll veloce per trovare il risultato.
+            for (let attempt = 0; attempt < 6 && !recovered; attempt += 1) {
+              await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 10000));
               try {
                 const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
                 const dump = dumpRes?.data?.data;
@@ -4958,9 +4962,13 @@ function App() {
                 // has_dump (non found): il backend rinominato la chiave per evitare
                 // collisione con dump.found del worker (None sui timeout → null in JS).
                 if (dump?.has_dump !== false && String(dump.practice_id) === String(p.id) && fresh) {
+                  // Se pending, aspetta ancora per il risultato finale (max 4 tentativi)
+                  if (dump.status === 'pending' && attempt < 4) continue;
                   recovered = normalizeYapResult({
-                    status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
-                    message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
+                    status: dump.status === 'pending' ? 'delete_failed' : (dump.status || (dump.deleted ? 'deleted' : 'delete_failed')),
+                    message: dump.status === 'pending'
+                      ? 'Delete YAP ancora in esecuzione sul server. L\u2019operazione potrebbe essere completata: verifica su YAP prima di riprovare.'
+                      : (dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).')),
                     action_target: 'delete',
                     worker_phases: dump.worker_phases || [],
                     stderr_tail: dump.stderr_tail || '',

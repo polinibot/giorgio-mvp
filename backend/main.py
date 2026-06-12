@@ -2738,6 +2738,18 @@ async def delete_practice(
             in polling da /yap/last-delete. Prima il dump era scritto DENTRO il
             generatore -> client morto = dump mai scritto = log sempre vuoto.
             """
+            # Pending dump PRIMA dello script: se il client si disconnette e il
+            # recovery poll trova questo dump, sa che la delete e' in corso.
+            # Senza questo, il dump non esiste finche' lo script non finisce (230s)
+            # e il recovery del client gira a vuoto mostrando log vuoto.
+            _write_yap_delete_dump({
+                "practice_id": captured_pid,
+                "args": yap_args,
+                "attempted": True,
+                "deleted": False,
+                "status": "pending",
+                "error": "Delete YAP in corso sul server…",
+            })
             try:
                 # allow_safe_retry=False: il retry in safe-mode raddoppiava la durata
                 # (230s x 2 ~= 460-500s), sforando OGNI timeout client. La delete e'
@@ -3577,6 +3589,18 @@ async def delete_practice_yap_appointment(
         args.append("--debug")
     if body.fresh_login:
         args.append("--fresh-login")
+
+    # Pending dump PRIMA dello script: il recovery del client trova subito
+    # qualcosa invece di un file inesistente.
+    _write_yap_delete_dump({
+        "practice_id": practice_id,
+        "endpoint": "yap_appointment_delete",
+        "args": args,
+        "attempted": True,
+        "deleted": False,
+        "status": "pending",
+        "error": "Delete YAP in corso sul server\u2026",
+    })
 
     try:
         result = await _run_yap_script("yap-delete-appointment.mjs", args, timeout_seconds=230, db=db, allow_safe_retry=False)
