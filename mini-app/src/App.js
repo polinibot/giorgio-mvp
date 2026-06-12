@@ -398,7 +398,7 @@ function getYapProgressPercent(action, startedAt) {
   // ma 0% fisso confonde l'utente. Curva asintotica verso 90%:
   // a 60s ~30%, a 120s ~55%, a 200s ~75%, a 280s ~85%.
   const elapsedS = Math.max(0, (Date.now() - (Number(startedAt) || Date.now())) / 1000);
-  const timeoutS = action === 'delete' ? 280 : 260;
+  const timeoutS = action === 'delete' ? 300 : 260;
   const ratio = Math.min(elapsedS / timeoutS, 1);
   return Math.round(90 * (1 - Math.exp(-2.5 * ratio)));
 }
@@ -3412,9 +3412,8 @@ function App() {
       const requestOptions = inferredTime ? { ...options, time: inferredTime } : { ...options };
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
       // NON ritentare in automatico: la delete e' non idempotente lato YAP.
-      // 260s: il backend ha timeout script 230s + lock wait 100s = max 330s,
-      // ma il proxy Railway taglia prima. Meglio fallire e recuperare che aspettare.
-      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 260000 });
+      // 300s: backend ha timeout script 200s + lock wait 100s = max 300s.
+      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 300000 });
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
@@ -3481,7 +3480,7 @@ function App() {
           `--- Errore locale (client-side) ---`,
           `durata: ${elapsed}s`,
           `url: DELETE ${API_BASE_URL}/practices/${id}/yap/appointment`,
-          `timeout_configurato: 260s`,
+          `timeout_configurato: 300s`,
           `codice_errore: ${err?.code || 'N/A'}`,
           `messaggio: ${err?.message || 'sconosciuto'}`,
           `recovery: 1 tentativo rapido su /yap/last-delete`,
@@ -4898,10 +4897,8 @@ function App() {
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         const reqStartMs = Date.now();
         try {
-          // 280s: il backend ha timeout script 230s + lock wait 100s, ma il proxy
-          // Railway taglia le connessioni molto prima. Meglio fallire e recuperare
-          // dal dump che aspettare un timeout infinito.
-          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 280000 });
+          // 300s: backend ha timeout script 200s + lock wait 100s.
+          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 300000 });
           // L'endpoint e' uno STREAM (heartbeat \n + JSON finale): axios a volte consegna
           // res.data come stringa. Normalizziamo a oggetto.
           let body = res?.data;
@@ -4992,7 +4989,7 @@ function App() {
               `--- Errore locale (client-side) ---`,
               `durata: ${elapsed}s`,
               `url: DELETE ${API_BASE_URL}/practices/${p.id}`,
-              `timeout_configurato: 280s`,
+              `timeout_configurato: 300s`,
               `codice_errore: ${err?.code || 'N/A'}`,
               `messaggio: ${err?.message || 'sconosciuto'}`,
               `recovery: 1 tentativo rapido su /yap/last-delete`,

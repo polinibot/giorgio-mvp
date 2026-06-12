@@ -235,35 +235,35 @@ async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace
   try {
     trace?.mark(`${kind}_fix_open_popup`, { event: event.title });
     await page.mouse.click(event.x, event.y);
-    await page.waitForTimeout(900);
+    await page.waitForTimeout(500);
 
     const practiceLink = await clickPracticeLinkInPopup(page);
     trace?.mark(`${kind}_fix_practice_link`, practiceLink);
     if (!practiceLink?.clicked) {
       await page.mouse.dblclick(event.x, event.y).catch(() => {});
     }
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(2000);
 
     const section = await clickDocSectionTab(page, doc.tabRe.source);
     trace?.mark(`${kind}_fix_section_click`, section);
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(1500);
 
     const del = await clickToolbarEliminaDoc(page);
     trace?.mark(`${kind}_fix_toolbar_elimina`, { found: Boolean(del) });
 
     // Loop conferma + attesa RPC delete documento.
-    for (let i = 0; i < 12 && !docRpc.length; i += 1) {
-      await page.waitForTimeout(400);
+    for (let i = 0; i < 8 && !docRpc.length; i += 1) {
+      await page.waitForTimeout(300);
       await clickDeleteConfirmIfPresent(page).catch(() => {});
     }
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(1000);
     const docDeleted = docRpc.length > 0;
     trace?.mark(`${kind}_fix_doc_delete_rpc`, { detected: docDeleted, rpc_count: docRpc.length });
 
     // Torna all'agenda e riprova la delete appuntamento (auto-fix DISABILITATO per
     // evitare ricorsione infinita se il documento non si è eliminato).
     await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(800);
     trace?.mark(`${kind}_fix_back_to_agenda`);
 
     const retryResult = await findAndDeleteAppointment(page, searchTerm, false, dateIso, false, trace, expectedTime, false);
@@ -489,12 +489,12 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
 
   if (!deleteRpcRequest) {
     trace?.mark("waiting_for_delete_rpc_after_confirm_loop", { iterations: confirmLoopIterations });
-    await Promise.race([rpcSeen, page.waitForTimeout(2200)]);
+    await Promise.race([rpcSeen, page.waitForTimeout(1500)]);
   }
 
   // Attesa extra per dialog asincroni post-RPC (es. errore "preventivo" che YAP
   // mostra come alert() dopo la risposta del server, fuori dal confirm loop).
-  await page.waitForTimeout(deleteRpcRequest ? 220 : 600);
+  await page.waitForTimeout(deleteRpcRequest ? 150 : 400);
   visibleMessage = visibleMessage || await visibleYapMessage(page);
   const nativeDialogText = dialogMessages.join(" | ");
   if (!visibleMessage && nativeDialogText) visibleMessage = nativeDialogText;
@@ -520,7 +520,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
       current_url: page.url(),
     });
     await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(200);
     afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
     remainingMatches = afterEvents.filter(matchesNeedle).length;
     deletedCount = Math.max(0, initialMatchCount - remainingMatches);
@@ -541,7 +541,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
         trace?.mark("blocking_doc_auto_fix_success", { kind: blockKind });
         // Riverifica eliminazione
         await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
-        await page.waitForTimeout(400);
+        await page.waitForTimeout(300);
         const finalEvents = await listVisibleAgendaEvents(page).catch(() => []);
         remainingMatches = finalEvents.filter(matchesNeedle).length;
         deletedCount = Math.max(0, initialMatchCount - remainingMatches);
