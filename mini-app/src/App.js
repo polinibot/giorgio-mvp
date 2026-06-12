@@ -394,10 +394,13 @@ function formatProgressElapsed(startedAt) {
 }
 
 function getYapProgressPercent(action, startedAt) {
-  // Il backend non trasmette fasi live durante il POST lungo. Qualsiasi percentuale
-  // intermedia basata sul tempo sarebbe inventata: 0 = nessun completamento ancora
-  // confermato, 100 viene impostato esclusivamente alla risposta terminale.
-  return 0;
+  // Stima basata sul tempo trascorso. Il backend non invia fasi live,
+  // ma 0% fisso confonde l'utente. Curva asintotica verso 90%:
+  // a 60s ~30%, a 120s ~55%, a 200s ~75%, a 280s ~85%.
+  const elapsedS = Math.max(0, (Date.now() - (Number(startedAt) || Date.now())) / 1000);
+  const timeoutS = action === 'delete' ? 280 : 260;
+  const ratio = Math.min(elapsedS / timeoutS, 1);
+  return Math.round(90 * (1 - Math.exp(-2.5 * ratio)));
 }
 
 function getYapProgressLabel(action, startedAt, fallback = '') {
