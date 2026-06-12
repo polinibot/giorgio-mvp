@@ -1240,6 +1240,69 @@ def _write_yap_delete_dump(payload: Dict[str, Any]) -> None:
         logger.warning("Failed to write YAP delete dump: %s", exc)
 
 
+async def _notify_user_delete_result(
+    telegram_user_id: Optional[int],
+    practice_id: Optional[int],
+    deleted: bool,
+    failure_status: Optional[str],
+    worker_phases: Optional[list],
+    error: Optional[str],
+) -> None:
+    """Invia notifica Telegram all'utente sul risultato della delete YAP.
+
+    Bypassa completamente il proxy Railway: Telegram API va diretto,
+    non passa per il proxy HTTP. Cosi' l'utente sa se l'eliminazione
+    e' riuscita anche se la connessione client-server e' caduta.
+    """
+    if not telegram_user_id:
+        return
+    try:
+        bot_token = settings.telegram_bot_token
+        if not bot_token:
+            logger.warning("Cannot notify user: TELEGRAM_BOT_TOKEN not configured")
+            return
+        if deleted:
+            icon = "\u2705"
+            title = f"Appuntamento #{practice_id} eliminato da YAP"
+            body = "L'eliminazione e' riuscita. Apri la Mini App per la sincronizzazione."
+        elif failure_status == "blocked_by_odl":
+            icon = "\u26a0\ufe0f"
+            title = f"Appuntamento #{practice_id}: eliminazione bloccata"
+            body = "L'appuntamento e' collegato a un ordine di lavoro. Eliminalo prima su YAP, poi riprova."
+        elif failure_status == "blocked_by_preventivo":
+            icon = "\u26a0\ufe0f"
+            title = f"Appuntamento #{practice_id}: eliminazione bloccata"
+            body = "Presente un preventivo. Eliminalo prima su YAP, poi riprova."
+        else:
+            icon = "\u274c"
+            title = f"Appuntamento #{practice_id}: eliminazione FALLITA"
+            body = error or failure_status or "Errore sconosciuto durante l'eliminazione YAP."
+
+        phases_text = ""
+        if worker_phases:
+            last_phases = worker_phases[-3:]
+            phases_text = "\n\nUltime fasi script:\n" + "\n".join(
+                f"  - {p.get('phase','?')}: {p.get('status','?')} (+{p.get('elapsed_ms',0)/1000:.1f}s)"
+                for p in last_phases
+            )
+        text = f"{icon} *{title}*\n\n{body}{phases_text}\n\n_Vedi 'Crash log YAP' nella Mini App per dettagli._"
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            async with session.post(url, json={
+                "chat_id": telegram_user_id,
+                "text": text,
+                "parse_mode": "Markdown",
+                "disable_notification": False,
+            }) as resp:
+                if resp.status == 200:
+                    logger.info("Delete result notified to user %s for practice %s", telegram_user_id, practice_id)
+                else:
+                    body_text = await resp.text()
+                    logger.warning("Failed to notify user %s: HTTP %s - %s", telegram_user_id, resp.status, body_text[:200])
+    except Exception as exc:
+        logger.warning("Failed to notify user delete result: %s", exc)
+
+
 def _yap_session_fernet() -> Fernet:
     secret = settings.secret_key or settings.telegram_bot_token or "dev-yap-session-state-key"
     digest = hashlib.sha256(f"giorgio:yap-session-state:{secret}".encode("utf-8")).digest()
@@ -2783,6 +2846,16 @@ async def delete_practice(
                     "stdout_tail": _err_payload.get("stdout_tail"),
                     "runner": _err_payload.get("runner"),
                 })
+                # Notifica Telegram: bypassa proxy Railway.
+                # Failure status: "delete_failed" (non mappato a ODL/preventivo da qui).
+                await _notify_user_delete_result(
+                    telegram_user_id=captured_uid,
+                    practice_id=captured_pid,
+                    deleted=False,
+                    failure_status="delete_failed",
+                    worker_phases=_wp,
+                    error=_err_payload.get("message") or _err_payload.get("detail"),
+                )
                 raise
             _wp_ok = res.get("worker_phases") or []
             _parts_ok = []
@@ -2791,6 +2864,7 @@ async def delete_practice(
                 _cur = _p.get("elapsed_ms") or 0
                 _parts_ok.append(f"{_p.get('phase','')}:{_p.get('status','')}({_cur}ms,+{_cur-_prev_ok}ms)")
                 _prev_ok = _cur
+            _fs_ok = res.get("deleteAction", {}).get("failureStatus") or res.get("status")
             _write_yap_delete_dump({
                 "practice_id": captured_pid,
                 "args": yap_args,
@@ -2798,12 +2872,21 @@ async def delete_practice(
                 "deleted": bool(res.get("deleted")),
                 "found": res.get("found"),
                 "status": res.get("status"),
-                "failure_status": res.get("deleteAction", {}).get("failureStatus") or res.get("status"),
+                "failure_status": _fs_ok,
                 "deleteAction": res.get("deleteAction"),
                 "last_phase": f"{_wp_ok[-1].get('phase', '?')}:{_wp_ok[-1].get('status', '?')}" if _wp_ok else "no_phases",
                 "phase_summary": " -> ".join(_parts_ok) or "none",
                 "worker_phases": _wp_ok,
             })
+            # Notifica Telegram: successo o fallimento (ODL/preventivo).
+            await _notify_user_delete_result(
+                telegram_user_id=captured_uid,
+                practice_id=captured_pid,
+                deleted=bool(res.get("deleted")),
+                failure_status=_fs_ok,
+                worker_phases=_wp_ok,
+                error=str(res.get("deleteAction", {}).get("message") or res.get("message") or ""),
+            )
             return res
 
         async def _delete_stream():
@@ -3642,6 +3725,15 @@ async def delete_practice_yap_appointment(
             "stdout_tail": _fail_detail.get("stdout_tail"),
             "runner": _fail_detail.get("runner"),
         })
+        # Notifica Telegram: bypassa proxy Railway.
+        await _notify_user_delete_result(
+            telegram_user_id=user_data["id"],
+            practice_id=practice_id,
+            deleted=False,
+            failure_status="delete_failed",
+            worker_phases=_fail_detail.get("worker_phases"),
+            error=_fail_detail.get("message"),
+        )
         raise
     _write_yap_delete_dump({
         "practice_id": practice_id,
@@ -3653,6 +3745,16 @@ async def delete_practice_yap_appointment(
         "deleteAction": result.get("deleteAction"),
         "worker_phases": result.get("worker_phases"),
     })
+    # Notifica Telegram: successo o fallimento (ODL/preventivo).
+    _fs_std = (result.get("deleteAction") or {}).get("failureStatus") or result.get("status")
+    await _notify_user_delete_result(
+        telegram_user_id=user_data["id"],
+        practice_id=practice_id,
+        deleted=bool(result.get("deleted")),
+        failure_status=_fs_std,
+        worker_phases=result.get("worker_phases"),
+        error=str((result.get("deleteAction") or {}).get("message") or result.get("message") or ""),
+    )
     runtime_telemetry = _extract_yap_runtime_telemetry(result)
     status_value = result.get("status") or ("deleted" if result.get("deleted") else ("not_found" if result.get("found") is False else "not_deleted"))
     delete_succeeded = bool(result.get("deleted") or status_value == "not_found" or result.get("found") is False)
