@@ -17,8 +17,9 @@ const DRAFT_STORAGE_KEY = 'giorgio_draft';
 const DRAFT_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
 const CLIENT_CACHE_TTL_MS = 30 * 1000;
 // Recovery polling delays (ms) per attempt after delete timeout.
+// 4 attempts: 5s/20s/40s/60s per coprire il caso script finisce a ~200s.
 // Evaluated at runtime so tests can override via window.__YAP_RECOVERY_DELAYS.
-const getRecoveryDelays = () => (typeof window !== 'undefined' && window.__YAP_RECOVERY_DELAYS) || [5000, 15000, 15000];
+const getRecoveryDelays = () => (typeof window !== 'undefined' && window.__YAP_RECOVERY_DELAYS) || [5000, 20000, 40000, 60000];
 
 const getDraftStorage = () => {
   if (typeof window === 'undefined') return null;
@@ -3471,11 +3472,12 @@ function App() {
       let recoveryError = null;
       const hadResponse = Boolean(err?.response);
       if (!hadResponse) {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          await new Promise(r => setTimeout(r, getRecoveryDelays()[attempt] || 15000));
+        for (let attempt = 0; attempt < 4; attempt++) {
+          await new Promise(r => setTimeout(r, getRecoveryDelays()[attempt] || 30000));
           recoveryAttempts++;
           try {
-            const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 });
+            // Timeout 30s: il proxy Railway potrebbe bloccare il GET dopo la DELETE lunga.
+            const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 });
             const dump = dumpRes?.data?.data;
             const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
             const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
@@ -3492,9 +3494,9 @@ function App() {
               });
               break;
             }
-            recoveryError = `dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump?.practice_id) === String(id)}, status=${dump?.status}, fresh=${fresh}`;
+            recoveryError = `attempt=${attempt + 1}: dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump?.practice_id) === String(id)}, status=${dump?.status}, fresh=${fresh}`;
           } catch (re) {
-            recoveryError = `${re?.response?.status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
+            recoveryError = `attempt=${attempt + 1}: ${re?.response?.status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
           }
         }
       }
@@ -3510,11 +3512,14 @@ function App() {
           `timeout_axios: 180s | timeout_script_server: 200s`,
           `codice_errore: ${err?.code || 'N/A'}`,
           `messaggio: ${err?.message || 'sconosciuto'}`,
-          `recovery: ${recoveryAttempts} tentativi su /yap/last-delete`,
+          `recovery: ${recoveryAttempts} tentativi su /yap/last-delete (5/20/40/60s)`,
           `recovery_esito: ${recovered ? 'TROVATO' : 'NON trovato'}`,
           recoveryError ? `recovery_dettaglio: ${recoveryError}` : '',
           ``,
-          `>> Per vedere le fasi dello script usa il pulsante "Crash log YAP" qui sotto <<`,
+          `--- Azione successiva ---`,
+          `1. Aspetta 30-60s e clicca "Crash log YAP" qui sotto per vedere le fasi dal server.`,
+          `2. Se la pratica e' ancora nella lista dopo 1 minuto, prova a ricaricare la dashboard.`,
+          `3. Se l'appuntamento e' sparito da YAP, l'eliminazione e' riuscita (solo il client non l'ha vista).`,
         ].filter(Boolean).join('\n');
         return base;
       })();
@@ -4980,17 +4985,18 @@ function App() {
           setSelectedPracticeId(null);
           setDetailData(null);
         } catch (err) {
-          // Recovery robusto: polling 3 tentativi a 15s (server finisce a ~200s).
+          // Recovery robusto: polling 4 tentativi a 5/20/40/60s (server finisce a ~200s).
           let recovered = null;
           let recoveryAttempts = 0;
           let recoveryError = null;
           const hadResponse = Boolean(err?.response);
           if (!hadResponse) {
-            for (let attempt = 0; attempt < 3; attempt++) {
-              await new Promise(r => setTimeout(r, getRecoveryDelays()[attempt] || 15000));
+            for (let attempt = 0; attempt < 4; attempt++) {
+              await new Promise(r => setTimeout(r, getRecoveryDelays()[attempt] || 30000));
               recoveryAttempts++;
               try {
-                const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 });
+                // Timeout 30s: il proxy Railway potrebbe bloccare il GET dopo la DELETE lunga.
+                const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 });
                 const dump = dumpRes?.data?.data;
                 const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
                 const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
@@ -5007,9 +5013,9 @@ function App() {
                   });
                   break;
                 }
-                recoveryError = `dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump?.practice_id) === String(p.id)}, status=${dump?.status}, fresh=${fresh}`;
+                recoveryError = `attempt=${attempt + 1}: dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump?.practice_id) === String(p.id)}, status=${dump?.status}, fresh=${fresh}`;
               } catch (re) {
-                recoveryError = `${re?.response?.status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
+                recoveryError = `attempt=${attempt + 1}: ${re?.response?.status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
               }
             }
           }
@@ -5025,11 +5031,14 @@ function App() {
               `timeout_axios: 180s | timeout_script_server: 200s`,
               `codice_errore: ${err?.code || 'N/A'}`,
               `messaggio: ${err?.message || 'sconosciuto'}`,
-              `recovery: ${recoveryAttempts} tentativi su /yap/last-delete`,
+              `recovery: ${recoveryAttempts} tentativi su /yap/last-delete (5/20/40/60s)`,
               `recovery_esito: ${recovered ? 'TROVATO' : 'NON trovato'}`,
               recoveryError ? `recovery_dettaglio: ${recoveryError}` : '',
               ``,
-              `>> Per vedere le fasi dello script usa il pulsante "Crash log YAP" qui sotto <<`,
+              `--- Azione successiva ---`,
+              `1. Aspetta 30-60s e clicca "Crash log YAP" qui sotto per vedere le fasi dal server.`,
+              `2. Se la pratica e' ancora nella lista dopo 1 minuto, prova a ricaricare la dashboard.`,
+              `3. Se l'appuntamento e' sparito da YAP, l'eliminazione e' riuscita (solo il client non l'ha vista).`,
             ].filter(Boolean).join('\n');
             return base;
           })();
