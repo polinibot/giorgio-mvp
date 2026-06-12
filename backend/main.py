@@ -2755,7 +2755,7 @@ async def delete_practice(
                 # (230s x 2 ~= 460-500s), sforando OGNI timeout client. La delete e'
                 # non-idempotente: meglio fallire in fretta con log che ritentare al buio.
                 res = await _run_yap_script(
-                    "yap-delete-appointment.mjs", yap_args, timeout_seconds=230, db=task_db,
+                    "yap-delete-appointment.mjs", yap_args, timeout_seconds=150, db=task_db,
                     allow_safe_retry=False,
                 )
             except Exception as exc:
@@ -3603,7 +3603,7 @@ async def delete_practice_yap_appointment(
     })
 
     try:
-        result = await _run_yap_script("yap-delete-appointment.mjs", args, timeout_seconds=230, db=db, allow_safe_retry=False)
+        result = await _run_yap_script("yap-delete-appointment.mjs", args, timeout_seconds=150, db=db, allow_safe_retry=False)
     except HTTPException as yap_exc:
         # Lo script ha fallito (502 returncode!=0 / 504 timeout): _run_yap_script solleva
         # PRIMA di poter scrivere il dump, quindi senza questo blocco l'ultima delete

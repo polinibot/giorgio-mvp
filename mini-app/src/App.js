@@ -103,7 +103,7 @@ function classifyError(err) {
   const url = String(err?.config?.url || '').toLowerCase();
   const isYapSync = url.includes('/yap/sync');
   const isYapAudit = url.includes('/yap/audit');
-  const isYapDelete = url.includes('/yap/appointment');
+  const isYapDelete = url.includes('/yap/appointment') || url.match(/\/practices\/\d+$/);
   if (!err.response) {
     if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
       if (isYapSync) {
@@ -3476,7 +3476,23 @@ function App() {
           } catch (_) { /* riprova */ }
         }
       }
-      const errorResult = recovered || buildYapErrorResult(err, 'delete_failed');
+      const errorResult = recovered || (() => {
+        const base = buildYapErrorResult(err, 'delete_failed');
+        // Local crash dump: diagnostica SEMPRE disponibile anche se il
+        // recovery polling dal server non trova il dump (auth/proxy/rate-limit).
+        const elapsed = Math.round((Date.now() - reqStartMs) / 1000);
+        base.stderr_tail = [
+          `--- Errore locale (client-side) ---`,
+          `durata: ${elapsed}s`,
+          `url: DELETE ${API_BASE_URL}/practices/${id}/yap/appointment`,
+          `timeout_configurato: 260s`,
+          `codice_errore: ${err?.code || 'N/A'}`,
+          `messaggio: ${err?.message || 'sconosciuto'}`,
+          `recovery_tentativi: 6 (polling /yap/last-delete)`,
+          `recovery_esito: ${recovered ? 'trovato' : 'NON trovato (dump assente o auth fallita)'}`,
+        ].join('\n');
+        return base;
+      })();
       setYapLastResult(errorResult);
       if (recovered && (recovered.status === 'deleted' || recovered.status === 'not_found')) {
         invalidatePracticeCaches(id);
@@ -4980,7 +4996,23 @@ function App() {
               } catch (_) { /* riprova */ }
             }
           }
-          const errorResult = recovered || buildYapErrorResult(err, 'delete_failed');
+          const errorResult = recovered || (() => {
+            const base = buildYapErrorResult(err, 'delete_failed');
+            // Local crash dump: diagnostica SEMPRE disponibile anche se il
+            // recovery polling dal server non trova il dump.
+            const elapsed = Math.round((Date.now() - reqStartMs) / 1000);
+            base.stderr_tail = [
+              `--- Errore locale (client-side) ---`,
+              `durata: ${elapsed}s`,
+              `url: DELETE ${API_BASE_URL}/practices/${p.id}`,
+              `timeout_configurato: 280s`,
+              `codice_errore: ${err?.code || 'N/A'}`,
+              `messaggio: ${err?.message || 'sconosciuto'}`,
+              `recovery_tentativi: 6 (polling /yap/last-delete)`,
+              `recovery_esito: ${recovered ? 'trovato' : 'NON trovato (dump assente o auth fallita)'}`,
+            ].join('\n');
+            return base;
+          })();
           // Mostra il banner col log copiabile, non solo il toast.
           setYapLastPracticeId(p.id);
           setYapLastResult(errorResult);
