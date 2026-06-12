@@ -12,6 +12,7 @@ import hmac
 import time
 import traceback
 import hashlib
+import aiohttp
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, date
 from enum import Enum
@@ -1255,28 +1256,30 @@ async def _notify_user_delete_result(
     e' riuscita anche se la connessione client-server e' caduta.
     """
     if not telegram_user_id:
+        logger.debug("_notify_user_delete_result: skip (no telegram_user_id)")
         return
     try:
         bot_token = settings.telegram_bot_token
         if not bot_token:
-            logger.warning("Cannot notify user: TELEGRAM_BOT_TOKEN not configured")
+            logger.warning("Cannot notify user %s: TELEGRAM_BOT_TOKEN not configured", telegram_user_id)
             return
         if deleted:
-            icon = "\u2705"
+            icon = "✅"
             title = f"Appuntamento #{practice_id} eliminato da YAP"
             body = "L'eliminazione e' riuscita. Apri la Mini App per la sincronizzazione."
         elif failure_status == "blocked_by_odl":
-            icon = "\u26a0\ufe0f"
+            icon = "⚠️"
             title = f"Appuntamento #{practice_id}: eliminazione bloccata"
             body = "L'appuntamento e' collegato a un ordine di lavoro. Eliminalo prima su YAP, poi riprova."
         elif failure_status == "blocked_by_preventivo":
-            icon = "\u26a0\ufe0f"
+            icon = "⚠️"
             title = f"Appuntamento #{practice_id}: eliminazione bloccata"
             body = "Presente un preventivo. Eliminalo prima su YAP, poi riprova."
         else:
-            icon = "\u274c"
+            icon = "❌"
             title = f"Appuntamento #{practice_id}: eliminazione FALLITA"
             body = error or failure_status or "Errore sconosciuto durante l'eliminazione YAP."
+        body = (body or "")[:400]
 
         phases_text = ""
         if worker_phases:
@@ -1287,6 +1290,7 @@ async def _notify_user_delete_result(
             )
         text = f"{icon} *{title}*\n\n{body}{phases_text}\n\n_Vedi 'Crash log YAP' nella Mini App per dettagli._"
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        logger.info("Notifying user %s: practice=%s deleted=%s status=%s", telegram_user_id, practice_id, deleted, failure_status)
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             async with session.post(url, json={
                 "chat_id": telegram_user_id,
@@ -1294,13 +1298,13 @@ async def _notify_user_delete_result(
                 "parse_mode": "Markdown",
                 "disable_notification": False,
             }) as resp:
+                resp_body = await resp.text()
                 if resp.status == 200:
-                    logger.info("Delete result notified to user %s for practice %s", telegram_user_id, practice_id)
+                    logger.info("Delete result notified to user %s for practice %s (HTTP 200)", telegram_user_id, practice_id)
                 else:
-                    body_text = await resp.text()
-                    logger.warning("Failed to notify user %s: HTTP %s - %s", telegram_user_id, resp.status, body_text[:200])
+                    logger.warning("Telegram API rejected notification (HTTP %s): %s", resp.status, resp_body[:300])
     except Exception as exc:
-        logger.warning("Failed to notify user delete result: %s", exc)
+        logger.warning("Failed to notify user delete result: %s", exc, exc_info=True)
 
 
 def _yap_session_fernet() -> Fernet:
