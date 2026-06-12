@@ -1415,6 +1415,21 @@ describe('Mini App user-simulation suite', () => {
     });
 
     axios.get.mockImplementation((url) => {
+      if (url.includes('/yap/last-delete')) {
+        return Promise.resolve({ data: { success: true, data: {
+          has_dump: true,
+          practice_id: 1,
+          ts: new Date().toISOString(),
+          status: 'delete_failed',
+          deleted: false,
+          error: 'Timeout automazione YAP',
+          worker_phases: [
+            { phase: 'save_result', status: 'failed', elapsed_ms: 84162 },
+          ],
+          stderr_tail: '{"event":"yap:phase","phase":"save_result","status":"failed"}',
+          runner: { script: 'yap-delete-appointment.mjs', timeout_seconds: 230 },
+        } } });
+      }
       if (url.includes('/api/practices/stats')) {
         return Promise.resolve({ data: { success: true, data: { total: 1, this_month: 1, pending_sync: 1 } } });
       }
@@ -1491,8 +1506,8 @@ describe('Mini App user-simulation suite', () => {
     await waitFor(() => document.body.textContent.includes('Automazione YAP'));
     clickElement(getButton('Elimina da YAP'));
 
-    await waitFor(() => document.body.textContent.includes('La richiesta di eliminazione YAP si è interrotta prima della risposta.'));
-    expect(document.body.textContent).toContain('Eliminazione YAP fallita');
+    await waitFor(() => document.body.textContent.includes('Eliminazione YAP fallita'));
+    expect(document.body.textContent).toContain('Timeout automazione YAP');
     expect(document.body.textContent).toContain('Crash log YAP');
     expect(document.body.textContent).toContain('last_phase: save_result:failed');
     expect(document.body.textContent).not.toContain('Errore di rete. Controlla la connessione internet e riprova.');

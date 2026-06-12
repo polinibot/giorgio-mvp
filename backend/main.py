@@ -3780,11 +3780,13 @@ async def get_yap_last_delete(
     """Restituisce l'esito (worker log incluso) dell'ultima delete YAP."""
     _dump_path = os.path.join(_project_root(), "automation", "artifacts", "yap", "crash-dumps", "last-delete.json")
     if not os.path.exists(_dump_path):
-        return APIResponse(success=True, data={"found": False, "message": "Nessuna delete YAP registrata."})
+        return APIResponse(success=True, data={"has_dump": False, "message": "Nessuna delete YAP registrata."})
     try:
         with open(_dump_path, "r", encoding="utf-8") as _fh:
             dump = _json.load(_fh)
-        return APIResponse(success=True, data={"found": True, **dump})
+        # NB: "has_dump" (non "found") per evitare collisione con dump["found"]
+        # che il worker imposta a None sui timeout, causando override a null.
+        return APIResponse(success=True, data={"has_dump": True, **dump})
     except Exception as _e:
         raise HTTPException(status_code=500, detail=f"Errore lettura delete dump: {_e}")
 
