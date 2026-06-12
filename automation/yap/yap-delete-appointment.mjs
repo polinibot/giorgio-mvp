@@ -651,6 +651,15 @@ async function main() {
     "--disable-background-networking",
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
+    // Limita RAM Chromium per evitare OOM kill su Railway (512MB container).
+    // Senza questi flag Chromium puo' consumare 600-800MB su una pagina YAP complessa.
+    "--js-flags=--max-old-space-size=256",
+    "--renderer-process-limit=1",
+    "--disable-features=Translate,TranslateUI,BlinkGenPropertyTrees",
+    "--disable-ipc-flooding-protection",
+    "--blink-settings=imagesEnabled=false",
+    "--media-cache-size=1",
+    "--disk-cache-size=1",
   ];
   if (safeMode) {
     launchArgs.push(
