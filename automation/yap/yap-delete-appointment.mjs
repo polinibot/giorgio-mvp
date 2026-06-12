@@ -513,12 +513,25 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   let remainingMatches = afterEvents.filter(matchesNeedle).length;
   let deletedCount = Math.max(0, initialMatchCount - remainingMatches);
   let targetDeleted = deletedCount >= 1;
-  if (!targetDeleted) {
-    trace?.mark("reopening_agenda_for_verification", {
-      remaining_matches_before_reopen: remainingMatches,
-      deleted_count_before_reopen: deletedCount,
-      current_url: page.url(),
-    });
+
+  // Se la RPC response non e' mai arrivata (response_status null), la verifica
+  // basata su "appuntamento sparito dalla vista" e' inaffidabile: potrebbe essere
+  // scomparso per una navigazione/ricarica, non per la delete. In questo caso
+  // forziamo sempre un re-open dell'agenda per confermare lo stato reale.
+  const rpcResponseMissing = !deleteRpcResponse;
+  if (!targetDeleted || rpcResponseMissing) {
+    if (rpcResponseMissing) {
+      trace?.mark("reopening_agenda_rpc_unconfirmed", {
+        remaining_matches_before_reopen: remainingMatches,
+        reason: "rpc_response_null",
+      });
+    } else {
+      trace?.mark("reopening_agenda_for_verification", {
+        remaining_matches_before_reopen: remainingMatches,
+        deleted_count_before_reopen: deletedCount,
+        current_url: page.url(),
+      });
+    }
     await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
     await page.waitForTimeout(200);
     afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
@@ -574,6 +587,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     target_deleted: targetDeleted,
     failure_status: failureStatus,
     response_status: deleteRpcResponse?.status ?? null,
+    rpc_response_missing: rpcResponseMissing,
     verified_event_count: afterEvents.length,
   });
 
