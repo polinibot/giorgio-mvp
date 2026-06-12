@@ -2053,12 +2053,22 @@ function YapCrashLogButton({ initData, telegramUserId }) {
       const params = {};
       if (initData) params['init_data'] = initData;
       else if (telegramUserId) params['user_id'] = telegramUserId;
-      const res = await fetch(`${API_BASE_URL}/yap/last-crash?${new URLSearchParams(params).toString()}`, {
-        headers: initData ? { 'X-Telegram-Init-Data': initData } : {},
-      });
-      const json = await res.json();
-      if (!json?.data?.found) { setErr('Nessun crash dump salvato.'); return; }
-      setCrash(json.data);
+      const hdrs = initData ? { 'X-Telegram-Init-Data': initData } : {};
+      const qs = new URLSearchParams(params).toString();
+      // Check BOTH crash sources: delete dump (most relevant for delete failures)
+      // and timeout dump (for sync/audit timeouts). Show the most recent.
+      const [delRes, crashRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/yap/last-delete?${qs}`, { headers: hdrs }).then(r => r.json()).catch(() => null),
+        fetch(`${API_BASE_URL}/yap/last-crash?${qs}`, { headers: hdrs }).then(r => r.json()).catch(() => null),
+      ]);
+      const delDump = delRes?.data?.has_dump ? delRes.data : null;
+      const crashDump = crashRes?.data?.found ? crashRes.data : null;
+      // Prefer the more recent dump
+      const delTs = delDump?.ts ? Date.parse(delDump.ts) : 0;
+      const crashTs = crashDump?.ts ? Date.parse(crashDump.ts) : 0;
+      const best = (delTs >= crashTs && delDump) ? delDump : (crashDump || delDump);
+      if (!best) { setErr('Nessun crash dump salvato.'); return; }
+      setCrash(best);
     } catch (e) { setErr(String(e?.message || e)); }
     finally { setLoading(false); }
   };
@@ -2071,11 +2081,13 @@ function YapCrashLogButton({ initData, telegramUserId }) {
       {crash && (
         <div style={{ marginTop: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#111', color: '#eee', padding: 8, borderRadius: 4, maxHeight: 400, overflowY: 'auto' }}>
           <b>ts:</b> {crash.ts}{'\n'}
-          <b>script:</b> {crash.script}  <b>timeout:</b> {crash.timeout_seconds}s{'\n'}
-          <b>last_phase:</b> {crash.last_phase}{'\n'}
-          <b>phases:</b> {crash.phase_summary}{'\n\n'}
-          <b>stdout:</b>{'\n'}{crash.stdout || '(vuoto)'}{'\n\n'}
-          <b>stderr:</b>{'\n'}{crash.stderr || '(vuoto)'}
+          {crash.script && <><b>script:</b> {crash.script}  <b>timeout:</b> {crash.timeout_seconds}s{'\n'}</>}
+          {crash.status && <><b>status:</b> {crash.status}  {crash.deleted != null && <><b>deleted:</b> {String(crash.deleted)}</>}{'\n'}</>}
+          <b>last_phase:</b> {crash.last_phase || (crash.worker_phases?.length ? `${crash.worker_phases[crash.worker_phases.length - 1]?.phase}:${crash.worker_phases[crash.worker_phases.length - 1]?.status}` : '-')}{'\n'}
+          {crash.phase_summary && <><b>phases:</b> {crash.phase_summary}{'\n'}</>}
+          {crash.error && <><b>error:</b> {crash.error}{'\n'}</>}
+          {'\n'}<b>stdout:</b>{'\n'}{crash.stdout || crash.stdout_tail || '(vuoto)'}{'\n\n'}
+          <b>stderr:</b>{'\n'}{crash.stderr || crash.stderr_tail || '(vuoto)'}
         </div>
       )}
     </div>
@@ -3385,6 +3397,7 @@ function App() {
     });
     updateYapActionProgress({ percent: 0, label: 'Eliminazione YAP in esecuzione sul server. Fase live non disponibile.' });
     await waitForNextPaint();
+    const reqStartMs = Date.now();
     try {
       const listPractice = Array.isArray(practices)
         ? practices.find((practiceItem) => String(practiceItem.id) === String(id))
@@ -3435,7 +3448,6 @@ function App() {
       const hadResponse = Boolean(err?.response);
       if (!hadResponse) {
         updateYapActionProgress({ percent: 95, label: 'Connessione interrotta: recupero l\u2019esito dal server\u2026' });
-        const reqStartMs = Date.now() - 340000; // stima: il timeout client e' 340s
         for (let attempt = 0; attempt < 12 && !recovered; attempt += 1) {
           await new Promise(r => setTimeout(r, attempt === 0 ? 3000 : 8000));
           try {
