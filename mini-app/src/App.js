@@ -4830,6 +4830,7 @@ function App() {
 
         setSaving(true);
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
+        const reqStartMs = Date.now();
         try {
           // 340s: attesa lock YAP (fino a 100s) + worker delete con cascata
           // preventivo/ODL (fino a 230s). Con 180s il backend stava ancora
@@ -4886,11 +4887,52 @@ function App() {
           setSelectedPracticeId(null);
           setDetailData(null);
         } catch (err) {
+          // La richiesta HTTP puo' MORIRE per timeout proxy mentre lo script YAP gira
+          // ancora (delete lente con cascata preventivo): in quel caso "err" non ha corpo
+          // e il log resta vuoto. Il backend pero' persiste l'esito in last-delete.json
+          // quando lo script finisce: lo recuperiamo in polling (cercando un dump piu'
+          // recente dell'inizio richiesta) cosi' il log e' comunque visibile/copiabile.
+          let recovered = null;
+          const hadResponse = Boolean(err?.response);
+          if (!hadResponse) {
+            updateYapActionProgress({ percent: 95, label: 'Connessione interrotta: recupero l’esito dal server…' });
+            for (let attempt = 0; attempt < 8 && !recovered; attempt += 1) {
+              await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 6000));
+              try {
+                const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
+                const dump = dumpRes?.data?.data;
+                const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
+                const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
+                if (dump?.found && String(dump.practice_id) === String(p.id) && fresh) {
+                  recovered = normalizeYapResult({
+                    status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
+                    message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
+                    action_target: 'delete',
+                    worker_phases: dump.worker_phases || [],
+                    stderr_tail: dump.stderr_tail || '',
+                    stdout_tail: dump.stdout_tail || '',
+                    runner: dump.runner || null,
+                    error: dump,
+                  });
+                }
+              } catch (_) { /* riprova */ }
+            }
+          }
+          const errorResult = recovered || buildYapErrorResult(err, 'delete_failed');
           // Mostra il banner col log copiabile, non solo il toast.
           setYapLastPracticeId(p.id);
-          setYapLastResult(buildYapErrorResult(err, 'delete_failed'));
-          finishYapActionProgress(classifyError(err), 'error', 0);
-          addToast(classifyError(err), 'error');
+          setYapLastResult(errorResult);
+          if (recovered && (recovered.status === 'deleted' || recovered.status === 'not_found')) {
+            // Lo script E' riuscito lato server nonostante la connessione caduta.
+            invalidatePracticeCaches(p.id);
+            setPractices(prev => prev.filter(pr => pr.id !== p.id));
+            finishYapActionProgress('Appuntamento eliminato da YAP (recuperato dopo timeout)', 'success', 1500);
+            addToast('Eliminazione confermata dal server (la connessione era caduta).', 'success');
+          } else {
+            const msg = errorResult.message || classifyError(err);
+            finishYapActionProgress(msg, 'error', 0);
+            addToast(msg, 'error');
+          }
         } finally {
           setSaving(false);
         }
