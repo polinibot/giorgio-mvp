@@ -2085,10 +2085,22 @@ function YapCrashLogButton({ initData, telegramUserId }) {
         <div style={{ marginTop: 6, fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#111', color: '#eee', padding: 8, borderRadius: 4, maxHeight: 400, overflowY: 'auto' }}>
           <b>ts:</b> {crash.ts}{'\n'}
           {crash.script && <><b>script:</b> {crash.script}  <b>timeout:</b> {crash.timeout_seconds}s{'\n'}</>}
-          {crash.status && <><b>status:</b> {crash.status}  {crash.deleted != null && <><b>deleted:</b> {String(crash.deleted)}</>}{'\n'}</>}
+          {crash.status && <><b>status:</b> {crash.status}  {crash.deleted != null && <><b>deleted:</b> {String(crash.deleted)}</>}{crash.runner?.duration_ms && <>  <b>durata:</b> {(crash.runner.duration_ms / 1000).toFixed(1)}s</>}{'\n'}</>}
           <b>last_phase:</b> {crash.last_phase || (crash.worker_phases?.length ? `${crash.worker_phases[crash.worker_phases.length - 1]?.phase}:${crash.worker_phases[crash.worker_phases.length - 1]?.status}` : '-')}{'\n'}
-          {crash.phase_summary && <><b>phases:</b> {crash.phase_summary}{'\n'}</>}
+          {crash.phase_summary && <><b>phase_summary:</b> {crash.phase_summary}{'\n'}</>}
           {crash.error && <><b>error:</b> {crash.error}{'\n'}</>}
+          {Array.isArray(crash.worker_phases) && crash.worker_phases.length > 0 && (
+            <>
+              {'\n'}<b>── Fasi ({crash.worker_phases.length}) ──</b>{'\n'}
+              {crash.worker_phases.map((p, i) => {
+                const elapsed = p.elapsed_ms || 0;
+                const prev = i > 0 ? (crash.worker_phases[i-1]?.elapsed_ms || 0) : 0;
+                const delta = elapsed - prev;
+                const statusIcon = p.status === 'completed' ? '\u2705' : p.status === 'failed' ? '\u274c' : p.status === 'started' ? '\u23f3' : '\u2022';
+                return `${statusIcon} ${i+1}. ${p.phase} [${p.status}] +${(delta/1000).toFixed(1)}s (${(elapsed/1000).toFixed(1)}s total)${p.detail ? ` — ${JSON.stringify(p.detail)}` : ''}\n`;
+              })}
+            </>
+          )}
           {'\n'}<b>stdout:</b>{'\n'}{crash.stdout || crash.stdout_tail || '(vuoto)'}{'\n\n'}
           <b>stderr:</b>{'\n'}{crash.stderr || crash.stderr_tail || '(vuoto)'}
         </div>
@@ -3476,15 +3488,19 @@ function App() {
         // Local crash dump: diagnostica SEMPRE disponibile anche se il
         // recovery polling dal server non trova il dump (auth/proxy/rate-limit).
         const elapsed = Math.round((Date.now() - reqStartMs) / 1000);
+        const isTimeout = err?.code === 'ECONNABORTED' || String(err?.message || '').includes('timeout');
         base.stderr_tail = [
           `--- Errore locale (client-side) ---`,
           `durata: ${elapsed}s`,
+          `tipo: ${isTimeout ? 'TIMEOUT client (axios)' : 'Errore rete'}`,
           `url: DELETE ${API_BASE_URL}/practices/${id}/yap/appointment`,
-          `timeout_configurato: 300s`,
+          `timeout_axios: 300s | timeout_script_server: 200s`,
           `codice_errore: ${err?.code || 'N/A'}`,
           `messaggio: ${err?.message || 'sconosciuto'}`,
           `recovery: 1 tentativo rapido su /yap/last-delete`,
           `recovery_esito: ${recovered ? 'trovato' : 'NON trovato'}`,
+          ``,
+          `>> Per vedere le fasi dello script usa il pulsante "Crash log YAP" qui sotto <<`,
         ].join('\n');
         return base;
       })();
@@ -4985,15 +5001,19 @@ function App() {
             // Local crash dump: diagnostica SEMPRE disponibile anche se il
             // recovery polling dal server non trova il dump.
             const elapsed = Math.round((Date.now() - reqStartMs) / 1000);
+            const isTimeout = err?.code === 'ECONNABORTED' || String(err?.message || '').includes('timeout');
             base.stderr_tail = [
               `--- Errore locale (client-side) ---`,
               `durata: ${elapsed}s`,
+              `tipo: ${isTimeout ? 'TIMEOUT client (axios)' : 'Errore rete'}`,
               `url: DELETE ${API_BASE_URL}/practices/${p.id}`,
-              `timeout_configurato: 300s`,
+              `timeout_axios: 300s | timeout_script_server: 200s`,
               `codice_errore: ${err?.code || 'N/A'}`,
               `messaggio: ${err?.message || 'sconosciuto'}`,
               `recovery: 1 tentativo rapido su /yap/last-delete`,
               `recovery_esito: ${recovered ? 'trovato' : 'NON trovato'}`,
+              ``,
+              `>> Per vedere le fasi dello script usa il pulsante "Crash log YAP" qui sotto <<`,
             ].join('\n');
             return base;
           })();

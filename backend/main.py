@@ -2761,6 +2761,14 @@ async def delete_practice(
             except Exception as exc:
                 _detail = getattr(exc, "detail", None)
                 _err_payload = _detail if isinstance(_detail, dict) else {"detail": str(exc)}
+                _wp = _err_payload.get("worker_phases") or []
+                _last_phase = f"{_wp[-1].get('phase', '?')}:{_wp[-1].get('status', '?')}" if _wp else "no_phases"
+                _parts = []
+                _prev = 0
+                for _p in _wp:
+                    _cur = _p.get("elapsed_ms") or 0
+                    _parts.append(f"{_p.get('phase','')}:{_p.get('status','')}({_cur}ms,+{_cur-_prev}ms)")
+                    _prev = _cur
                 _write_yap_delete_dump({
                     "practice_id": captured_pid,
                     "args": yap_args,
@@ -2768,12 +2776,21 @@ async def delete_practice(
                     "deleted": False,
                     "status": "delete_failed",
                     "error": _err_payload.get("message") or _err_payload.get("detail"),
-                    "worker_phases": _err_payload.get("worker_phases"),
+                    "last_phase": _last_phase,
+                    "phase_summary": " -> ".join(_parts) or "none",
+                    "worker_phases": _wp,
                     "stderr_tail": _err_payload.get("stderr_tail"),
                     "stdout_tail": _err_payload.get("stdout_tail"),
                     "runner": _err_payload.get("runner"),
                 })
                 raise
+            _wp_ok = res.get("worker_phases") or []
+            _parts_ok = []
+            _prev_ok = 0
+            for _p in _wp_ok:
+                _cur = _p.get("elapsed_ms") or 0
+                _parts_ok.append(f"{_p.get('phase','')}:{_p.get('status','')}({_cur}ms,+{_cur-_prev_ok}ms)")
+                _prev_ok = _cur
             _write_yap_delete_dump({
                 "practice_id": captured_pid,
                 "args": yap_args,
@@ -2783,7 +2800,9 @@ async def delete_practice(
                 "status": res.get("status"),
                 "failure_status": res.get("deleteAction", {}).get("failureStatus") or res.get("status"),
                 "deleteAction": res.get("deleteAction"),
-                "worker_phases": res.get("worker_phases"),
+                "last_phase": f"{_wp_ok[-1].get('phase', '?')}:{_wp_ok[-1].get('status', '?')}" if _wp_ok else "no_phases",
+                "phase_summary": " -> ".join(_parts_ok) or "none",
+                "worker_phases": _wp_ok,
             })
             return res
 
