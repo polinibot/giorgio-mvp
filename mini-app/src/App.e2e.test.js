@@ -295,11 +295,14 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   document.body.innerHTML = '';
+  // Fast recovery delays for tests (no real 5s/15s waits).
+  window.__YAP_RECOVERY_DELAYS = [10, 10, 10];
 });
 
 afterEach(() => {
   document.body.innerHTML = '';
   delete window.Telegram;
+  delete window.__YAP_RECOVERY_DELAYS;
 });
 
 afterEach(() => {

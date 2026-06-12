@@ -16,6 +16,9 @@ const DEV_TELEGRAM_USER_ID = process.env.REACT_APP_DEV_TELEGRAM_USER_ID || '7611
 const DRAFT_STORAGE_KEY = 'giorgio_draft';
 const DRAFT_STORAGE_TTL_MS = 24 * 60 * 60 * 1000;
 const CLIENT_CACHE_TTL_MS = 30 * 1000;
+// Recovery polling delays (ms) per attempt after delete timeout.
+// Evaluated at runtime so tests can override via window.__YAP_RECOVERY_DELAYS.
+const getRecoveryDelays = () => (typeof window !== 'undefined' && window.__YAP_RECOVERY_DELAYS) || [5000, 15000, 15000];
 
 const getDraftStorage = () => {
   if (typeof window === 'undefined') return null;
@@ -398,7 +401,7 @@ function getYapProgressPercent(action, startedAt) {
   // ma 0% fisso confonde l'utente. Curva asintotica verso 90%:
   // a 60s ~30%, a 120s ~55%, a 200s ~75%, a 280s ~85%.
   const elapsedS = Math.max(0, (Date.now() - (Number(startedAt) || Date.now())) / 1000);
-  const timeoutS = action === 'delete' ? 300 : 260;
+  const timeoutS = action === 'delete' ? 180 : 180;
   const ratio = Math.min(elapsedS / timeoutS, 1);
   return Math.round(90 * (1 - Math.exp(-2.5 * ratio)));
 }
@@ -3424,8 +3427,10 @@ function App() {
       const requestOptions = inferredTime ? { ...options, time: inferredTime } : { ...options };
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
       // NON ritentare in automatico: la delete e' non idempotente lato YAP.
-      // 300s: backend ha timeout script 200s + lock wait 100s = max 300s.
-      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 300000 });
+      // 180s: Railway proxy taglia le connessioni SSE dopo ~120-180s.
+      // Inutile aspettare 300s (il proxy ha gia' chiuso). Falliamo veloce e
+      // usiamo il recovery polling per recuperare il dump dal server.
+      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
@@ -3457,36 +3462,44 @@ function App() {
       return data;
     } catch (err) {
       rememberError('yap.delete', err);
-      // Recovery ridotto: 1 solo tentativo rapido. In produzione il dump
-      // server-side non e' mai accessibile (filesystem Railway effimero o
-      // auth init_data). Il crash dump LOCALE sotto garantisce log sempre.
+      // Recovery robusto: il server ha timeout 200s ma il client fallisce a 180s
+      // (proxy Railway). Lo script continua in background e scrive il dump.
+      // Polling con 3 tentativi a 15s di distanza: il dump dovrebbe apparire
+      // entro il 2°-3° tentativo (server finisce a ~200s, recovery a 195/210/225s).
       let recovered = null;
+      let recoveryAttempts = 0;
+      let recoveryError = null;
       const hadResponse = Boolean(err?.response);
       if (!hadResponse) {
-        await new Promise(r => setTimeout(r, 2000));
-        try {
-          const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 });
-          const dump = dumpRes?.data?.data;
-          const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
-          const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
-          if (dump?.has_dump !== false && String(dump.practice_id) === String(id) && fresh && dump.status !== 'pending') {
-            recovered = normalizeYapResult({
-              status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
-              message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
-              action_target: 'delete',
-              worker_phases: dump.worker_phases || [],
-              stderr_tail: dump.stderr_tail || '',
-              stdout_tail: dump.stdout_tail || '',
-              runner: dump.runner || null,
-              error: dump,
-            });
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await new Promise(r => setTimeout(r, getRecoveryDelays()[attempt] || 15000));
+          recoveryAttempts++;
+          try {
+            const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 });
+            const dump = dumpRes?.data?.data;
+            const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
+            const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
+            if (dump?.has_dump !== false && String(dump.practice_id) === String(id) && fresh && dump.status !== 'pending') {
+              recovered = normalizeYapResult({
+                status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
+                message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
+                action_target: 'delete',
+                worker_phases: dump.worker_phases || [],
+                stderr_tail: dump.stderr_tail || '',
+                stdout_tail: dump.stdout_tail || '',
+                runner: dump.runner || null,
+                error: dump,
+              });
+              break;
+            }
+            recoveryError = `dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump?.practice_id) === String(id)}, status=${dump?.status}, fresh=${fresh}`;
+          } catch (re) {
+            recoveryError = `${re?.response?.status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
           }
-        } catch (_) { /* ignora */ }
+        }
       }
       const errorResult = recovered || (() => {
         const base = buildYapErrorResult(err, 'delete_failed');
-        // Local crash dump: diagnostica SEMPRE disponibile anche se il
-        // recovery polling dal server non trova il dump (auth/proxy/rate-limit).
         const elapsed = Math.round((Date.now() - reqStartMs) / 1000);
         const isTimeout = err?.code === 'ECONNABORTED' || String(err?.message || '').includes('timeout');
         base.stderr_tail = [
@@ -3494,14 +3507,15 @@ function App() {
           `durata: ${elapsed}s`,
           `tipo: ${isTimeout ? 'TIMEOUT client (axios)' : 'Errore rete'}`,
           `url: DELETE ${API_BASE_URL}/practices/${id}/yap/appointment`,
-          `timeout_axios: 300s | timeout_script_server: 200s`,
+          `timeout_axios: 180s | timeout_script_server: 200s`,
           `codice_errore: ${err?.code || 'N/A'}`,
           `messaggio: ${err?.message || 'sconosciuto'}`,
-          `recovery: 1 tentativo rapido su /yap/last-delete`,
-          `recovery_esito: ${recovered ? 'trovato' : 'NON trovato'}`,
+          `recovery: ${recoveryAttempts} tentativi su /yap/last-delete`,
+          `recovery_esito: ${recovered ? 'TROVATO' : 'NON trovato'}`,
+          recoveryError ? `recovery_dettaglio: ${recoveryError}` : '',
           ``,
           `>> Per vedere le fasi dello script usa il pulsante "Crash log YAP" qui sotto <<`,
-        ].join('\n');
+        ].filter(Boolean).join('\n');
         return base;
       })();
       setYapLastResult(errorResult);
@@ -4913,8 +4927,8 @@ function App() {
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         const reqStartMs = Date.now();
         try {
-          // 300s: backend ha timeout script 200s + lock wait 100s.
-          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 300000 });
+          // 180s: Railway proxy taglia SSE dopo ~120-180s. Falliamo veloce + recovery.
+          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
           // L'endpoint e' uno STREAM (heartbeat \n + JSON finale): axios a volte consegna
           // res.data come stringa. Normalizziamo a oggetto.
           let body = res?.data;
@@ -4966,40 +4980,41 @@ function App() {
           setSelectedPracticeId(null);
           setDetailData(null);
         } catch (err) {
-          // La richiesta HTTP puo' MORIRE per timeout proxy mentre lo script YAP gira
-          // ancora (delete lente con cascata preventivo): in quel caso "err" non ha corpo
-          // e il log resta vuoto. Il backend pero' persiste l'esito in last-delete.json
-          // quando lo script finisce: lo recuperiamo in polling (cercando un dump piu'
-          // recente dell'inizio richiesta) cosi' il log e' comunque visibile/copiabile.
-          // Recovery ridotto: 1 solo tentativo rapido. Il crash dump LOCALE
-          // sotto garantisce log sempre visibile.
+          // Recovery robusto: polling 3 tentativi a 15s (server finisce a ~200s).
           let recovered = null;
+          let recoveryAttempts = 0;
+          let recoveryError = null;
           const hadResponse = Boolean(err?.response);
           if (!hadResponse) {
-            await new Promise(r => setTimeout(r, 2000));
-            try {
-              const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 });
-              const dump = dumpRes?.data?.data;
-              const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
-              const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
-              if (dump?.has_dump !== false && String(dump.practice_id) === String(p.id) && fresh && dump.status !== 'pending') {
-                recovered = normalizeYapResult({
-                  status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
-                  message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
-                  action_target: 'delete',
-                  worker_phases: dump.worker_phases || [],
-                  stderr_tail: dump.stderr_tail || '',
-                  stdout_tail: dump.stdout_tail || '',
-                  runner: dump.runner || null,
-                  error: dump,
-                });
+            for (let attempt = 0; attempt < 3; attempt++) {
+              await new Promise(r => setTimeout(r, getRecoveryDelays()[attempt] || 15000));
+              recoveryAttempts++;
+              try {
+                const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 });
+                const dump = dumpRes?.data?.data;
+                const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
+                const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
+                if (dump?.has_dump !== false && String(dump.practice_id) === String(p.id) && fresh && dump.status !== 'pending') {
+                  recovered = normalizeYapResult({
+                    status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
+                    message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
+                    action_target: 'delete',
+                    worker_phases: dump.worker_phases || [],
+                    stderr_tail: dump.stderr_tail || '',
+                    stdout_tail: dump.stdout_tail || '',
+                    runner: dump.runner || null,
+                    error: dump,
+                  });
+                  break;
+                }
+                recoveryError = `dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump?.practice_id) === String(p.id)}, status=${dump?.status}, fresh=${fresh}`;
+              } catch (re) {
+                recoveryError = `${re?.response?.status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
               }
-            } catch (_) { /* ignora */ }
+            }
           }
           const errorResult = recovered || (() => {
             const base = buildYapErrorResult(err, 'delete_failed');
-            // Local crash dump: diagnostica SEMPRE disponibile anche se il
-            // recovery polling dal server non trova il dump.
             const elapsed = Math.round((Date.now() - reqStartMs) / 1000);
             const isTimeout = err?.code === 'ECONNABORTED' || String(err?.message || '').includes('timeout');
             base.stderr_tail = [
@@ -5007,14 +5022,15 @@ function App() {
               `durata: ${elapsed}s`,
               `tipo: ${isTimeout ? 'TIMEOUT client (axios)' : 'Errore rete'}`,
               `url: DELETE ${API_BASE_URL}/practices/${p.id}`,
-              `timeout_axios: 300s | timeout_script_server: 200s`,
+              `timeout_axios: 180s | timeout_script_server: 200s`,
               `codice_errore: ${err?.code || 'N/A'}`,
               `messaggio: ${err?.message || 'sconosciuto'}`,
-              `recovery: 1 tentativo rapido su /yap/last-delete`,
-              `recovery_esito: ${recovered ? 'trovato' : 'NON trovato'}`,
+              `recovery: ${recoveryAttempts} tentativi su /yap/last-delete`,
+              `recovery_esito: ${recovered ? 'TROVATO' : 'NON trovato'}`,
+              recoveryError ? `recovery_dettaglio: ${recoveryError}` : '',
               ``,
               `>> Per vedere le fasi dello script usa il pulsante "Crash log YAP" qui sotto <<`,
-            ].join('\n');
+            ].filter(Boolean).join('\n');
             return base;
           })();
           // Mostra il banner col log copiabile, non solo il toast.
