@@ -2780,16 +2780,23 @@ async def delete_practice(
 
             if not result.get("deleted"):
                 gen_db.close()
+                # Includi il worker log della delete cosi' il banner mostra il log GIUSTO
+                # (non quello dell'ultimo sync) e si capisce dove si e' fermata.
+                _wp = result.get("worker_phases")
                 if failure_status == "blocked_by_odl":
                     yield _json.dumps({"success": False, "data": None, "errors": {
                         "code": "HTTP_ERROR",
                         "detail": "Impossibile cancellare la pratica: l'appuntamento YAP è collegato a un ordine di lavoro",
+                        "failure_status": failure_status,
+                        "worker_phases": _wp,
                     }}).encode()
                     return
                 if failure_status == "blocked_by_preventivo":
                     yield _json.dumps({"success": False, "data": None, "errors": {
                         "code": "HTTP_ERROR",
                         "detail": "Impossibile cancellare la pratica: l'appuntamento YAP è collegato a un preventivo. Elimina prima il preventivo su YAP, poi riprova.",
+                        "failure_status": failure_status,
+                        "worker_phases": _wp,
                     }}).encode()
                     return
                 if failure_status in {"not_found"} or result.get("found") is False:

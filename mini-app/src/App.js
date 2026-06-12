@@ -433,6 +433,12 @@ function normalizeYapAuditSnapshot(audit) {
 
 function mergeYapResultWithPersistedAudit(result, practice) {
   if (!result) return result;
+  // Per gli esiti di ELIMINAZIONE NON mescolare worker log / audit dell'ultimo SYNC
+  // salvato sulla pratica: mostrerebbe il log sbagliato (un sync) al posto della delete.
+  const deleteStatuses = ['deleted', 'not_found', 'not_needed', 'delete_failed', 'blocked_by_odl', 'blocked_by_preventivo'];
+  if (deleteStatuses.includes(String(result.status || '')) || result.action_target === 'delete') {
+    return result;
+  }
   const persistedAudit = normalizeYapAuditSnapshot(practice?.management_audit_result);
   if (!persistedAudit) return result;
 
