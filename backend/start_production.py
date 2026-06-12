@@ -90,33 +90,42 @@ def main():
     if not migrations_completed:
         child_env["GIORGIO_MIGRATIONS_TIMED_OUT"] = "1"
 
-    processes = [
-        start_process([sys.executable, "bot.py"], env=child_env),
-        start_process([
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "main:app",
-            "--host",
-            "0.0.0.0",
-            "--port",
-            port,
-        ], env=child_env),
-    ]
+    bot_proc = start_process([sys.executable, "bot.py"], env=child_env)
+    api_proc = start_process([
+        sys.executable,
+        "-m",
+        "uvicorn",
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        port,
+    ], env=child_env)
 
     try:
         while True:
-            for proc in processes:
-                code = proc.poll()
-                if code is not None:
-                    for other in processes:
-                        if other is not proc:
-                            stop_process(other)
-                    return code or 1
+            # --- API (uvicorn) e' il processo critico ---
+            # Se l'API crasha, riavviamo tutto (Railway detecta exit code != 0).
+            api_code = api_proc.poll()
+            if api_code is not None:
+                logger.error("API process exited with code %s, shutting down", api_code)
+                stop_process(bot_proc)
+                return api_code or 1
+
+            # --- Bot Telegram NON e' critico ---
+            # Se il bot crasha (es. TelegramConflictError al deploy), lo riavviamo
+            # localmente SENZA killare l'API. Questo evita che un restart del bot
+            # interrompa uno script YAP in esecuzione.
+            bot_code = bot_proc.poll()
+            if bot_code is not None:
+                logger.warning("Bot process exited with code %s, restarting bot only", bot_code)
+                time.sleep(3)  # breve pausa prima di rilanciare
+                bot_proc = start_process([sys.executable, "bot.py"], env=child_env)
+
             time.sleep(1)
     except KeyboardInterrupt:
-        for proc in processes:
-            stop_process(proc)
+        stop_process(bot_proc)
+        stop_process(api_proc)
         return 130
 
 
