@@ -28,6 +28,14 @@ const requireFromYap = createRequire(new URL("./package.json", import.meta.url))
 const { chromium } = requireFromYap("playwright");
 
 const DELETE_ACTION_ENDPOINT = "/yap/action/PrenotazioneDelAction";
+// RPC che YAP invia quando un DOCUMENTO (preventivo/ODL) viene davvero eliminato.
+// Usate per confermare la delete del documento bloccante (non basta cliccare).
+const DOC_DELETE_ENDPOINTS = [
+  "/yap/action/DocumentoDeleteAction",
+  "/yap/action/OdlDeleteAction",
+  "/yap/action/PreventivoDelAction",
+  "/yap/action/PreventivoDeleteAction",
+];
 
 function createDeleteTrace(context = {}) {
   const startedAtMs = Date.now();
@@ -113,85 +121,149 @@ async function visibleYapMessage(page) {
   }).catch(() => "");
 }
 
+// Apre la pratica dal popup appuntamento cliccando "Gestione pratica" (DOM-dispatch,
+// come lo standalone yap-delete-linked-odl.mjs che funziona).
+async function clickPracticeLinkInPopup(page) {
+  return page.evaluate(() => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const popup = document.querySelector(".gwt-DecoratedPopupPanel");
+    const root = popup || document.body;
+    const cand = [...root.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div")].filter((el) => {
+      const t = (el.textContent || "").toLowerCase();
+      return (t.includes("gestione pratica") || t.includes("apri pratica")
+        || (t.includes("pratica") && !t.includes("prenotazione"))) && t.length < 60;
+    });
+    for (const el of cand) {
+      if (!isVisible(el)) continue;
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return { clicked: true, label: (el.textContent || "").trim().slice(0, 80) };
+    }
+    return { clicked: false };
+  }).catch(() => ({ clicked: false }));
+}
+
+// Clicca la sezione documento nella pratica (Preventivi / Ordini di lavoro).
+async function clickDocSectionTab(page, tabReSource) {
+  return page.evaluate((src) => {
+    const re = new RegExp(src, "i");
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const cand = [...document.querySelectorAll("button, a, [role='button'], .gwt-Label, span, div, td")].filter((el) => {
+      const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+      return re.test(t) && t.length < 40;
+    });
+    for (const el of cand) {
+      if (!isVisible(el)) continue;
+      el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return { clicked: true, label: (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60) };
+    }
+    return { clicked: false };
+  }, tabReSource).catch(() => ({ clicked: false }));
+}
+
+// Clicca il bottone "Elimina" della TOOLBAR documento (testo esatto "Elimina", in alto
+// y<180). Evita di prendere l'Elimina dell'appuntamento o un delete di riga.
+async function clickToolbarEliminaDoc(page) {
+  const target = await page.evaluate(() => {
+    const btns = [...document.querySelectorAll("button, .gwt-Button, a.gwt-Anchor, [role='button']")];
+    const m = btns.find((el) => {
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return text === "Elimina" && r.width > 10 && r.height > 10 && r.y < 180
+        && s.display !== "none" && s.visibility !== "hidden";
+    });
+    if (!m) return null;
+    const r = m.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }).catch(() => null);
+  if (target) {
+    await page.mouse.click(target.x, target.y);
+    return target;
+  }
+  const loc = page.locator("button, .gwt-Button, a.gwt-Anchor, [role='button']").filter({ hasText: /^Elimina$/i }).first();
+  if (await loc.count().catch(() => 0)) {
+    await loc.click({ force: true }).catch(() => {});
+    return { text: "Elimina" };
+  }
+  return null;
+}
+
 /**
- * Gestisce documento bloccante (ODL o preventivo): apre la pratica, naviga al tab
- * del documento, lo elimina, torna ad agenda e riprova la delete dell'appuntamento.
+ * Gestisce documento bloccante (ODL o preventivo): apre la pratica, naviga alla sezione
+ * del documento, clicca Elimina nella toolbar, conferma, e CONFERMA via RPC che il
+ * documento sia stato eliminato; poi torna ad agenda e riprova la delete appuntamento.
+ * Mirroring della logica provata in yap-delete-linked-odl.mjs.
  */
-async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace, kind = "odl") {
+async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace, kind = "odl", expectedTime = "") {
   const doc = kind === "preventivo"
-    ? { tabRe: /Preventivi/i, pageEnum: "PREVENTIVO" }
-    : { tabRe: /Ordini di lavoro|ODL|Lavori/i, pageEnum: "ODL" };
-  trace?.mark(`${kind}_fix_open_practice`, { event: event.title });
-  // I dialog nativi (confirm di eliminazione documento) vanno accettati.
-  const onDialog = (dialog) => { dialog.accept().catch(() => {}); };
+    ? { tabRe: /^Preventivi$|Preventivi/i }
+    : { tabRe: /Ordini di lavoro|^ODL$/i };
+
+  // Rileva la delete REALE del documento via RPC (non basta cliccare Elimina).
+  const docRpc = [];
+  const onDocReq = (req) => {
+    if (DOC_DELETE_ENDPOINTS.some((e) => req.url().includes(e))) {
+      docRpc.push({ method: req.method(), url: req.url() });
+    }
+  };
+  page.on("request", onDocReq);
+  // I dialog di conferma eliminazione documento (nativi e GWT) vanno accettati.
+  const onDialog = (dialog) => {
+    const m = dialog.message();
+    if (/elimin|conferm|sicur|rimuov|vuoi|s[ìi]\b/i.test(m)) dialog.accept().catch(() => {});
+    else dialog.dismiss().catch(() => {});
+  };
   page.on("dialog", onDialog);
   try {
-    // Clicca sull'appuntamento per aprire popup
+    trace?.mark(`${kind}_fix_open_popup`, { event: event.title });
     await page.mouse.click(event.x, event.y);
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(900);
 
-    // Cerca link "Gestione pratica" o "Dettagli"
-    const praticaLink = await page.locator("a.gwt-Anchor, button").filter({ hasText: /Gestione pratica|Dettagli|Apri pratica/i }).first();
-    if (await praticaLink.isVisible().catch(() => false)) {
-      await praticaLink.click();
-      await page.waitForTimeout(2000);
-      trace?.mark(`${kind}_fix_practice_opened`);
-    } else {
-      // Prova doppio click per aprire diretto
-      await page.mouse.dblclick(event.x, event.y);
-      await page.waitForTimeout(2000);
+    const practiceLink = await clickPracticeLinkInPopup(page);
+    trace?.mark(`${kind}_fix_practice_link`, practiceLink);
+    if (!practiceLink?.clicked) {
+      await page.mouse.dblclick(event.x, event.y).catch(() => {});
     }
-
-    // Attendi caricamento pratica
     await page.waitForTimeout(3000);
 
-    // Cerca il tab del documento (Ordini di lavoro / Preventivi)
-    const docTab = await page.locator("[role='tab'], .gwt-TabBarItem, .gwt-TabLayoutPanelTab, .tab").filter({ hasText: doc.tabRe }).first();
-    if (await docTab.isVisible().catch(() => false)) {
-      await docTab.click();
-      await page.waitForTimeout(2500);
-      trace?.mark(`${kind}_fix_tab_opened`);
-    } else {
-      // Prova URL hash navigation
-      const currentUrl = page.url();
-      if (currentUrl.includes("pratica")) {
-        await page.evaluate((pageEnum) => { window.location.hash = window.location.hash.replace(/Page%22:%22[^%]+%22|Page":"[^"]+"/, `Page":"${pageEnum}"`); }, doc.pageEnum);
-        await page.waitForTimeout(2500);
-        trace?.mark(`${kind}_fix_hash_navigated`);
-      }
+    const section = await clickDocSectionTab(page, doc.tabRe.source);
+    trace?.mark(`${kind}_fix_section_click`, section);
+    await page.waitForTimeout(2500);
+
+    const del = await clickToolbarEliminaDoc(page);
+    trace?.mark(`${kind}_fix_toolbar_elimina`, { found: Boolean(del) });
+
+    // Loop conferma + attesa RPC delete documento.
+    for (let i = 0; i < 12 && !docRpc.length; i += 1) {
+      await page.waitForTimeout(400);
+      await clickDeleteConfirmIfPresent(page).catch(() => {});
     }
+    await page.waitForTimeout(1500);
+    const docDeleted = docRpc.length > 0;
+    trace?.mark(`${kind}_fix_doc_delete_rpc`, { detected: docDeleted, rpc_count: docRpc.length });
 
-    // Cerca bottone elimina del documento
-    const eliminaDoc = await page.locator("button, a.gwt-Anchor, .gwt-Button").filter({ hasText: /Elimina|Rimuovi|Cancella|Delete/i }).first();
-    if (await eliminaDoc.isVisible().catch(() => false)) {
-      await eliminaDoc.click();
-      await page.waitForTimeout(1000);
-
-      // Conferma eliminazione (dialog GWT; quelli nativi sono gestiti da onDialog)
-      const conferma = await page.locator("button, .gwt-Button").filter({ hasText: /Sì|Conferma|OK|Elimina/i }).first();
-      if (await conferma.isVisible().catch(() => false)) {
-        await conferma.click();
-        await page.waitForTimeout(3000);
-        trace?.mark(`${kind}_fix_doc_deleted`);
-      }
-    } else {
-      trace?.mark(`${kind}_fix_delete_button_not_found`);
-    }
-
-    // Torna all'agenda
+    // Torna all'agenda e riprova la delete appuntamento (auto-fix DISABILITATO per
+    // evitare ricorsione infinita se il documento non si è eliminato).
     await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
     await page.waitForTimeout(1500);
     trace?.mark(`${kind}_fix_back_to_agenda`);
 
-    // Riprova eliminazione appuntamento
-    const retryResult = await findAndDeleteAppointment(page, searchTerm, false, dateIso, false, null);
-    trace?.mark(`${kind}_fix_retry_completed`, { deleted: retryResult.deleted });
-
+    const retryResult = await findAndDeleteAppointment(page, searchTerm, false, dateIso, false, trace, expectedTime, false);
+    trace?.mark(`${kind}_fix_retry_completed`, { deleted: retryResult.deleted, status: retryResult.status });
     return retryResult.deleted;
   } catch (err) {
     trace?.mark(`${kind}_fix_error`, { error: err.message });
     return false;
   } finally {
+    page.off("request", onDocReq);
     page.off("dialog", onDialog);
   }
 }
@@ -228,7 +300,7 @@ async function listVisibleAgendaEvents(page) {
   return scanVisibleAgendaEventTargets(page);
 }
 
-async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug = false, trace = null, expectedTime = "") {
+async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug = false, trace = null, expectedTime = "", allowAutoFix = true) {
   const normalizeText = (t) =>
     String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
   const needle = normalizeText(searchTerm);
@@ -450,11 +522,11 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   // Gestione automatica documento bloccante (ODL o preventivo): apri pratica,
   // elimina il documento, riprova la delete dell'appuntamento.
   let odlAutoFixed = false;
-  if ((failureStatus === "blocked_by_odl" || failureStatus === "blocked_by_preventivo") && !dryRun) {
+  if ((failureStatus === "blocked_by_odl" || failureStatus === "blocked_by_preventivo") && !dryRun && allowAutoFix) {
     const blockKind = failureStatus === "blocked_by_preventivo" ? "preventivo" : "odl";
     trace?.mark("blocking_doc_auto_fix_started", { kind: blockKind });
     try {
-      odlAutoFixed = await handleBlockingDocAndRetry(page, match, dateIso, searchTerm, trace, blockKind);
+      odlAutoFixed = await handleBlockingDocAndRetry(page, match, dateIso, searchTerm, trace, blockKind, expectedTime);
       if (odlAutoFixed) {
         trace?.mark("blocking_doc_auto_fix_success", { kind: blockKind });
         // Riverifica eliminazione
