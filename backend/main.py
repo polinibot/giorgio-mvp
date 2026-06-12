@@ -2745,7 +2745,24 @@ async def delete_practice(
             except Exception as exc:
                 gen_db.close()
                 logger.error("YAP delete stream exception practice %d: %s", captured_pid, exc)
-                yield _json.dumps({"success": False, "data": None, "errors": str(exc)}).encode()
+                # HTTPException da _run_yap_script porta un detail strutturato (worker_phases,
+                # stderr/stdout, runner): preservalo invece di str(exc) cosi' il frontend
+                # mostra il log copiabile, e persistilo nel dump dell'ultima delete.
+                _detail = getattr(exc, "detail", None)
+                _err_payload = _detail if isinstance(_detail, dict) else {"detail": str(exc)}
+                _write_yap_delete_dump({
+                    "practice_id": captured_pid,
+                    "args": yap_args,
+                    "attempted": True,
+                    "deleted": False,
+                    "status": "delete_failed",
+                    "error": _err_payload.get("message") or _err_payload.get("detail"),
+                    "worker_phases": _err_payload.get("worker_phases"),
+                    "stderr_tail": _err_payload.get("stderr_tail"),
+                    "stdout_tail": _err_payload.get("stdout_tail"),
+                    "runner": _err_payload.get("runner"),
+                })
+                yield _json.dumps({"success": False, "data": None, "errors": _err_payload}).encode()
                 return
 
             failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")

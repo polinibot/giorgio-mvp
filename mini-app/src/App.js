@@ -4829,23 +4829,60 @@ function App() {
           // preventivo/ODL (fino a 230s). Con 180s il backend stava ancora
           // lavorando e l'utente vedeva un falso "Errore di rete".
           const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 340000 });
+          // L'endpoint e' uno STREAM (heartbeat \n + JSON finale): axios a volte consegna
+          // res.data come stringa. Normalizziamo a oggetto.
+          let body = res?.data;
+          if (typeof body === 'string') { try { body = JSON.parse(body.trim()); } catch { body = {}; } }
+          // Risposta di FALLIMENTO YAP (blocco preventivo/ODL o crash): il backend risponde
+          // 200 con success:false. Senza questo blocco veniva scambiata per successo e
+          // l'utente non vedeva ne' errore ne' log. Mostriamo il banner col log e restiamo.
+          if (body && body.success === false) {
+            const errObj = (body.errors && typeof body.errors === 'object') ? body.errors : { detail: String(body.errors || '') };
+            const errMsg = errObj.detail || errObj.message || 'Eliminazione YAP fallita.';
+            setYapLastPracticeId(p.id);
+            setYapLastResult(normalizeYapResult({
+              status: errObj.failure_status || 'delete_failed',
+              message: errMsg,
+              worker_phases: errObj.worker_phases || [],
+              stderr_tail: errObj.stderr_tail || '',
+              stdout_tail: errObj.stdout_tail || '',
+              runner: errObj.runner || null,
+              error: errObj,
+            }));
+            finishYapActionProgress(errMsg, 'error', 0);
+            addToast(errMsg, 'error');
+            return; // resta sul dettaglio per leggere/copiare il log
+          }
           // Il backend distingue "eliminata anche su YAP" da "eliminata SOLO localmente"
           // (appuntamento non trovato / dati mancanti): mostra il messaggio vero.
-          const deleteMessage = res?.data?.data?.message || 'Pratica cancellata con successo';
-          const yapInfo = res?.data?.data?.yap;
+          const deleteMessage = body?.data?.message || 'Pratica cancellata con successo';
+          const yapInfo = body?.data?.yap;
           const yapWarning = Boolean(yapInfo && (!yapInfo.attempted || !yapInfo.deleted));
+          // Se YAP NON ha eliminato (ODL/preventivo bloccante, ecc.) mostra il banner con
+          // il log worker copiabile prima di lasciare il dettaglio.
+          if (yapWarning) {
+            setYapLastPracticeId(p.id);
+            setYapLastResult(normalizeYapOutcome(body?.data || {}));
+          }
           finishYapActionProgress(yapWarning ? deleteMessage : 'Pratica eliminata', yapWarning ? 'error' : 'success', yapWarning ? 4000 : 800);
           invalidatePracticeCaches(p.id);
           clearDraft();
           addToast(deleteMessage, yapWarning ? 'error' : 'success');
+          setPractices(prev => prev.filter(pr => pr.id !== p.id));
+          setStats(prev => prev ? { ...prev, total: prev.total - 1, pending_sync: p.synced ? prev.pending_sync : prev.pending_sync - 1 } : prev);
+          if (yapWarning) {
+            // Resta sul dettaglio: l'utente deve poter leggere/copiare il log dell'errore YAP.
+            return;
+          }
           await new Promise(r => setTimeout(r, 900));
           setCurrentView('dashboard');
           setNavigationStack([]);
           setSelectedPracticeId(null);
           setDetailData(null);
-          setPractices(prev => prev.filter(pr => pr.id !== p.id));
-          setStats(prev => prev ? { ...prev, total: prev.total - 1, pending_sync: p.synced ? prev.pending_sync : prev.pending_sync - 1 } : prev);
         } catch (err) {
+          // Mostra il banner col log copiabile, non solo il toast.
+          setYapLastPracticeId(p.id);
+          setYapLastResult(buildYapErrorResult(err, 'delete_failed'));
           finishYapActionProgress(classifyError(err), 'error', 0);
           addToast(classifyError(err), 'error');
         } finally {
@@ -6004,6 +6041,9 @@ function App() {
               🗑 Elimina
             </button>
           </div>
+          {/* Esito/errore dell'eliminazione completa "🗑 Elimina": senza questo banner
+              un fallimento mostrava solo un toast, senza log copiabile. */}
+          {!browserPreviewMode && yapLastPracticeId === practice.id && renderYapResultBanner(liveYapResult, { practiceId: practice.id, showRetry: false, showDelete: false })}
         </div>
 
         {lightboxPhoto && <Lightbox src={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}
