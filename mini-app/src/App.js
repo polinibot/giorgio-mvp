@@ -3443,38 +3443,31 @@ function App() {
       return data;
     } catch (err) {
       rememberError('yap.delete', err);
-      // Recovery: se la connessione e' caduta (timeout proxy / rete), il backend
-      // persiste comunque l'esito in last-delete.json. Poll per recuperarlo.
+      // Recovery ridotto: 1 solo tentativo rapido. In produzione il dump
+      // server-side non e' mai accessibile (filesystem Railway effimero o
+      // auth init_data). Il crash dump LOCALE sotto garantisce log sempre.
       let recovered = null;
       const hadResponse = Boolean(err?.response);
       if (!hadResponse) {
-        updateYapActionProgress({ percent: 95, label: 'Connessione interrotta: recupero l\u2019esito dal server\u2026' });
-        for (let attempt = 0; attempt < 6 && !recovered; attempt += 1) {
-          await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 10000));
-          try {
-            const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
-            const dump = dumpRes?.data?.data;
-            const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
-            const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
-            if (dump?.has_dump !== false && String(dump.practice_id) === String(id) && fresh) {
-              // Se il dump e' "pending" (script ancora in esecuzione), aspetta
-              // ancora un po' per vedere se arriva il risultato finale.
-              if (dump.status === 'pending' && attempt < 4) continue;
-              recovered = normalizeYapResult({
-                status: dump.status === 'pending' ? 'delete_failed' : (dump.status || (dump.deleted ? 'deleted' : 'delete_failed')),
-                message: dump.status === 'pending'
-                  ? 'Delete YAP ancora in esecuzione sul server. L\u2019operazione potrebbe essere completata: verifica su YAP prima di riprovare.'
-                  : (dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).')),
-                action_target: 'delete',
-                worker_phases: dump.worker_phases || [],
-                stderr_tail: dump.stderr_tail || '',
-                stdout_tail: dump.stdout_tail || '',
-                runner: dump.runner || null,
-                error: dump,
-              });
-            }
-          } catch (_) { /* riprova */ }
-        }
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 });
+          const dump = dumpRes?.data?.data;
+          const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
+          const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
+          if (dump?.has_dump !== false && String(dump.practice_id) === String(id) && fresh && dump.status !== 'pending') {
+            recovered = normalizeYapResult({
+              status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
+              message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
+              action_target: 'delete',
+              worker_phases: dump.worker_phases || [],
+              stderr_tail: dump.stderr_tail || '',
+              stdout_tail: dump.stdout_tail || '',
+              runner: dump.runner || null,
+              error: dump,
+            });
+          }
+        } catch (_) { /* ignora */ }
       }
       const errorResult = recovered || (() => {
         const base = buildYapErrorResult(err, 'delete_failed');
@@ -3488,8 +3481,8 @@ function App() {
           `timeout_configurato: 260s`,
           `codice_errore: ${err?.code || 'N/A'}`,
           `messaggio: ${err?.message || 'sconosciuto'}`,
-          `recovery_tentativi: 6 (polling /yap/last-delete)`,
-          `recovery_esito: ${recovered ? 'trovato' : 'NON trovato (dump assente o auth fallita)'}`,
+          `recovery: 1 tentativo rapido su /yap/last-delete`,
+          `recovery_esito: ${recovered ? 'trovato' : 'NON trovato'}`,
         ].join('\n');
         return base;
       })();
@@ -4962,39 +4955,30 @@ function App() {
           // e il log resta vuoto. Il backend pero' persiste l'esito in last-delete.json
           // quando lo script finisce: lo recuperiamo in polling (cercando un dump piu'
           // recente dell'inizio richiesta) cosi' il log e' comunque visibile/copiabile.
+          // Recovery ridotto: 1 solo tentativo rapido. Il crash dump LOCALE
+          // sotto garantisce log sempre visibile.
           let recovered = null;
           const hadResponse = Boolean(err?.response);
           if (!hadResponse) {
-            updateYapActionProgress({ percent: 95, label: 'Connessione interrotta: recupero l\u2019esito dal server\u2026' });
-            // Il backend scrive un pending dump PRIMA dello script e il dump
-            // finale quando finisce. Poll veloce per trovare il risultato.
-            for (let attempt = 0; attempt < 6 && !recovered; attempt += 1) {
-              await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 10000));
-              try {
-                const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
-                const dump = dumpRes?.data?.data;
-                const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
-                const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
-                // has_dump (non found): il backend rinominato la chiave per evitare
-                // collisione con dump.found del worker (None sui timeout → null in JS).
-                if (dump?.has_dump !== false && String(dump.practice_id) === String(p.id) && fresh) {
-                  // Se pending, aspetta ancora per il risultato finale (max 4 tentativi)
-                  if (dump.status === 'pending' && attempt < 4) continue;
-                  recovered = normalizeYapResult({
-                    status: dump.status === 'pending' ? 'delete_failed' : (dump.status || (dump.deleted ? 'deleted' : 'delete_failed')),
-                    message: dump.status === 'pending'
-                      ? 'Delete YAP ancora in esecuzione sul server. L\u2019operazione potrebbe essere completata: verifica su YAP prima di riprovare.'
-                      : (dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).')),
-                    action_target: 'delete',
-                    worker_phases: dump.worker_phases || [],
-                    stderr_tail: dump.stderr_tail || '',
-                    stdout_tail: dump.stdout_tail || '',
-                    runner: dump.runner || null,
-                    error: dump,
-                  });
-                }
-              } catch (_) { /* riprova */ }
-            }
+            await new Promise(r => setTimeout(r, 2000));
+            try {
+              const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 10000 });
+              const dump = dumpRes?.data?.data;
+              const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
+              const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
+              if (dump?.has_dump !== false && String(dump.practice_id) === String(p.id) && fresh && dump.status !== 'pending') {
+                recovered = normalizeYapResult({
+                  status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
+                  message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
+                  action_target: 'delete',
+                  worker_phases: dump.worker_phases || [],
+                  stderr_tail: dump.stderr_tail || '',
+                  stdout_tail: dump.stdout_tail || '',
+                  runner: dump.runner || null,
+                  error: dump,
+                });
+              }
+            } catch (_) { /* ignora */ }
           }
           const errorResult = recovered || (() => {
             const base = buildYapErrorResult(err, 'delete_failed');
@@ -5008,8 +4992,8 @@ function App() {
               `timeout_configurato: 280s`,
               `codice_errore: ${err?.code || 'N/A'}`,
               `messaggio: ${err?.message || 'sconosciuto'}`,
-              `recovery_tentativi: 6 (polling /yap/last-delete)`,
-              `recovery_esito: ${recovered ? 'trovato' : 'NON trovato (dump assente o auth fallita)'}`,
+              `recovery: 1 tentativo rapido su /yap/last-delete`,
+              `recovery_esito: ${recovered ? 'trovato' : 'NON trovato'}`,
             ].join('\n');
             return base;
           })();
