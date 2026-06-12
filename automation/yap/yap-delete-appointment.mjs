@@ -43,14 +43,24 @@ function createDeleteTrace(context = {}) {
   const timeline = [];
 
   const mark = (event, details = {}) => {
-    const entry = {
-      at: new Date().toISOString(),
-      elapsed_ms: Date.now() - startedAtMs,
-      event,
-      ...details,
-    };
+    const ts = new Date().toISOString();
+    const elapsed_ms = Date.now() - startedAtMs;
+    const entry = { at: ts, elapsed_ms, event, ...details };
     timeline.push(entry);
     console.warn(`[delete-trace] ${JSON.stringify(entry)}`);
+    // CRITICO: emette ANCHE un evento yap:phase, l'unico formato che il backend estrae
+    // in worker_phases. Senza questo il log della delete era SEMPRE vuoto nel banner
+    // (il worker di sync lo ha perche' usa logPhase=yap:phase; la delete no).
+    try {
+      process.stderr.write(JSON.stringify({
+        event: "yap:phase",
+        phase: "delete",
+        status: event,
+        elapsed_ms,
+        ts,
+        ...details,
+      }) + "\n");
+    } catch (_) { /* best-effort */ }
     return entry;
   };
 
@@ -655,7 +665,10 @@ async function main() {
     freshLogin: args.freshLogin,
     launchArgs,
     viewport: { width: 1280, height: 820 },
-    preferPersistentProfile: false,
+    // Riusa profilo + sessione persistente (come il sync worker): se elimini subito
+    // dopo un'altra operazione la sessione e' ancora viva e si SALTANO i ~22s di login.
+    // Disattivabile con YAP_DELETE_PERSISTENT_PROFILE=0 (fallback al contesto pulito).
+    preferPersistentProfile: String(process.env.YAP_DELETE_PERSISTENT_PROFILE || "1").trim() !== "0",
     resolveModule: requireFromYap.resolve.bind(requireFromYap),
   });
   const { page } = runtime;
