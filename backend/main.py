@@ -1288,14 +1288,15 @@ async def _notify_user_delete_result(
                 f"  - {p.get('phase','?')}: {p.get('status','?')} (+{p.get('elapsed_ms',0)/1000:.1f}s)"
                 for p in last_phases
             )
-        text = f"{icon} *{title}*\n\n{body}{phases_text}\n\n_Vedi 'Crash log YAP' nella Mini App per dettagli._"
+        # Niente parse_mode: il body puo' contenere caratteri che rompono Markdown
+        # (es. «V», apostrofi, parentesi, trattini). Plain text e' sempre sicuro.
+        text = f"{icon} {title}\n\n{body}{phases_text}"
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         logger.info("Notifying user %s: practice=%s deleted=%s status=%s", telegram_user_id, practice_id, deleted, failure_status)
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
             async with session.post(url, json={
                 "chat_id": telegram_user_id,
                 "text": text,
-                "parse_mode": "Markdown",
                 "disable_notification": False,
             }) as resp:
                 resp_body = await resp.text()
@@ -2914,6 +2915,7 @@ async def delete_practice(
                 _detail = getattr(exc, "detail", None)
                 _err_payload = _detail if isinstance(_detail, dict) else {"detail": str(exc)}
                 yield _json.dumps({"success": False, "data": None, "errors": _err_payload}).encode()
+                await asyncio.sleep(1.5)
                 return
 
             failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
@@ -2930,6 +2932,7 @@ async def delete_practice(
                         "failure_status": failure_status,
                         "worker_phases": _wp,
                     }}).encode()
+                    await asyncio.sleep(1.5)
                     return
                 if failure_status == "blocked_by_preventivo":
                     yield _json.dumps({"success": False, "data": None, "errors": {
@@ -2938,6 +2941,7 @@ async def delete_practice(
                         "failure_status": failure_status,
                         "worker_phases": _wp,
                     }}).encode()
+                    await asyncio.sleep(1.5)
                     return
                 if failure_status in {"not_found"} or result.get("found") is False:
                     # Non trovato su YAP = gia' rimosso; segniamo comunque deleted in Giorgio
@@ -2954,6 +2958,7 @@ async def delete_practice(
                         "code": "HTTP_ERROR",
                         "detail": "Impossibile cancellare l'appuntamento su YAP",
                     }}).encode()
+                    await asyncio.sleep(1.5)
                     return
             else:
                 msg = "Pratica e appuntamento YAP eliminati."
@@ -2976,6 +2981,10 @@ async def delete_practice(
                 "data": {"message": msg, "yap": {"deleted": bool(result.get("deleted")), "status": result.get("status")}},
                 "errors": None,
             }).encode()
+            # Piccolo delay prima di chiudere lo stream: Railway proxy (Nginx chunked)
+            # a volte resetta la connessione TCP prima che il client legga il body
+            # finale se lo stream si chiude troppo velocemente dopo l'ultimo chunk.
+            await asyncio.sleep(1.5)
 
         return StreamingResponse(_delete_stream(), media_type="application/json")
     except HTTPException:
