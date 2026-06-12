@@ -515,14 +515,33 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   let targetDeleted = deletedCount >= 1;
 
   // Se la RPC response non e' mai arrivata (response_status null), la verifica
-  // basata su "appuntamento sparito dalla vista" e' inaffidabile: potrebbe essere
-  // scomparso per una navigazione/ricarica, non per la delete. In questo caso
-  // forziamo sempre un re-open dell'agenda per confermare lo stato reale.
+  // basata su "appuntamento sparito dalla vista" e' inaffidabile: YAP aggiorna
+  // ottimisticamente la UI rimuovendo l'evento PRIMA che il server risponda.
+  // Aspettiamo fino a 6s che la response arrivi; se non arriva, forziamo un
+  // page.reload() per ottenere lo stato vero dal server (non ottimistico).
   const rpcResponseMissing = !deleteRpcResponse;
+  if (rpcResponseMissing) {
+    trace?.mark("waiting_rpc_response_post_confirm", { reason: "rpc_response_null_after_loop" });
+    // Aspetta fino a 6s che onResponse catturi la response
+    for (let w = 0; w < 12; w++) {
+      if (deleteRpcResponse) break;
+      await page.waitForTimeout(500);
+    }
+    if (!deleteRpcResponse) {
+      // Ancora null: forza reload della pagina per ottenere stato server reale
+      trace?.mark("forcing_page_reload_rpc_missing", { elapsed_before_reload_ms: Date.now() - startedAtMs });
+      try {
+        await page.reload({ timeout: 15000, waitUntil: 'domcontentloaded' });
+        await page.waitForTimeout(2000); // YAP carica i dati in async dopo il DOM
+      } catch (_) {}
+    }
+  }
+
   if (!targetDeleted || rpcResponseMissing) {
     if (rpcResponseMissing) {
       trace?.mark("reopening_agenda_rpc_unconfirmed", {
         remaining_matches_before_reopen: remainingMatches,
+        rpc_arrived: !!deleteRpcResponse,
         reason: "rpc_response_null",
       });
     } else {
@@ -533,7 +552,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
       });
     }
     await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD });
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(1500); // attesa extra per caricamento asincrono eventi
     afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
     remainingMatches = afterEvents.filter(matchesNeedle).length;
     deletedCount = Math.max(0, initialMatchCount - remainingMatches);
