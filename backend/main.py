@@ -1873,7 +1873,7 @@ class _YapScriptTimeout(Exception):
         self.detail = detail
 
 
-async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180, db: Optional[Session] = None) -> Dict[str, Any]:
+async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: int = 180, db: Optional[Session] = None, allow_safe_retry: bool = True) -> Dict[str, Any]:
     queued_started_at = _utc_now_iso()
     queued_started_monotonic = time.perf_counter()
 
@@ -2153,7 +2153,9 @@ async def _run_yap_script(script_name: str, args: List[str], timeout_seconds: in
                 "agenda_event_population_timeout",
             )
             message_lc = str(failure_detail.get("message") or "").lower()
-            is_recoverable = any(signal in message_lc for signal in recoverable_signals)
+            # allow_safe_retry=False per le DELETE: il retry raddoppia la durata
+            # (230s x 2) sforando ogni timeout client, e una delete non e' idempotente.
+            is_recoverable = allow_safe_retry and any(signal in message_lc for signal in recoverable_signals)
             if is_recoverable:
                 logger.warning("YAP script recoverable failure (%s), retrying once in safe mode", script_name)
                 retry_code, retry_out, retry_err, retry_attempt_meta = await _run_once({"YAP_SAFE_MODE": "1"})
@@ -2727,27 +2729,24 @@ async def delete_practice(
         captured_date_iso = date_iso
         captured_search = search
 
-        async def _delete_stream():
-            import json as _json
-            yield b"\n"  # apertura immediata stream — Railway non va in timeout
-            gen_db = SessionLocal()
+        async def _run_delete_and_dump(task_db):
+            """Esegue lo script delete e scrive SEMPRE last-delete.json (successo o errore).
+
+            Vive in un task separato dal generatore dello stream: se il client si
+            disconnette (timeout axios/proxy) il generatore viene cancellato MA questo
+            task continua e persiste comunque l'esito, cosi' il frontend lo recupera
+            in polling da /yap/last-delete. Prima il dump era scritto DENTRO il
+            generatore -> client morto = dump mai scritto = log sempre vuoto.
+            """
             try:
-                delete_task = asyncio.ensure_future(
-                    _run_yap_script("yap-delete-appointment.mjs", yap_args, timeout_seconds=230, db=gen_db)
+                # allow_safe_retry=False: il retry in safe-mode raddoppiava la durata
+                # (230s x 2 ~= 460-500s), sforando OGNI timeout client. La delete e'
+                # non-idempotente: meglio fallire in fretta con log che ritentare al buio.
+                res = await _run_yap_script(
+                    "yap-delete-appointment.mjs", yap_args, timeout_seconds=230, db=task_db,
+                    allow_safe_retry=False,
                 )
-                # heartbeat ogni 8s mentre il task gira
-                while not delete_task.done():
-                    try:
-                        await asyncio.wait_for(asyncio.shield(delete_task), timeout=8.0)
-                    except asyncio.TimeoutError:
-                        yield b"\n"
-                result = await delete_task
             except Exception as exc:
-                gen_db.close()
-                logger.error("YAP delete stream exception practice %d: %s", captured_pid, exc)
-                # HTTPException da _run_yap_script porta un detail strutturato (worker_phases,
-                # stderr/stdout, runner): preservalo invece di str(exc) cosi' il frontend
-                # mostra il log copiabile, e persistilo nel dump dell'ultima delete.
                 _detail = getattr(exc, "detail", None)
                 _err_payload = _detail if isinstance(_detail, dict) else {"detail": str(exc)}
                 _write_yap_delete_dump({
@@ -2762,21 +2761,44 @@ async def delete_practice(
                     "stdout_tail": _err_payload.get("stdout_tail"),
                     "runner": _err_payload.get("runner"),
                 })
-                yield _json.dumps({"success": False, "data": None, "errors": _err_payload}).encode()
-                return
-
-            failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
+                raise
             _write_yap_delete_dump({
                 "practice_id": captured_pid,
                 "args": yap_args,
                 "attempted": True,
-                "deleted": bool(result.get("deleted")),
-                "found": result.get("found"),
-                "status": result.get("status"),
-                "failure_status": failure_status,
-                "deleteAction": result.get("deleteAction"),
-                "worker_phases": result.get("worker_phases"),
+                "deleted": bool(res.get("deleted")),
+                "found": res.get("found"),
+                "status": res.get("status"),
+                "failure_status": res.get("deleteAction", {}).get("failureStatus") or res.get("status"),
+                "deleteAction": res.get("deleteAction"),
+                "worker_phases": res.get("worker_phases"),
             })
+            return res
+
+        async def _delete_stream():
+            import json as _json
+            yield b"\n"  # apertura immediata stream — Railway non va in timeout
+            gen_db = SessionLocal()
+            try:
+                delete_task = asyncio.ensure_future(_run_delete_and_dump(gen_db))
+                # heartbeat ogni 8s mentre il task gira
+                while not delete_task.done():
+                    try:
+                        await asyncio.wait_for(asyncio.shield(delete_task), timeout=8.0)
+                    except asyncio.TimeoutError:
+                        yield b"\n"
+                result = await delete_task
+            except Exception as exc:
+                gen_db.close()
+                logger.error("YAP delete stream exception practice %d: %s", captured_pid, exc)
+                # Il dump e' gia' stato scritto dal task; qui serializziamo solo l'errore
+                # strutturato (worker_phases, stderr/stdout, runner) per il banner.
+                _detail = getattr(exc, "detail", None)
+                _err_payload = _detail if isinstance(_detail, dict) else {"detail": str(exc)}
+                yield _json.dumps({"success": False, "data": None, "errors": _err_payload}).encode()
+                return
+
+            failure_status = result.get("deleteAction", {}).get("failureStatus") or result.get("status")
 
             if not result.get("deleted"):
                 gen_db.close()
@@ -3557,7 +3579,7 @@ async def delete_practice_yap_appointment(
         args.append("--fresh-login")
 
     try:
-        result = await _run_yap_script("yap-delete-appointment.mjs", args, timeout_seconds=230, db=db)
+        result = await _run_yap_script("yap-delete-appointment.mjs", args, timeout_seconds=230, db=db, allow_safe_retry=False)
     except HTTPException as yap_exc:
         # Lo script ha fallito (502 returncode!=0 / 504 timeout): _run_yap_script solleva
         # PRIMA di poter scrivere il dump, quindi senza questo blocco l'ultima delete

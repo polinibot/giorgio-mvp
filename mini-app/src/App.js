@@ -4832,10 +4832,11 @@ function App() {
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         const reqStartMs = Date.now();
         try {
-          // 340s: attesa lock YAP (fino a 100s) + worker delete con cascata
-          // preventivo/ODL (fino a 230s). Con 180s il backend stava ancora
-          // lavorando e l'utente vedeva un falso "Errore di rete".
-          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 340000 });
+          // 400s: attesa lock YAP (fino a 100s) + worker delete con cascata
+          // preventivo/ODL (fino a 230s, SENZA retry safe-mode lato server) + margine.
+          // Con un timeout piu' corto del caso peggiore il client mollava mentre il
+          // server lavorava ancora -> falso "Errore di rete" e log vuoto.
+          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 400000 });
           // L'endpoint e' uno STREAM (heartbeat \n + JSON finale): axios a volte consegna
           // res.data come stringa. Normalizziamo a oggetto.
           let body = res?.data;
@@ -4896,7 +4897,10 @@ function App() {
           const hadResponse = Boolean(err?.response);
           if (!hadResponse) {
             updateYapActionProgress({ percent: 95, label: 'Connessione interrotta: recupero l’esito dal server…' });
-            for (let attempt = 0; attempt < 8 && !recovered; attempt += 1) {
+            // Il task server-side ora scrive SEMPRE last-delete.json anche a client
+            // disconnesso: il dump arriva al massimo entro il timeout script (230s).
+            // Poll fino a ~2 minuti per coprire la coda piu' lunga.
+            for (let attempt = 0; attempt < 20 && !recovered; attempt += 1) {
               await new Promise(r => setTimeout(r, attempt === 0 ? 2000 : 6000));
               try {
                 const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
