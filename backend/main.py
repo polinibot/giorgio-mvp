@@ -3532,7 +3532,28 @@ async def delete_practice_yap_appointment(
     if body.fresh_login:
         args.append("--fresh-login")
 
-    result = await _run_yap_script("yap-delete-appointment.mjs", args, timeout_seconds=230, db=db)
+    try:
+        result = await _run_yap_script("yap-delete-appointment.mjs", args, timeout_seconds=230, db=db)
+    except HTTPException as yap_exc:
+        # Lo script ha fallito (502 returncode!=0 / 504 timeout): _run_yap_script solleva
+        # PRIMA di poter scrivere il dump, quindi senza questo blocco l'ultima delete
+        # fallita non lascia NESSUN log consultabile. Persistiamo l'esito di fallimento
+        # (worker log + stdout/stderr) cosi' e' copiabile da get_yap_last_delete e dal banner.
+        _fail_detail = yap_exc.detail if isinstance(yap_exc.detail, dict) else {"message": str(yap_exc.detail)}
+        _write_yap_delete_dump({
+            "practice_id": practice_id,
+            "endpoint": "yap_appointment_delete",
+            "args": args,
+            "deleted": False,
+            "found": None,
+            "status": "delete_failed",
+            "error": _fail_detail.get("message"),
+            "worker_phases": _fail_detail.get("worker_phases"),
+            "stderr_tail": _fail_detail.get("stderr_tail"),
+            "stdout_tail": _fail_detail.get("stdout_tail"),
+            "runner": _fail_detail.get("runner"),
+        })
+        raise
     _write_yap_delete_dump({
         "practice_id": practice_id,
         "endpoint": "yap_appointment_delete",

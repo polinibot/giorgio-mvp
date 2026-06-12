@@ -5813,6 +5813,11 @@ function App() {
               </div>
             </div>
           )}
+
+          {/* Esito ultima azione YAP (sync/audit/delete) anche nel dettaglio: senza
+              questo, un errore di "Elimina da YAP" mostrava solo un toast e NESSUN
+              log copiabile (il banner esisteva solo nella lista dashboard). */}
+          {!browserPreviewMode && yapLastPracticeId === practice.id && renderYapResultBanner(liveYapResult, { practiceId: practice.id, showRetry: true, showDelete: false })}
             </>
           )}
 
