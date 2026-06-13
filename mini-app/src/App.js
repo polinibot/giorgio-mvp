@@ -3490,7 +3490,11 @@ function App() {
       lines.push(`Sync status: ${p.management_sync_status || 'mai_syncato'}`);
       try {
         const res = await axios.get(`${API_BASE_URL}/api/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
-        const detail = res.data?.data || res.data;
+        // Il dettaglio incapsula i campi pratica in data.practice: l'audit e' in
+        // data.practice.management_audit_result, NON in data.management_audit_result.
+        // Prima si leggeva il livello sbagliato -> auditRaw sempre undefined ->
+        // "(nessun audit result)" su TUTTE le pratiche, anche le complete_synced.
+        const detail = res.data?.data?.practice || res.data?.data || res.data;
         const auditRaw = detail?.management_audit_result;
         let audit = null;
         if (typeof auditRaw === 'string') { try { audit = JSON.parse(auditRaw); } catch { audit = null; } } else if (typeof auditRaw === 'object') { audit = auditRaw; }
