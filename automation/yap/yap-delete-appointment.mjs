@@ -529,7 +529,7 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     }
     if (!deleteRpcResponse) {
       // Ancora null: forza reload della pagina per ottenere stato server reale
-      trace?.mark("forcing_page_reload_rpc_missing", { elapsed_before_reload_ms: Date.now() - startedAtMs });
+      trace?.mark("forcing_page_reload_rpc_missing", { reload_at_ms: Date.now() });
       try {
         await page.reload({ timeout: 15000, waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(2000); // YAP carica i dati in async dopo il DOM
