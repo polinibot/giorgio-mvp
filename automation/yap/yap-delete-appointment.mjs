@@ -336,13 +336,9 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
 
   let matchingEvents = events.filter(matchesNeedle);
   let timeOnlyFallback = false;
-  // Fallback 1: match solo per targa (senza orario). Se il titolo contiene la targa,
-  // l'appuntamento e' quello giusto anche se il formato orario non matcha.
-  if (matchingEvents.length === 0) {
-    matchingEvents = events.filter(matchesNeedleLoose);
-    if (matchingEvents.length) timeOnlyFallback = true;
-  }
-  // Fallback 2: solo orario (YAP mostra icone invece del testo nel titolo).
+  // Fallback: solo orario (YAP mostra icone invece del testo nel titolo).
+  // NON usiamo fallback solo-targa: se ci sono piu' appuntamenti con la stessa
+  // targa ma orari diversi, il match loose prenderebbe quello sbagliato.
   if (matchingEvents.length === 0 && normalizedExpectedTime) {
     const toMin = (s) => { const [h, m] = String(s || "").replace(".", ":").split(":").map(Number); return isNaN(h) ? null : h * 60 + (m || 0); };
     const expMin = toMin(normalizedExpectedTime);
