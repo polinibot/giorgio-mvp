@@ -3531,9 +3531,8 @@ function App() {
       const requestOptions = inferredTime ? { ...options, time: inferredTime } : { ...options };
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
       // NON ritentare in automatico: la delete e' non idempotente lato YAP.
-      // 40s: lo script finisce in ~32s. Se Railway proxy non consegna in 8s extra,
-      // falliamo veloce e usiamo il recovery polling per recuperare il dump dal server.
-      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 40000 });
+      // 75s: copre anche i casi con preventivo/ODL collegato (~45s). Oltre, recovery polling.
+      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 75000 });
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
@@ -3622,7 +3621,7 @@ function App() {
           `durata: ${elapsed}s`,
           `tipo: ${isTimeout ? 'TIMEOUT client (axios)' : 'Errore rete'}`,
           `url: DELETE ${API_BASE_URL}/practices/${id}/yap/appointment`,
-          `timeout_axios: 40s | timeout_script_server: 200s`,
+          `timeout_axios: 75s | timeout_script_server: 200s`,
           `codice_errore: ${err?.code || 'N/A'}`,
           `messaggio: ${err?.message || 'sconosciuto'}`,
           `recovery: ${recoveryAttempts} tentativi su /yap/last-delete`,
@@ -5055,9 +5054,11 @@ function App() {
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         const reqStartMs = Date.now();
         try {
-          // 40s: lo script finisce in ~32s. Se Railway proxy non consegna in 8s extra,
-          // failiamo veloce e usiamo recovery polling.
-          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 40000 });
+          // 75s: lo script base finisce in ~32s, ma col fix preventivo/ODL collegato
+          // arriva a ~45s. Con 40s il client mollava SEMPRE prima della fine nei casi
+          // con preventivo (banner di crash anche a delete riuscita). 75s copre quei
+          // casi e resta sotto i 200s del server. Oltre questo, recovery polling.
+          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 75000 });
           // L'endpoint e' uno STREAM (heartbeat \n + JSON finale): axios a volte consegna
           // res.data come stringa. Normalizziamo a oggetto.
           let body = res?.data;
@@ -5170,7 +5171,7 @@ function App() {
               `durata: ${elapsed}s`,
               `tipo: ${isTimeout ? 'TIMEOUT client (axios)' : 'Errore rete'}`,
               `url: DELETE ${API_BASE_URL}/practices/${p.id}`,
-              `timeout_axios: 40s | timeout_script_server: 200s`,
+              `timeout_axios: 75s | timeout_script_server: 200s`,
               `codice_errore: ${err?.code || 'N/A'}`,
               `messaggio: ${err?.message || 'sconosciuto'}`,
               `recovery: ${recoveryAttempts} tentativi su /yap/last-delete`,

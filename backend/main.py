@@ -2926,6 +2926,49 @@ async def delete_practice(
                 worker_phases=_wp_ok,
                 error=str(res.get("deleteAction", {}).get("message") or res.get("message") or ""),
             )
+
+            # ================================================================
+            # FIX DEFINITIVO — "cancellato su YAP ma RIMANE nel mini-app"
+            # ----------------------------------------------------------------
+            # CAUSA: il commit che segna la pratica DELETED su Giorgio viveva SOLO
+            # dentro il generatore _delete_stream (vedi piu' sotto). Il generatore
+            # viene CANCELLATO quando il client si disconnette. Quando lo script
+            # supera il timeout axios del client (40s) — tipico col fix preventivo
+            # che porta la delete a ~45s — il client molla, il generatore muore e
+            # il commit DELETED non viene MAI eseguito. Intanto YAP ha gia'
+            # cancellato e il dump/Telegram lo confermano: percio' la pratica
+            # spariva da YAP ma restava ACTIVE nel DB -> ricompariva in lista.
+            #
+            # FIX: marchiamo il DELETED QUI, dentro _run_delete_and_dump, che gira
+            # in asyncio.ensure_future e SOPRAVVIVE alla disconnessione del client.
+            # Cosi' la cancellazione su Giorgio e' garantita anche a client morto.
+            # Il commit nel generatore resta come ridondanza per il caso connesso
+            # (idempotente: se e' gia' DELETED non cambia nulla).
+            # Non marcare se bloccato da ODL/preventivo non risolto: la pratica NON
+            # va eliminata in quei casi.
+            # ================================================================
+            _mark_deleted = (
+                bool(res.get("deleted"))
+                or res.get("found") is False
+                or _fs_ok in {"not_found", "unknown", None}
+            )
+            if _mark_deleted and _fs_ok not in {"blocked_by_odl", "blocked_by_preventivo"}:
+                try:
+                    _p = task_db.query(Practice).filter(Practice.id == captured_pid).first()
+                    if _p and _p.status != PracticeStatus.DELETED:
+                        _p.status = PracticeStatus.DELETED
+                        _p.updated_by_telegram_id = captured_uid
+                        task_db.commit()
+                        logger.info(
+                            "Practice %d soft-deleted in delete task (status=%s, client-independent)",
+                            captured_pid, _fs_ok or "deleted",
+                        )
+                except Exception as _db_exc:
+                    task_db.rollback()
+                    logger.error(
+                        "DB commit DELETED failed in delete task practice %d: %s",
+                        captured_pid, _db_exc,
+                    )
             return res
 
         async def _delete_stream():
