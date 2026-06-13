@@ -2806,6 +2806,31 @@ async def delete_practice(
         captured_date_iso = date_iso
         captured_search = search
 
+        # ============================================================================
+        # FIX DEFINITIVO — "ogni volta che va male un'eliminazione, va in timeout TUTTO"
+        # ----------------------------------------------------------------------------
+        # CAUSA: questo handler carica la pratica con _practice_by_id(..., for_update=True)
+        # (riga ~2755), cioe' un SELECT ... FOR UPDATE che su Postgres apre una transazione
+        # e tiene un LOCK di riga + UNA connessione del pool occupata.
+        # Subito dopo ritorniamo uno StreamingResponse che vive fino a ~200s (durata dello
+        # script YAP). La dependency get_db NON chiude la sessione `db` finche' lo stream
+        # non e' esaurito (il suo finally gira a fine response). Quindi per TUTTI i ~200s
+        # della delete restava appesa una connessione "idle in transaction" col lock.
+        # Con pool_size=10, poche delete consecutive/concorrenti esaurivano il pool: ogni
+        # altra richiesta (es. GET /api/practices della dashboard) restava in attesa di una
+        # connessione libera e andava in TIMEOUT — esattamente il sintomo del crash-dump.
+        #
+        # FIX: a questo punto abbiamo gia' estratto tutto cio' che serve in primitive
+        # (yap_args, captured_*). Lo stream usa SOLO sessioni dedicate proprie
+        # (gen_db / task_db, vedi sotto), MAI questa `db`. Quindi chiudiamo subito la
+        # transazione e restituiamo la connessione al pool PRIMA di iniziare lo stream.
+        # commit() termina la transazione e rilascia il lock FOR UPDATE; close() libera la
+        # connessione. get_db richiamera' close() a fine response: e' idempotente, ok.
+        # NON usare piu' `db` ne' l'oggetto `practice` dopo questa riga.
+        # ============================================================================
+        db.commit()
+        db.close()
+
         async def _run_delete_and_dump(task_db):
             """Esegue lo script delete e scrive SEMPRE last-delete.json (successo o errore).
 
