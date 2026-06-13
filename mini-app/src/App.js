@@ -19,7 +19,7 @@ const CLIENT_CACHE_TTL_MS = 30 * 1000;
 // Recovery polling delays (ms) per attempt after delete timeout.
 // 4 attempts: 5s/20s/40s/60s per coprire il caso script finisce a ~200s.
 // Evaluated at runtime so tests can override via window.__YAP_RECOVERY_DELAYS.
-const getRecoveryDelays = () => (typeof window !== 'undefined' && window.__YAP_RECOVERY_DELAYS) || [3000, 8000, 15000, 25000, 35000, 45000];
+const getRecoveryDelays = () => (typeof window !== 'undefined' && window.__YAP_RECOVERY_DELAYS) || [2000, 5000, 10000];
 
 const getDraftStorage = () => {
   if (typeof window === 'undefined') return null;

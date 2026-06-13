@@ -314,12 +314,15 @@ async function listVisibleAgendaEvents(page) {
 async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug = false, trace = null, expectedTime = "", allowAutoFix = true) {
   const normalizeText = (t) =>
     String(t || "").toLowerCase().replace(/\s+/g, " ").trim();
+  // Pad time: "8.40" → "08.40" (YAP a volte mostra ore senza zero iniziale)
+  const padTime = (t) => String(t || "").replace(/^(\d)([:.])/,  '0$1$2');
   const needle = normalizeText(searchTerm);
-  const normalizedExpectedTime = normalizeText(expectedTime).replace(":", ".");
+  const normalizedExpectedTime = padTime(normalizeText(expectedTime).replace(":", "."));
   const matchesNeedle = (event) => {
     if (!normalizeText(event.title).includes(needle)) return false;
     if (!normalizedExpectedTime) return true;
-    return normalizeText(event.time || "").replace(":", ".").includes(normalizedExpectedTime);
+    const eventTime = padTime(normalizeText(event.time || "").replace(":", "."));
+    return eventTime.includes(normalizedExpectedTime);
   };
 
   trace?.mark("agenda_scan_started", { search: searchTerm, date: dateIso });

@@ -2943,7 +2943,7 @@ async def delete_practice(
                     }}).encode()
                     await asyncio.sleep(1.5)
                     return
-                if failure_status in {"not_found"} or result.get("found") is False:
+                if failure_status in {"not_found", "unknown"} or result.get("found") is False:
                     # Non trovato su YAP = gia' rimosso; segniamo comunque deleted in Giorgio
                     msg = (
                         "Pratica eliminata. ATTENZIONE: l'appuntamento NON e' stato trovato su YAP "
