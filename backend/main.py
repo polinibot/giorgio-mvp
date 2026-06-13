@@ -1082,6 +1082,7 @@ async def list_practices(
         Practice.synced,
         Practice.management_sync_status,
         Practice.management_last_sync_at,
+        Practice.internal_notes,
     ).all()
     fetch_elapsed_ms = (time.perf_counter() - fetch_started) * 1000
 
@@ -1101,6 +1102,10 @@ async def list_practices(
             "synced": p.synced,
             "management_sync_status": p.management_sync_status,
             "management_last_sync_at": p.management_last_sync_at.isoformat() if p.management_last_sync_at else None,
+            # Serve al client per identificare le pratiche test YAP batch (filtro su
+            # internal_notes "TEST YAP BATCH"): senza, i bottoni "Sync tutte 6" / "Copia
+            # log tutte" trovavano 0 pratiche perche' la lista non esponeva le note.
+            "internal_notes": p.internal_notes or "",
         })
     serialize_elapsed_ms = (time.perf_counter() - serialize_started) * 1000
 
