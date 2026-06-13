@@ -348,7 +348,18 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   }
   const match = matchingEvents[0];
   if (!match) {
-    trace?.mark("appointment_not_found_in_visible_events", { visible_titles: events.map((event) => event.title).slice(0, 12) });
+    trace?.mark("appointment_not_found_in_visible_events", {
+      visible_titles: events.map((event) => event.title).slice(0, 12),
+      visible_times: events.map((event) => event.time || null).slice(0, 12),
+      needle,
+      normalized_expected_time: normalizedExpectedTime,
+      event_details: events.slice(0, 5).map((ev) => ({
+        title_norm: normalizeText(ev.title).slice(0, 50),
+        time_raw: ev.time || null,
+        time_padded: padTime(normalizeText(ev.time || "").replace(":", ".")),
+        title_match: normalizeText(ev.title).includes(needle),
+      })),
+    });
     return { found: false, searched: searchTerm, events: events.map((e) => e.title) };
   }
   if (timeOnlyFallback) {

@@ -1275,7 +1275,7 @@ async def _notify_user_delete_result(
             icon = "⚠️"
             title = f"Appuntamento #{practice_id}: eliminazione bloccata"
             body = "Presente un preventivo. Eliminalo prima su YAP, poi riprova."
-        elif failure_status in {"not_found", "unknown"}:
+        elif failure_status in {"not_found", "unknown", None}:
             icon = "ℹ️"
             title = f"Appuntamento #{practice_id}: non trovato su YAP"
             body = "L'appuntamento non e' presente su YAP (forse gia' eliminato). La pratica e' stata rimossa."
@@ -2947,7 +2947,7 @@ async def delete_practice(
                     }}).encode()
                     await asyncio.sleep(1.5)
                     return
-                if failure_status in {"not_found", "unknown"} or result.get("found") is False:
+                if failure_status in {"not_found", "unknown", None} or result.get("found") is False:
                     # Non trovato su YAP = gia' rimosso; segniamo comunque deleted in Giorgio
                     msg = (
                         "Pratica eliminata. ATTENZIONE: l'appuntamento NON e' stato trovato su YAP "
