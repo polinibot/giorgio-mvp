@@ -180,7 +180,9 @@ export function pickYapTags(mapping) {
   const tags = new Set();
   if (contexts.includes("officina")) tags.add("officina");
   if (contexts.includes("revisione")) tags.add("revisione");
-  if (contexts.includes("carrozzeria")) tags.add("carrozzeria");
+  // Su YAP la carrozzeria usa il tag "pneumatici" (stesso alias dell'ODL,
+  // vedi REPARTO_YAP_ALIAS): in agenda non c'e' un tag "carrozzeria".
+  if (contexts.includes("carrozzeria")) tags.add("pneumatici");
   if (contexts.includes("pneumatici")) tags.add("pneumatici");
   if (tipo === "preventivo") tags.add("preventivo");
 
