@@ -530,6 +530,15 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   // Ora stacchiamo definitivamente l'handler response
   page.off("response", onResponse);
 
+  // Logga il body della RPC response per diagnostica (YAP risponde sempre HTTP 200
+  // ma il body JSON puo' contenere un errore applicativo)
+  if (deleteRpcResponse) {
+    trace?.mark("rpc_response_body_sample", {
+      status: deleteRpcResponse.status,
+      body_preview: (deleteRpcResponse.body || "").slice(0, 300),
+    });
+  }
+
   if (!targetDeleted || rpcResponseMissing) {
     if (rpcResponseMissing) {
       trace?.mark("reopening_agenda_rpc_unconfirmed", {
