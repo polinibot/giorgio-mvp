@@ -4129,7 +4129,9 @@ async function writeGridFlowExtraFields(page, job, writeReport, args = {}) {
       out.wroteAny = out.wroteAny || matOk;
       if (sectionDebug) sectionDebug.fields.materiali = { tabReady: materialsTabReady };
     }
-    if (section.smaltimento_applica) {
+    // SMALTIMENTO ora scritto come RIGA (articolo MATT) in buildWorkGridRows, non piu'
+    // nel tab "Smaltimento rifiuti": disattivato qui per evitare la doppia scrittura.
+    if (false && section.smaltimento_applica) {
       out.attempted = true;
       writeReport.waste.attempted = true;
       const wasteTabReady = await clickBottomSectionTab(page, "Smaltimento rifiuti").catch(() => false);
@@ -4275,6 +4277,32 @@ function buildWorkGridRows(job) {
         iva: GRID_DEFAULT_ROW_VALUES.iva,
       });
     }
+
+    // SMALTIMENTO come RIGA con articolo MATT (richiesta cliente), non piu' nel tab
+    // "Smaltimento rifiuti". L'importo e' la PERCENTUALE SUL TOTALE del documento,
+    // gia' calcolata da sectionWasteDetails (manodopera + macchina + materiali +
+    // ricambi prezzati) x percentuale. Riga normale (tipo N), articolo MATT, qta 1,
+    // prezzo = importo calcolato. Cosi' non serve inserire l'importo a mano: basta la
+    // percentuale e il resto lo deduce dal totale.
+    if (section?.smaltimento_applica) {
+      const wasteAmount = sectionWasteAmount(section);
+      if (wasteAmount != null) {
+        rows.push({
+          kind: "smaltimento",
+          reparto: String(section?.reparto || "").trim().toLowerCase(),
+          tipo: "N",
+          articleQuery: "MATT",
+          text: withPrefix(section, "SMALTIMENTO") || "SMALTIMENTO",
+          cl: GRID_DEFAULT_ROW_VALUES.cl.mac,
+          cat: GRID_DEFAULT_ROW_VALUES.cat,
+          udm: GRID_DEFAULT_ROW_VALUES.udm,
+          qta: "1",
+          prezzo: normalizeGridMoney(wasteAmount),
+          sconto: GRID_DEFAULT_ROW_VALUES.sconto,
+          iva: GRID_DEFAULT_ROW_VALUES.iva,
+        });
+      }
+    }
   }
 
   return rows;
@@ -4394,7 +4422,8 @@ async function writeWorkGrid(page, job, args = {}) {
     if (row.articleQuery) {
       const preferredTerms = row.kind === "man"
         ? ["MANODOPERA"]
-        : (row.kind === "mac" ? ["MAQNODOPERA", "MACCHINA", "MANODOPERA"] : []);
+        : (row.kind === "mac" ? ["MAQNODOPERA", "MACCHINA", "MANODOPERA"]
+        : (row.kind === "smaltimento" ? ["SMALTIMENTO", "MATERIALI", "MATT"] : []));
       art = await gridSelectArticolo(page, rowIndex, row.articleQuery, {
         expectedPrice: row.prezzo,
         preferredTerms,
@@ -5053,10 +5082,13 @@ async function writePracticeAndOdl(page, job, args) {
         }
         const materialsExpected = (job.sections || []).some((section) => section?.materiali_euro != null);
         const materialsOk = !materialsExpected || Boolean(writeReport?.materials?.success);
-        const wasteExpected = (job.sections || []).some((section) => section?.smaltimento_applica);
-        const wastePercentOk = !wasteExpected || Boolean(writeReport?.waste?.success);
-        const wasteAmountExpected = (job.sections || []).some((section) => sectionWasteAmount(section) != null);
-        const wasteAmountOk = !wasteAmountExpected || Boolean(writeReport?.waste?.amountSuccess ?? writeReport?.waste?.success);
+        // Smaltimento ora e' una RIGA (articolo MATT): viene verificato tra le righe
+        // (persistedRows === expectedRows), non piu' come campo-tab. Quindi qui niente
+        // gate sul tab smaltimento.
+        const wasteExpected = false;
+        const wastePercentOk = true;
+        const wasteAmountExpected = false;
+        const wasteAmountOk = true;
         const gridOk = Boolean(gridResult?.ok)
           && docSaved
           && (!manExpected || manOk)
@@ -5128,29 +5160,8 @@ async function writePracticeAndOdl(page, job, args) {
               hint: `${docLabel} > Materiali di consumo.`,
             });
           }
-          if (section.smaltimento_applica) {
-            const wasteExpectedValue = String(section.smaltimento_percentuale ?? 2);
-            const wasteOk = Boolean(writeReport?.waste?.success);
-            pf.push({
-              field_id: `${docKind}.${reparto}.smaltimento`,
-              expected: wasteExpectedValue,
-              found: wasteOk ? wasteExpectedValue : null,
-              status: wasteOk ? "written" : "missing",
-              hint: `${docLabel} > Smaltimento rifiuti.`,
-            });
-            const wasteAmount = sectionWasteAmount(section);
-            if (wasteAmount != null) {
-              const wasteAmountExpectedValue = formatGridAmount(wasteAmount);
-              const wasteAmountWritten = Boolean(writeReport?.waste?.amountSuccess ?? writeReport?.waste?.success);
-              pf.push({
-                field_id: `${docKind}.${reparto}.smaltimento_importo`,
-                expected: wasteAmountExpectedValue,
-                found: wasteAmountWritten ? wasteAmountExpectedValue : null,
-                status: wasteAmountWritten ? "written" : "missing",
-                hint: `${docLabel} > Smaltimento rifiuti importo.`,
-              });
-            }
-          }
+          // Smaltimento e' ora una RIGA (articolo MATT): gia' incluso nell'audit dal
+          // loop sulle righe sopra (campo ${docKind}.smaltimento). Niente campo-tab qui.
         }
         writeReport.fields = pf;
         logPhase("grid_write", gridOk ? "done" : "failed", {
