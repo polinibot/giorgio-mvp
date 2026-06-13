@@ -3053,9 +3053,19 @@ async def delete_practice(
             finally:
                 gen_db.close()
 
+            # not_found = arrivati al success SENZA deleted: gli unici altri casi
+            # (blocked_by_odl/preventivo/errore) hanno gia' fatto return sopra. Quindi
+            # qui "non deleted" significa "appuntamento non presente su YAP, gia' rimosso".
+            # Esponiamo il flag cosi' il client lo tratta come SUCCESSO PULITO (rimuove la
+            # pratica e torna in dashboard) invece che come errore rosso col log.
+            _yap_not_found = not bool(result.get("deleted"))
             yield _json.dumps({
                 "success": True,
-                "data": {"message": msg, "yap": {"deleted": bool(result.get("deleted")), "status": result.get("status")}},
+                "data": {"message": msg, "yap": {
+                    "deleted": bool(result.get("deleted")),
+                    "status": result.get("status"),
+                    "not_found": _yap_not_found,
+                }},
                 "errors": None,
             }).encode()
             # Piccolo delay prima di chiudere lo stream: Railway proxy (Nginx chunked)

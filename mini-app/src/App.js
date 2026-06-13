@@ -5087,17 +5087,25 @@ function App() {
           // (appuntamento non trovato / dati mancanti): mostra il messaggio vero.
           const deleteMessage = body?.data?.message || 'Pratica cancellata con successo';
           const yapInfo = body?.data?.yap;
-          const yapWarning = Boolean(yapInfo && (!yapInfo.attempted || !yapInfo.deleted));
+          // not_found = l'appuntamento non e' (piu') su YAP: gia' rimosso. NON e' un errore,
+          // l'obiettivo (nessun appuntamento su YAP) e' raggiunto. Lo trattiamo come SUCCESSO
+          // PULITO: niente banner rosso col log, rimuovi la pratica e torna in dashboard,
+          // esattamente come gia' fa la notifica Telegram. Prima invece mostrava la schermata
+          // di errore (per giunta col log dell'ultimo SYNC, fuorviante).
+          const yapNotFound = Boolean(yapInfo && (yapInfo.not_found || yapInfo.status === 'not_found'));
+          // Warning VERO solo per blocchi reali (ODL/preventivo) o YAP non tentato: NON per not_found.
+          const yapWarning = Boolean(yapInfo && (!yapInfo.attempted || !yapInfo.deleted) && !yapNotFound);
           // Se YAP NON ha eliminato (ODL/preventivo bloccante, ecc.) mostra il banner con
           // il log worker copiabile prima di lasciare il dettaglio.
           if (yapWarning) {
             setYapLastPracticeId(p.id);
             setYapLastResult(normalizeYapOutcome(body?.data || {}));
           }
-          finishYapActionProgress(yapWarning ? deleteMessage : 'Pratica eliminata', yapWarning ? 'error' : 'success', yapWarning ? 4000 : 800);
+          const finishMsg = yapWarning ? deleteMessage : (yapNotFound ? 'Appuntamento già assente su YAP — pratica rimossa' : 'Pratica eliminata');
+          finishYapActionProgress(finishMsg, yapWarning ? 'error' : 'success', yapWarning ? 4000 : 800);
           invalidatePracticeCaches(p.id);
           clearDraft();
-          addToast(deleteMessage, yapWarning ? 'error' : 'success');
+          addToast(yapNotFound ? finishMsg : deleteMessage, yapWarning ? 'error' : 'success');
           setPractices(prev => prev.filter(pr => pr.id !== p.id));
           setStats(prev => prev ? { ...prev, total: prev.total - 1, pending_sync: p.synced ? prev.pending_sync : prev.pending_sync - 1 } : prev);
           if (yapWarning) {
