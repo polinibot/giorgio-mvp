@@ -19,7 +19,7 @@ const CLIENT_CACHE_TTL_MS = 30 * 1000;
 // Recovery polling delays (ms) per attempt after delete timeout.
 // 4 attempts: 5s/20s/40s/60s per coprire il caso script finisce a ~200s.
 // Evaluated at runtime so tests can override via window.__YAP_RECOVERY_DELAYS.
-const getRecoveryDelays = () => (typeof window !== 'undefined' && window.__YAP_RECOVERY_DELAYS) || [5000, 20000, 40000, 60000];
+const getRecoveryDelays = () => (typeof window !== 'undefined' && window.__YAP_RECOVERY_DELAYS) || [3000, 8000, 15000, 25000, 35000, 45000];
 
 const getDraftStorage = () => {
   if (typeof window === 'undefined') return null;
@@ -3428,10 +3428,9 @@ function App() {
       const requestOptions = inferredTime ? { ...options, time: inferredTime } : { ...options };
       rememberRequest('yap.delete', { method: 'DELETE', url: `${API_BASE_URL}/practices/${id}/yap/appointment`, params: getAuthParams(), headers: getHeaders(), data: requestOptions });
       // NON ritentare in automatico: la delete e' non idempotente lato YAP.
-      // 180s: Railway proxy taglia le connessioni SSE dopo ~120-180s.
-      // Inutile aspettare 300s (il proxy ha gia' chiuso). Falliamo veloce e
-      // usiamo il recovery polling per recuperare il dump dal server.
-      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
+      // 40s: lo script finisce in ~32s. Se Railway proxy non consegna in 8s extra,
+      // falliamo veloce e usiamo il recovery polling per recuperare il dump dal server.
+      const res = await axios.delete(`${API_BASE_URL}/practices/${id}/yap/appointment`, { data: requestOptions, params: getAuthParams(), headers: getHeaders(), timeout: 40000 });
       const data = normalizeYapOutcome(res.data?.data || {});
       setYapLastResult(data);
       rememberResponse('yap.delete');
@@ -3463,25 +3462,31 @@ function App() {
       return data;
     } catch (err) {
       rememberError('yap.delete', err);
-      // Recovery robusto: il server ha timeout 200s ma il client fallisce a 180s
-      // (proxy Railway). Lo script continua in background e scrive il dump.
-      // Polling con 3 tentativi a 15s di distanza: il dump dovrebbe apparire
-      // entro il 2°-3° tentativo (server finisce a ~200s, recovery a 195/210/225s).
+      // Recovery con istanza axios fresca (bypass connection pool del browser
+      // che Railway proxy blocca dopo la DELETE lunga).
       let recovered = null;
       let recoveryAttempts = 0;
       let recoveryError = null;
       const hadResponse = Boolean(err?.response);
       if (!hadResponse) {
-        for (let attempt = 0; attempt < 4; attempt++) {
-          await new Promise(r => setTimeout(r, getRecoveryDelays()[attempt] || 30000));
+        const freshAxios = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
+        const delays = getRecoveryDelays();
+        for (let attempt = 0; attempt < delays.length; attempt++) {
+          await new Promise(r => setTimeout(r, delays[attempt]));
           recoveryAttempts++;
           try {
-            // Timeout 30s: il proxy Railway potrebbe bloccare il GET dopo la DELETE lunga.
-            const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 });
+            const dumpRes = await freshAxios.get('/yap/last-delete', {
+              params: { ...getAuthParams(), _t: Date.now() },
+              headers: { ...getHeaders(), 'Cache-Control': 'no-cache' },
+            });
             const dump = dumpRes?.data?.data;
             const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
             const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
-            if (dump?.has_dump !== false && String(dump.practice_id) === String(id) && fresh && dump.status !== 'pending') {
+            if (dump?.has_dump !== false && String(dump.practice_id) === String(id) && fresh) {
+              if (dump.status === 'pending') {
+                recoveryError = `attempt=${attempt + 1}: pending (script ancora in corso)`;
+                continue;
+              }
               recovered = normalizeYapResult({
                 status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
                 message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
@@ -3494,9 +3499,14 @@ function App() {
               });
               break;
             }
-            recoveryError = `attempt=${attempt + 1}: dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump?.practice_id) === String(id)}, status=${dump?.status}, fresh=${fresh}`;
+            recoveryError = `attempt=${attempt + 1}: dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump.practice_id) === String(id)}, status=${dump?.status}, fresh=${fresh}`;
           } catch (re) {
-            recoveryError = `attempt=${attempt + 1}: ${re?.response?.status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
+            const status = re?.response?.status;
+            if (status === 499 || re?.code === 'ECONNABORTED') {
+              recoveryError = `attempt=${attempt + 1}: proxy_blocked (${status || re?.code})`;
+              continue;
+            }
+            recoveryError = `attempt=${attempt + 1}: ${status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
           }
         }
       }
@@ -3509,17 +3519,17 @@ function App() {
           `durata: ${elapsed}s`,
           `tipo: ${isTimeout ? 'TIMEOUT client (axios)' : 'Errore rete'}`,
           `url: DELETE ${API_BASE_URL}/practices/${id}/yap/appointment`,
-          `timeout_axios: 180s | timeout_script_server: 200s`,
+          `timeout_axios: 40s | timeout_script_server: 200s`,
           `codice_errore: ${err?.code || 'N/A'}`,
           `messaggio: ${err?.message || 'sconosciuto'}`,
-          `recovery: ${recoveryAttempts} tentativi su /yap/last-delete (5/20/40/60s)`,
+          `recovery: ${recoveryAttempts} tentativi su /yap/last-delete`,
           `recovery_esito: ${recovered ? 'TROVATO' : 'NON trovato'}`,
           recoveryError ? `recovery_dettaglio: ${recoveryError}` : '',
           ``,
           `--- Azione successiva ---`,
-          `1. Aspetta 30-60s e clicca "Crash log YAP" qui sotto per vedere le fasi dal server.`,
-          `2. Se la pratica e' ancora nella lista dopo 1 minuto, prova a ricaricare la dashboard.`,
-          `3. Se l'appuntamento e' sparito da YAP, l'eliminazione e' riuscita (solo il client non l'ha vista).`,
+          `1. La richiesta e' stata inviata al server. Controlla Telegram per la conferma.`,
+          `2. Se la pratica e' ancora nella lista dopo 1 minuto, ricarica la dashboard.`,
+          `3. Se l'appuntamento e' sparito da YAP, l'eliminazione e' riuscita.`,
         ].filter(Boolean).join('\n');
         return base;
       })();
@@ -3527,11 +3537,17 @@ function App() {
       if (recovered && (recovered.status === 'deleted' || recovered.status === 'not_found')) {
         invalidatePracticeCaches(id);
         setPractices((current) => current.filter((practiceItem) => String(practiceItem.id) !== String(id)));
-        finishYapActionProgress('Appuntamento eliminato da YAP (recuperato dopo timeout)', 'success', 1500);
-        addToast('Eliminazione confermata dal server (la connessione era caduta).', 'success');
+        finishYapActionProgress('Appuntamento eliminato da YAP', 'success', 1500);
+        addToast('Eliminazione riuscita.', 'success');
       } else {
-        addToast(errorResult.message, 'error');
-        finishYapActionProgress(errorResult.message || 'Eliminazione YAP fallita', 'error', 0);
+        const isTimeout = err?.code === 'ECONNABORTED' || String(err?.message || '').includes('timeout');
+        if (isTimeout && !recovered) {
+          finishYapActionProgress('Richiesta inviata. Controlla Telegram per la conferma.', 'warning', 0);
+          addToast('Richiesta in elaborazione sul server. Controlla Telegram.', 'warning');
+        } else {
+          addToast(errorResult.message, 'error');
+          finishYapActionProgress(errorResult.message || 'Eliminazione YAP fallita', 'error', 0);
+        }
       }
       return errorResult;
     } finally {
@@ -3612,7 +3628,7 @@ function App() {
     if (!yapActionProgress) return null;
     return (
       <div className="yap-global-progress-shell">
-        <div className={`yap-action-progress yap-global-progress ${yapActionProgress.status === 'error' ? 'save-progress-error' : yapActionProgress.status === 'success' ? 'save-progress-success' : 'save-progress-running'}`}>
+        <div className={`yap-action-progress yap-global-progress ${yapActionProgress.status === 'error' ? 'save-progress-error' : yapActionProgress.status === 'success' ? 'save-progress-success' : yapActionProgress.status === 'warning' ? 'save-progress-warning' : 'save-progress-running'}`}>
           <div className="save-progress-header">
             {yapActionProgress.status === 'running' && <span className="loading-spinner sm"></span>}
             <span className="save-progress-label">{yapActionProgress.label}</span>
@@ -4932,8 +4948,9 @@ function App() {
         startYapActionProgress('delete', p.id, 'Eliminazione pratica in corso...');
         const reqStartMs = Date.now();
         try {
-          // 180s: Railway proxy taglia SSE dopo ~120-180s. Falliamo veloce + recovery.
-          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 180000 });
+          // 40s: lo script finisce in ~32s. Se Railway proxy non consegna in 8s extra,
+          // failiamo veloce e usiamo recovery polling.
+          const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 40000 });
           // L'endpoint e' uno STREAM (heartbeat \n + JSON finale): axios a volte consegna
           // res.data come stringa. Normalizziamo a oggetto.
           let body = res?.data;
@@ -4985,22 +5002,34 @@ function App() {
           setSelectedPracticeId(null);
           setDetailData(null);
         } catch (err) {
-          // Recovery robusto: polling 4 tentativi a 5/20/40/60s (server finisce a ~200s).
+          // Recovery robusto: polling con istanza axios fresca (bypass connection pool
+          // del browser che Railway proxy blocca dopo la DELETE lunga).
           let recovered = null;
           let recoveryAttempts = 0;
           let recoveryError = null;
           const hadResponse = Boolean(err?.response);
           if (!hadResponse) {
-            for (let attempt = 0; attempt < 4; attempt++) {
-              await new Promise(r => setTimeout(r, getRecoveryDelays()[attempt] || 30000));
+            // Istanza axios separata: nuova connessione TCP, non riusa il pool
+            // del browser che potrebbe essere bloccato dal proxy Railway.
+            const freshAxios = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
+            const delays = getRecoveryDelays();
+            for (let attempt = 0; attempt < delays.length; attempt++) {
+              await new Promise(r => setTimeout(r, delays[attempt]));
               recoveryAttempts++;
               try {
-                // Timeout 30s: il proxy Railway potrebbe bloccare il GET dopo la DELETE lunga.
-                const dumpRes = await axios.get(`${API_BASE_URL}/yap/last-delete`, { params: getAuthParams(), headers: getHeaders(), timeout: 30000 });
+                const dumpRes = await freshAxios.get('/yap/last-delete', {
+                  params: { ...getAuthParams(), _t: Date.now() }, // cache-busting
+                  headers: { ...getHeaders(), 'Cache-Control': 'no-cache' },
+                });
                 const dump = dumpRes?.data?.data;
                 const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
                 const fresh = Number.isFinite(dumpMs) && dumpMs >= (reqStartMs - 5000);
-                if (dump?.has_dump !== false && String(dump.practice_id) === String(p.id) && fresh && dump.status !== 'pending') {
+                if (dump?.has_dump !== false && String(dump.practice_id) === String(p.id) && fresh) {
+                  if (dump.status === 'pending') {
+                    // Script ancora in esecuzione sul server, continua polling
+                    recoveryError = `attempt=${attempt + 1}: pending (script ancora in corso)`;
+                    continue;
+                  }
                   recovered = normalizeYapResult({
                     status: dump.status || (dump.deleted ? 'deleted' : 'delete_failed'),
                     message: dump.deleted ? 'Appuntamento eliminato da YAP.' : (dump.error || 'Eliminazione YAP non confermata (connessione interrotta).'),
@@ -5015,7 +5044,13 @@ function App() {
                 }
                 recoveryError = `attempt=${attempt + 1}: dump_presente=${dump?.has_dump !== false}, practice_match=${String(dump?.practice_id) === String(p.id)}, status=${dump?.status}, fresh=${fresh}`;
               } catch (re) {
-                recoveryError = `attempt=${attempt + 1}: ${re?.response?.status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
+                const status = re?.response?.status;
+                // 499 = Railway proxy blocca la richiesta. Riprova al prossimo delay.
+                if (status === 499 || re?.code === 'ECONNABORTED') {
+                  recoveryError = `attempt=${attempt + 1}: proxy_blocked (${status || re?.code})`;
+                  continue;
+                }
+                recoveryError = `attempt=${attempt + 1}: ${status || re?.code || 'unknown'}: ${re?.message?.slice(0, 100) || 'unknown'}`;
               }
             }
           }
@@ -5028,17 +5063,17 @@ function App() {
               `durata: ${elapsed}s`,
               `tipo: ${isTimeout ? 'TIMEOUT client (axios)' : 'Errore rete'}`,
               `url: DELETE ${API_BASE_URL}/practices/${p.id}`,
-              `timeout_axios: 180s | timeout_script_server: 200s`,
+              `timeout_axios: 40s | timeout_script_server: 200s`,
               `codice_errore: ${err?.code || 'N/A'}`,
               `messaggio: ${err?.message || 'sconosciuto'}`,
-              `recovery: ${recoveryAttempts} tentativi su /yap/last-delete (5/20/40/60s)`,
+              `recovery: ${recoveryAttempts} tentativi su /yap/last-delete`,
               `recovery_esito: ${recovered ? 'TROVATO' : 'NON trovato'}`,
               recoveryError ? `recovery_dettaglio: ${recoveryError}` : '',
               ``,
               `--- Azione successiva ---`,
-              `1. Aspetta 30-60s e clicca "Crash log YAP" qui sotto per vedere le fasi dal server.`,
-              `2. Se la pratica e' ancora nella lista dopo 1 minuto, prova a ricaricare la dashboard.`,
-              `3. Se l'appuntamento e' sparito da YAP, l'eliminazione e' riuscita (solo il client non l'ha vista).`,
+              `1. La richiesta e' stata inviata al server. Controlla Telegram per la conferma.`,
+              `2. Se la pratica e' ancora nella lista dopo 1 minuto, ricarica la dashboard.`,
+              `3. Se l'appuntamento e' sparito da YAP, l'eliminazione e' riuscita.`,
             ].filter(Boolean).join('\n');
             return base;
           })();
@@ -5049,12 +5084,24 @@ function App() {
             // Lo script E' riuscito lato server nonostante la connessione caduta.
             invalidatePracticeCaches(p.id);
             setPractices(prev => prev.filter(pr => pr.id !== p.id));
-            finishYapActionProgress('Appuntamento eliminato da YAP (recuperato dopo timeout)', 'success', 1500);
-            addToast('Eliminazione confermata dal server (la connessione era caduta).', 'success');
+            finishYapActionProgress('Appuntamento eliminato da YAP', 'success', 1500);
+            addToast('Eliminazione riuscita.', 'success');
           } else {
-            const msg = errorResult.message || classifyError(err);
-            finishYapActionProgress(msg, 'error', 0);
-            addToast(msg, 'error');
+            // Timeout senza recovery: la richiesta e' stata inviata ma Railway proxy
+            // non ha consegnato la risposta. Il server continua in background.
+            const isTimeout = err?.code === 'ECONNABORTED' || String(err?.message || '').includes('timeout');
+            if (isTimeout && !recovered) {
+              finishYapActionProgress(
+                'Richiesta inviata. Controlla Telegram per la conferma.',
+                'warning',
+                0,
+              );
+              addToast('Richiesta in elaborazione sul server. Controlla Telegram.', 'warning');
+            } else {
+              const msg = errorResult.message || classifyError(err);
+              finishYapActionProgress(msg, 'error', 0);
+              addToast(msg, 'error');
+            }
           }
         } finally {
           setSaving(false);
