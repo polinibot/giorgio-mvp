@@ -2228,6 +2228,9 @@ function App() {
   const [batchSyncRunning, setBatchSyncRunning] = useState(false);
   const [batchSyncProgress, setBatchSyncProgress] = useState({ current: 0, total: 0, label: '' });
   const [batchSyncResults, setBatchSyncResults] = useState([]);
+  const [batchDeleteRunning, setBatchDeleteRunning] = useState(false);
+  const [batchDeleteProgress, setBatchDeleteProgress] = useState({ current: 0, total: 0, label: '' });
+  const [batchDeleteResults, setBatchDeleteResults] = useState([]);
   const [previewPractices, setPreviewPractices] = useState(BROWSER_PREVIEW_PRACTICES);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState({ officina: false, carrozzeria: false, revisione: false, synced: null });
@@ -3544,6 +3547,161 @@ function App() {
       addToast(`Log copiati: ${testPractices.length} pratiche`, 'success');
     }
   }, [findYapTestPractices, getAuthParams, getHeaders, addToast]);
+
+  // Eliminazione BATCH delle pratiche test YAP (CN401MV). Ricalca il pattern provato di
+  // deleteMultiplePractices (prima appuntamento YAP, poi pratica locale con skip_yap), ma
+  // CATTURA l'esito di ogni pratica (status + fasi worker) in batchDeleteResults cosi'
+  // "Copia log eliminazione" puo' stamparlo dopo. Sequenziale: il worker YAP tiene un lock.
+  const deleteAllYapTest = useCallback(() => {
+    if (batchDeleteRunning) return;
+    const testPractices = findYapTestPractices();
+    if (testPractices.length === 0) {
+      addToast('Nessuna pratica test YAP trovata in dashboard.', 'warning');
+      return;
+    }
+    const n = testPractices.length;
+    setConfirmModal({
+      title: `🗑 Eliminare ${n} pratiche test YAP?`,
+      message: `Verranno rimosse sia su YAP che localmente (targa CN401MV, note "TEST YAP BATCH"). Operazione non reversibile.`,
+      onConfirm: async () => {
+        setConfirmModal(null);
+        setBatchDeleteRunning(true);
+        setBatchDeleteResults([]);
+        setBatchDeleteProgress({ current: 0, total: n, label: 'Avvio eliminazione batch…' });
+        const results = [];
+        try {
+          for (let i = 0; i < testPractices.length; i++) {
+            const p = testPractices[i];
+            const label = (p.internal_notes || `#${p.id}`).replace('TEST YAP BATCH ', '#');
+            setBatchDeleteProgress({ current: i + 1, total: n, label: `Elimino ${i + 1}/${n}: ${label}` });
+            const entry = { id: p.id, label, status: 'unknown', message: '', reason: null, phases: [] };
+
+            if (browserPreviewMode) {
+              setPractices(prev => prev.filter(pr => String(pr.id) !== String(p.id)));
+              entry.status = 'deleted';
+              entry.message = 'Anteprima: eliminazione simulata.';
+              results.push(entry);
+              setBatchDeleteResults([...results]);
+              continue;
+            }
+
+            let skipLocalDelete = false;
+            // 1) Appuntamento YAP (se la pratica e' mai stata sincronizzata).
+            try {
+              if (practiceNeedsYapDelete(p)) {
+                const inferredTime = p.appointment_time || '';
+                // 340s: un run di delete YAP dura 60-90s+, con cascata preventivo/ODL di piu'.
+                const res = await axios.delete(`${API_BASE_URL}/practices/${p.id}/yap/appointment`, {
+                  data: inferredTime ? { skip_audit: true, time: inferredTime } : { skip_audit: true },
+                  params: getAuthParams(),
+                  headers: getHeaders(),
+                  timeout: 340000,
+                });
+                const data = res?.data?.data || {};
+                entry.status = data.status || 'deleted';
+                entry.message = data.message || '';
+                entry.reason = data.status_reason || null;
+                entry.phases = data.phase_timeline || data.worker_phases || [];
+              } else {
+                entry.status = 'not_needed';
+                entry.message = 'Mai sincronizzata: nessuna delete YAP.';
+              }
+            } catch (yapErr) {
+              const d = yapErr?.response?.data?.detail;
+              const detailText = typeof d === 'string'
+                ? d
+                : (() => { try { return JSON.stringify(d || ''); } catch { return ''; } })();
+              if (yapErr?.response?.status === 409) {
+                // Bloccato da preventivo/ODL: NON eliminare la pratica locale, altrimenti
+                // resta un appuntamento orfano su YAP senza pratica da cui ritentare.
+                entry.status = 'blocked';
+                entry.message = detailText || 'Appuntamento bloccato (preventivo/ODL).';
+                entry.phases = (d && typeof d === 'object' && d.worker_phases) || [];
+                skipLocalDelete = true;
+              } else if (detailText.includes('not_found') || detailText.includes('non trovato')) {
+                entry.status = 'not_found';
+                entry.message = 'Appuntamento gia assente su YAP.';
+              } else {
+                entry.status = 'yap_error';
+                entry.message = detailText || yapErr?.message || 'Errore delete YAP.';
+              }
+            }
+
+            // 2) Pratica locale (skip_yap: lo YAP e' gia' gestito sopra). Saltata se bloccata.
+            if (!skipLocalDelete) {
+              try {
+                await axios.delete(`${API_BASE_URL}/practices/${p.id}`, {
+                  params: { ...getAuthParams(), skip_yap: true },
+                  headers: getHeaders(),
+                  timeout: 15000,
+                });
+                invalidatePracticeCaches(p.id);
+                setPractices(prev => prev.filter(pr => String(pr.id) !== String(p.id)));
+              } catch (localErr) {
+                // 404 = gia' rimossa dall'endpoint YAP sopra: e' un successo, non un errore.
+                if (localErr?.response?.status === 404) {
+                  invalidatePracticeCaches(p.id);
+                  setPractices(prev => prev.filter(pr => String(pr.id) !== String(p.id)));
+                } else {
+                  if (entry.status === 'unknown' || entry.status === 'not_needed') entry.status = 'local_error';
+                  entry.message = `${entry.message ? entry.message + ' | ' : ''}locale: ${localErr?.message || 'errore'}`;
+                }
+              }
+            }
+
+            results.push(entry);
+            setBatchDeleteResults([...results]);
+          }
+          setBatchDeleteProgress({ current: n, total: n, label: 'Eliminazione batch completata' });
+          const okCount = results.filter(r => ['deleted', 'not_found', 'not_needed'].includes(r.status)).length;
+          addToast(`Eliminazione batch: ${okCount}/${results.length} ok`, okCount === results.length ? 'success' : 'warning');
+          await loadDashboard(searchQuery, activeFilters);
+        } finally {
+          // SEMPRE: un errore in loadDashboard non deve lasciare i bottoni bloccati.
+          setBatchDeleteRunning(false);
+        }
+      },
+      onCancel: () => setConfirmModal(null),
+    });
+  }, [batchDeleteRunning, findYapTestPractices, browserPreviewMode, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters, invalidatePracticeCaches]);
+
+  // Copia in clipboard l'esito dell'ultima eliminazione batch (status + fasi worker per
+  // pratica). Legge batchDeleteResults catturato durante deleteAllYapTest: il log di delete
+  // server-side (last-delete.json) conserva solo l'ULTIMO, quindi qui usiamo lo storico in
+  // memoria del batch. Niente fetch: solo formattazione.
+  const copyAllYapDeleteLogs = useCallback(async () => {
+    if (!batchDeleteResults.length) {
+      addToast('Nessun log eliminazione. Esegui prima "Elimina tutte".', 'warning');
+      return;
+    }
+    const lines = [];
+    for (const r of batchDeleteResults) {
+      lines.push(`\n${'='.repeat(60)}`);
+      lines.push(`PRATICA ${r.id} — ${r.label}`);
+      lines.push(`Esito: ${r.status}${r.reason ? ` (${r.reason})` : ''}`);
+      if (r.message) lines.push(`Messaggio: ${r.message}`);
+      const phases = Array.isArray(r.phases) ? r.phases : [];
+      if (phases.length) {
+        const last = phases[phases.length - 1];
+        lines.push(`Ultima fase: ${last?.name || last?.phase || '-'}:${last?.status || '-'}`);
+        lines.push(`Fasi (${phases.length}): ${phases.map((ph) => ph.name || ph.phase).join(' -> ')}`);
+      }
+    }
+    const okCount = batchDeleteResults.filter((r) => ['deleted', 'not_found', 'not_needed'].includes(r.status)).length;
+    const text = `YAP BATCH DELETE LOG — ${new Date().toISOString()}\nOK: ${okCount}/${batchDeleteResults.length}\n${lines.join('\n')}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      addToast(`Log eliminazione copiati: ${batchDeleteResults.length} pratiche`, 'success');
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      addToast(`Log eliminazione copiati: ${batchDeleteResults.length} pratiche`, 'success');
+    }
+  }, [batchDeleteResults, addToast]);
 
   const deleteYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
@@ -5929,6 +6087,52 @@ function App() {
             Copia log tutte
           </button>
         </div>
+
+        <div className="detail-actions" style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={deleteAllYapTest}
+            disabled={batchDeleteRunning || batchSyncRunning || browserPreviewMode}
+            style={{ fontSize: 13, color: '#ff8a8a', borderColor: '#5c1a1a' }}
+          >
+            {batchDeleteRunning
+              ? `Elimino ${batchDeleteProgress.current}/${batchDeleteProgress.total}...`
+              : `🗑 Elimina tutte le pratiche test YAP`}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={copyAllYapDeleteLogs}
+            disabled={batchDeleteRunning || batchDeleteResults.length === 0}
+            style={{ fontSize: 13 }}
+          >
+            Copia log eliminazione
+          </button>
+        </div>
+        {batchDeleteRunning && (
+          <div style={{ fontSize: 12, color: '#999', marginBottom: 8, padding: '4px 8px', background: '#2a1414', borderRadius: 4 }}>
+            {batchDeleteProgress.label}
+            {batchDeleteResults.length > 0 && (
+              <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {batchDeleteResults.map((r) => (
+                  <span key={r.id} style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 3, fontSize: 11, background: ['deleted', 'not_found', 'not_needed'].includes(r.status) ? '#1b4332' : r.status === 'blocked' ? '#7c4a00' : '#5c1a1a', color: '#eee' }}>
+                    {r.label}: {r.status}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {!batchDeleteRunning && batchDeleteResults.length > 0 && (
+          <div style={{ fontSize: 12, marginBottom: 8, padding: '6px 8px', background: '#111', borderRadius: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {batchDeleteResults.map((r) => (
+              <span key={r.id} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 3, fontSize: 11, background: ['deleted', 'not_found', 'not_needed'].includes(r.status) ? '#1b4332' : r.status === 'blocked' ? '#7c4a00' : '#5c1a1a', color: '#eee' }}>
+                {r.label}: {r.status}
+              </span>
+            ))}
+          </div>
+        )}
         {batchSyncRunning && (
           <div style={{ fontSize: 12, color: '#999', marginBottom: 8, padding: '4px 8px', background: '#1a1a2e', borderRadius: 4 }}>
             {batchSyncProgress.label}
