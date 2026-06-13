@@ -109,9 +109,10 @@ function parseArgs(argv) {
 function classifyDeleteFailure(text) {
   const normalized = String(text || "").toLowerCase();
   if (/ordine di lavoro|odl|associat[oa].*lavoro|work order/.test(normalized)) return "blocked_by_odl";
-  if (/preventivo/.test(normalized)) return "blocked_by_preventivo";
+  if (/preventivo|prev(?!ious)|praticareferenceprev/.test(normalized)) return "blocked_by_preventivo";
   if (/non trov|not found/.test(normalized)) return "not_found";
   if (/permess|autorizz|permission|unauthorized|forbidden/.test(normalized)) return "permission_denied";
+  if (/unable to delete|impossibile elimin/.test(normalized)) return "yap_server_error";
   if (normalized.trim()) return "unknown_yap_error";
   return null;
 }
@@ -519,13 +520,14 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   // ottimisticamente la UI rimuovendo l'evento PRIMA che il server risponda.
   // Aspettiamo fino a 6s con l'handler ancora attivo: cosi' se il server
   // risponde in ritardo (es. YAP lento) la catturiamo correttamente.
-  const rpcResponseMissing = !deleteRpcResponse;
+  let rpcResponseMissing = !deleteRpcResponse;
   if (rpcResponseMissing) {
     trace?.mark("waiting_rpc_response_post_confirm", { reason: "rpc_response_null_after_loop" });
     for (let w = 0; w < 12; w++) {
       if (deleteRpcResponse) break;
       await page.waitForTimeout(500);
     }
+    rpcResponseMissing = !deleteRpcResponse; // ricalcola dopo il loop
   }
   // Ora stacchiamo definitivamente l'handler response
   page.off("response", onResponse);
@@ -539,12 +541,23 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     });
   }
 
+  // Controlla il body della RPC response per errori applicativi.
+  // YAP risponde HTTP 200 anche quando la delete fallisce (es. "Unable to delete
+  // because has Prev/ODL"). Il body GWT-RPC contiene classi exception quando c'e'
+  // un errore, mentre un body vuoto o senza exception indica successo.
+  const rpcBody = deleteRpcResponse?.body || "";
+  const rpcBodyHasException = /exception|unable to delete|impossibile elimin|errore/i.test(rpcBody);
+  const rpcBodyFailure = rpcBodyHasException
+    ? classifyDeleteFailure(rpcBody)
+    : null;
+
   if (!targetDeleted || rpcResponseMissing) {
     if (rpcResponseMissing) {
       trace?.mark("reopening_agenda_rpc_unconfirmed", {
         remaining_matches_before_reopen: remainingMatches,
         rpc_arrived: !!deleteRpcResponse,
         rpc_arrived_status: deleteRpcResponse?.status ?? null,
+        rpc_body_failure: rpcBodyFailure,
         reason: "rpc_response_null",
       });
     } else {
@@ -561,8 +574,22 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     deletedCount = Math.max(0, initialMatchCount - remainingMatches);
     targetDeleted = deletedCount >= 1;
   }
+
+  // Se il body RPC contiene QUALSIASI errore applicativo, sovrascriviamo
+  // targetDeleted = false anche se l'agenda non mostrava piu' l'evento.
+  // La UI YAP dopo la dialog di conferma puo' rimuovere ottimisticamente l'evento
+  // prima di processare la response del server, quindi il conteggio visivo e'
+  // inaffidabile quando la RPC dice che c'e' stato un errore.
+  if (rpcBodyFailure) {
+    trace?.mark("rpc_body_override_target_deleted", {
+      rpc_body_failure: rpcBodyFailure,
+      target_deleted_was: targetDeleted,
+    });
+    targetDeleted = false;
+  }
+
   let failureStatus = !targetDeleted
-    ? classifyDeleteFailure(deleteRpcResponse?.body || visibleMessage)
+    ? (rpcBodyFailure || classifyDeleteFailure(visibleMessage))
     : null;
   // Gestione automatica documento bloccante (ODL o preventivo): apri pratica,
   // elimina il documento, riprova la delete dell'appuntamento.
