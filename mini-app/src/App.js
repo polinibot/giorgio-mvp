@@ -2999,8 +2999,27 @@ function App() {
 
     setSeedingYapTestPractices(true);
     try {
+      // Anti-duplicati: crea SOLO le pratiche test (BATCH 01..06) non gia' presenti in
+      // dashboard. Prima ogni pressione del bottone ricreava tutte e 6 -> doppioni a
+      // pioggia (12, 18...) che falsavano "Sync tutte 6" e il conteggio. Ora fa "top-up"
+      // dei soli BATCH mancanti. Per ripartire pulito: elimina prima le test esistenti.
+      const existingBatchNums = new Set(
+        practices
+          .filter((p) =>
+            String(p.plate_confirmed || p.plate_detected || '').toUpperCase() === 'CN401MV'
+            && /TEST YAP BATCH/i.test(String(p.internal_notes || '')))
+          .map((p) => Number((String(p.internal_notes || '').match(/BATCH\s*(\d+)/i) || [])[1] || 0))
+      );
+      const toCreate = YAP_TEST_BATCH_PRACTICES.filter((payload) => {
+        const num = Number((String(payload.internal_notes || '').match(/BATCH\s*(\d+)/i) || [])[1] || 0);
+        return !existingBatchNums.has(num);
+      });
+      if (toCreate.length === 0) {
+        addToast(`Le ${YAP_TEST_BATCH_PRACTICES.length} pratiche test YAP esistono gia in dashboard`, 'info');
+        return;
+      }
       await Promise.all(
-        YAP_TEST_BATCH_PRACTICES.map((payload) =>
+        toCreate.map((payload) =>
           fetchWithRetry(() =>
             axios.post(`${API_BASE_URL}/practices/full`, payload, {
               params: getAuthParams(),
@@ -3010,14 +3029,14 @@ function App() {
           )
         )
       );
-      addToast(`Ho creato ${YAP_TEST_BATCH_PRACTICES.length} pratiche test YAP per CN401MV`, 'success');
+      addToast(`Ho creato ${toCreate.length} pratiche test YAP per CN401MV`, 'success');
       await loadDashboard(searchQuery, activeFilters);
     } catch (err) {
       addToast(classifyError(err), 'error');
     } finally {
       setSeedingYapTestPractices(false);
     }
-  }, [seedingYapTestPractices, browserPreviewMode, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
+  }, [seedingYapTestPractices, browserPreviewMode, practices, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
 
   // Load dashboard on view mount
   useEffect(() => {
@@ -3428,22 +3447,30 @@ function App() {
     setBatchSyncResults([]);
     setBatchSyncProgress({ current: 0, total: testPractices.length, label: 'Avvio sync batch...' });
     const results = [];
-    for (let i = 0; i < testPractices.length; i++) {
-      const p = testPractices[i];
-      const label = (p.internal_notes || `#${p.id}`).replace('TEST YAP BATCH ', '#');
-      setBatchSyncProgress({ current: i + 1, total: testPractices.length, label: `Sync ${i + 1}/${testPractices.length}: ${label}` });
-      try {
-        const res = await syncToYap(p.id, { silent: true });
-        results.push({ id: p.id, label, status: res?.status || 'unknown', message: res?.message || '' });
-      } catch (err) {
-        results.push({ id: p.id, label, status: 'error', message: String(err?.message || err) });
+    try {
+      for (let i = 0; i < testPractices.length; i++) {
+        const p = testPractices[i];
+        const label = (p.internal_notes || `#${p.id}`).replace('TEST YAP BATCH ', '#');
+        setBatchSyncProgress({ current: i + 1, total: testPractices.length, label: `Sync ${i + 1}/${testPractices.length}: ${label}` });
+        try {
+          const res = await syncToYap(p.id, { silent: true });
+          results.push({ id: p.id, label, status: res?.status || 'unknown', message: res?.message || '' });
+        } catch (err) {
+          results.push({ id: p.id, label, status: 'error', message: String(err?.message || err) });
+        }
+        setBatchSyncResults([...results]);
       }
-      setBatchSyncResults([...results]);
+      setBatchSyncProgress({ current: testPractices.length, total: testPractices.length, label: 'Batch completato' });
+      // 'duplicate' = agenda gia' presente su YAP: e' un SUCCESSO (allineato a syncToYap),
+      // altrimenti ri-sincronizzando le stesse 6 il toast diceva falsamente "0/6 ok".
+      const okCount = results.filter((r) => ['complete_synced', 'partial_synced', 'agenda_synced', 'synced', 'duplicate'].includes(r.status)).length;
+      addToast(`Batch sync completato: ${okCount}/${results.length} ok`, 'success');
+      await loadDashboard(searchQuery, activeFilters);
+    } finally {
+      // SEMPRE: senza questo, un errore in loadDashboard lasciava batchSyncRunning=true
+      // e i bottoni "Sync tutte" / "Copia log" disabilitati fino al reload della pagina.
+      setBatchSyncRunning(false);
     }
-    setBatchSyncProgress({ current: testPractices.length, total: testPractices.length, label: 'Batch completato' });
-    addToast(`Batch sync completato: ${results.filter((r) => ['complete_synced', 'partial_synced', 'agenda_synced', 'synced'].includes(r.status)).length}/${results.length} ok`, 'success');
-    await loadDashboard(searchQuery, activeFilters);
-    setBatchSyncRunning(false);
   }, [batchSyncRunning, findYapTestPractices, syncToYap, addToast, loadDashboard, searchQuery, activeFilters]);
 
   const copyAllYapLogs = useCallback(async () => {
