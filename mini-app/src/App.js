@@ -3502,8 +3502,18 @@ function App() {
           lines.push(`Status: ${audit.status || '-'}  Verified: ${audit.verified ?? '-'}`);
           lines.push(`Message: ${audit.message || '-'}`);
           if (Array.isArray(audit.present)) lines.push(`Present (${audit.present.length}): ${audit.present.map((x) => x.field).join(', ')}`);
-          if (Array.isArray(audit.missing) && audit.missing.length) lines.push(`Missing (${audit.missing.length}): ${audit.missing.map((x) => x.field).join(', ')}`);
-          if (Array.isArray(audit.mismatch) && audit.mismatch.length) lines.push(`Mismatch (${audit.mismatch.length}): ${audit.mismatch.map((x) => x.field).join(', ')}`);
+          // Includi anche il MOTIVO (found) e l'atteso (expected) per ogni campo: e' li'
+          // che si legge perche' un campo manca (es. odl.salvataggio -> "nothing_to_save" /
+          // "incomplete_rows_not_saved" / "rows_missing_after_reload"). Prima stampavamo solo
+          // il nome del campo, rendendo il log inutile per diagnosticare i partial_synced ODL.
+          if (Array.isArray(audit.missing) && audit.missing.length) {
+            lines.push(`Missing (${audit.missing.length}):`);
+            audit.missing.forEach((x) => lines.push(`  - ${x.field}${x.found != null ? ` | trovato: ${x.found}` : ''}${x.expected != null ? ` | atteso: ${x.expected}` : ''}`));
+          }
+          if (Array.isArray(audit.mismatch) && audit.mismatch.length) {
+            lines.push(`Mismatch (${audit.mismatch.length}):`);
+            audit.mismatch.forEach((x) => lines.push(`  - ${x.field}${x.found != null ? ` | trovato: ${x.found}` : ''}${x.expected != null ? ` | atteso: ${x.expected}` : ''}`));
+          }
           if (audit.summary) lines.push(`Summary: ${JSON.stringify(audit.summary)}`);
           const phases = audit.worker_phases || audit.phase_timeline;
           if (Array.isArray(phases) && phases.length) {
