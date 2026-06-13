@@ -3723,6 +3723,25 @@ async function saveWorkDocument(page, args = {}) {
     }
   }
   const rpc = await saveRpc;
+
+  // RILEVAMENTO FINALE ROBUSTO (fix odl.salvataggio sempre "mancante").
+  // Il salvataggio ODL e' LENTO: il doc_save dura ~9.5s, ma la disabilitazione del
+  // bottone "Salva" arriva DOPO la finestra di polling sopra (2 x 2.8s). Inoltre l'ODL
+  // (a differenza del preventivo) non emette la notifica "salvato" e usa un RPC che la
+  // regex non intercetta -> becameDisabled/notif/rpc restano tutti falsi anche quando il
+  // documento E' stato salvato. Evidenza affidabile dai log: a salvataggio avvenuto il
+  // bottone Salva diventa gwt-Button-disabled (niente piu' da salvare; partivamo da
+  // abilitato, vedi guardia info.disabled sopra). Quindi ri-controlliamo QUI lo stato
+  // finale: se il bottone ora e' disabilitato (o sparito), il salvataggio e' riuscito.
+  // Diamo anche un piccolo margine per i save lenti prima di arrenderci.
+  if (!becameDisabled && !notif && !rpc) {
+    for (let i = 0; i < 10; i += 1) {
+      const finalState = await locate();
+      if (!finalState.found || finalState.disabled) { becameDisabled = true; break; }
+      await page.waitForTimeout(300).catch(() => {});
+    }
+  }
+
   const ok = becameDisabled || Boolean(notif) || Boolean(rpc);
   const afterShot = await shot(ok ? "ok" : "fail");
 
