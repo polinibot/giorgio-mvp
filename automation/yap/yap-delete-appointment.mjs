@@ -444,10 +444,15 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   const onDialog = async (dialog) => {
     const message = dialog.message();
     dialogMessages.push(message);
-    if (/confermi l'eliminazione dell'appuntamento\?/i.test(message)) {
-      await dialog.accept();
-    } else {
-      await dialog.dismiss().catch(() => {});
+    try {
+      if (/confermi l'eliminazione dell'appuntamento\?/i.test(message)) {
+        await dialog.accept();
+      } else {
+        await dialog.dismiss();
+      }
+    } catch (_) {
+      // Dialog gia' gestito da un altro handler (es. durante auto-fix ricorsivo
+      // dove handleBlockingDocAndRetry ha il suo onDialog attivo)
     }
   };
   page.on("dialog", onDialog);
