@@ -319,11 +319,16 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   const needle = normalizeText(searchTerm);
   const normalizedExpectedTime = padTime(normalizeText(expectedTime).replace(":", "."));
   const matchesNeedle = (event) => {
-    if (!normalizeText(event.title).includes(needle)) return false;
+    const titleMatch = normalizeText(event.title).includes(needle);
+    if (!titleMatch) return false;
     if (!normalizedExpectedTime) return true;
     const eventTime = padTime(normalizeText(event.time || "").replace(":", "."));
     return eventTime.includes(normalizedExpectedTime);
   };
+
+  // Match leggero: solo targa nel titolo (senza controllo orario).
+  // Utile quando il time matching fallisce per formati diversi (es. "8:40" vs "08:40").
+  const matchesNeedleLoose = (event) => normalizeText(event.title).includes(needle);
 
   trace?.mark("agenda_scan_started", { search: searchTerm, date: dateIso });
   const events = await listVisibleAgendaEvents(page);
@@ -331,8 +336,13 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
 
   let matchingEvents = events.filter(matchesNeedle);
   let timeOnlyFallback = false;
-  // Fallback: YAP mostra icone (titolo "V") al posto del testo nel .fc-title.
-  // Se non c'è match per targa+ora, usa solo l'orario quando expectedTime è presente.
+  // Fallback 1: match solo per targa (senza orario). Se il titolo contiene la targa,
+  // l'appuntamento e' quello giusto anche se il formato orario non matcha.
+  if (matchingEvents.length === 0) {
+    matchingEvents = events.filter(matchesNeedleLoose);
+    if (matchingEvents.length) timeOnlyFallback = true;
+  }
+  // Fallback 2: solo orario (YAP mostra icone invece del testo nel titolo).
   if (matchingEvents.length === 0 && normalizedExpectedTime) {
     const toMin = (s) => { const [h, m] = String(s || "").replace(".", ":").split(":").map(Number); return isNaN(h) ? null : h * 60 + (m || 0); };
     const expMin = toMin(normalizedExpectedTime);
