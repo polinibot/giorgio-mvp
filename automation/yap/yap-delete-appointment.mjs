@@ -505,7 +505,11 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     confirmLoopIterations = i + 1;
     await page.waitForTimeout(180);
     if (deleteRpcRequest) break;
-    visibleMessage = await visibleYapMessage(page);
+    // NON sovrascrivere visibleMessage se ha gia' un messaggio di errore catturato.
+    // YAP a volte mostra il messaggio ODL/preventivo brevemente e poi lo rimuove
+    // dal DOM. Se lo sovrascriviamo con "" perdiamo l'informazione di blocco.
+    const currentMsg = await visibleYapMessage(page);
+    if (currentMsg && !visibleMessage) visibleMessage = currentMsg;
     if (classifyDeleteFailure(visibleMessage)) break;
     // controlla anche i dialog nativi già catturati dall'handler persistente
     const dialogBlock = classifyDeleteFailure(dialogMessages.join(" | "));
