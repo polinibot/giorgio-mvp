@@ -3477,7 +3477,7 @@ function App() {
           try {
             const dumpRes = await freshAxios.get('/yap/last-delete', {
               params: { ...getAuthParams(), _t: Date.now() },
-              headers: { ...getHeaders(), 'Cache-Control': 'no-cache' },
+              headers: getHeaders(),
             });
             const dump = dumpRes?.data?.data;
             const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
@@ -5023,7 +5023,7 @@ function App() {
               try {
                 const dumpRes = await freshAxios.get('/yap/last-delete', {
                   params: { ...getAuthParams(), _t: Date.now() }, // cache-busting
-                  headers: { ...getHeaders(), 'Cache-Control': 'no-cache' },
+                  headers: getHeaders(),
                 });
                 const dump = dumpRes?.data?.data;
                 const dumpMs = dump?.ts ? Date.parse(dump.ts) : NaN;
