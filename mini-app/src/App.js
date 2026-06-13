@@ -3019,106 +3019,6 @@ function App() {
     }
   }, [seedingYapTestPractices, browserPreviewMode, getAuthParams, getHeaders, addToast, loadDashboard, searchQuery, activeFilters]);
 
-  // Trova le pratiche test YAP batch nella dashboard (targa CN401MV + internal_notes "TEST YAP BATCH").
-  const findYapTestPractices = useCallback(() => {
-    return practices.filter((p) => {
-      const plate = String(p.plate_confirmed || p.plate_detected || '').toUpperCase();
-      const notes = String(p.internal_notes || '');
-      return plate === 'CN401MV' && /TEST YAP BATCH/i.test(notes);
-    }).sort((a, b) => {
-      const numA = Number((String(a.internal_notes || '').match(/BATCH\s*(\d+)/i) || [])[1] || 0);
-      const numB = Number((String(b.internal_notes || '').match(/BATCH\s*(\d+)/i) || [])[1] || 0);
-      return numA - numB;
-    });
-  }, [practices]);
-
-  const syncAllYapTest = useCallback(async () => {
-    if (batchSyncRunning) return;
-    const testPractices = findYapTestPractices();
-    if (testPractices.length === 0) {
-      addToast('Nessuna pratica test YAP trovata in dashboard. Crea prima le 6 pratiche.', 'warning');
-      return;
-    }
-    setBatchSyncRunning(true);
-    setBatchSyncResults([]);
-    setBatchSyncProgress({ current: 0, total: testPractices.length, label: 'Avvio sync batch...' });
-    const results = [];
-    for (let i = 0; i < testPractices.length; i++) {
-      const p = testPractices[i];
-      const label = (p.internal_notes || `#${p.id}`).replace('TEST YAP BATCH ', '#');
-      setBatchSyncProgress({ current: i + 1, total: testPractices.length, label: `Sync ${i + 1}/${testPractices.length}: ${label}` });
-      try {
-        const res = await syncToYap(p.id, { silent: true });
-        results.push({ id: p.id, label, status: res?.status || 'unknown', message: res?.message || '' });
-      } catch (err) {
-        results.push({ id: p.id, label, status: 'error', message: String(err?.message || err) });
-      }
-      setBatchSyncResults([...results]);
-    }
-    setBatchSyncProgress({ current: testPractices.length, total: testPractices.length, label: 'Batch completato' });
-    addToast(`Batch sync completato: ${results.filter((r) => ['complete_synced', 'partial_synced', 'agenda_synced', 'synced'].includes(r.status)).length}/${results.length} ok`, 'success');
-    await loadDashboard(searchQuery, activeFilters);
-    setBatchSyncRunning(false);
-  }, [batchSyncRunning, findYapTestPractices, syncToYap, addToast, loadDashboard, searchQuery, activeFilters]);
-
-  const copyAllYapLogs = useCallback(async () => {
-    const testPractices = findYapTestPractices();
-    if (testPractices.length === 0) {
-      addToast('Nessuna pratica test YAP trovata.', 'warning');
-      return;
-    }
-    addToast('Caricamento log da tutte le pratiche...', 'info');
-    const lines = [];
-    for (const p of testPractices) {
-      const label = (p.internal_notes || `#${p.id}`).replace('TEST YAP BATCH ', '#');
-      lines.push(`\n${'='.repeat(60)}`);
-      lines.push(`PRATICA ${p.id} — ${label}`);
-      lines.push(`Targa: ${p.plate_confirmed || p.plate_detected || '-'}`);
-      lines.push(`Tipo: ${p.practice_type || '-'}  Ora: ${p.appointment_time || '-'}  Data: ${(p.appointment_date || '').slice(0, 10)}`);
-      lines.push(`Sync status: ${p.management_sync_status || 'mai_syncato'}`);
-      try {
-        const res = await axios.get(`${API_BASE_URL}/api/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
-        const detail = res.data?.data || res.data;
-        const auditRaw = detail?.management_audit_result;
-        let audit = null;
-        if (typeof auditRaw === 'string') { try { audit = JSON.parse(auditRaw); } catch { audit = null; } } else if (typeof auditRaw === 'object') { audit = auditRaw; }
-        if (audit) {
-          lines.push(`Status: ${audit.status || '-'}  Verified: ${audit.verified ?? '-'}`);
-          lines.push(`Message: ${audit.message || '-'}`);
-          if (Array.isArray(audit.present)) lines.push(`Present (${audit.present.length}): ${audit.present.map((x) => x.field).join(', ')}`);
-          if (Array.isArray(audit.missing) && audit.missing.length) lines.push(`Missing (${audit.missing.length}): ${audit.missing.map((x) => x.field).join(', ')}`);
-          if (Array.isArray(audit.mismatch) && audit.mismatch.length) lines.push(`Mismatch (${audit.mismatch.length}): ${audit.mismatch.map((x) => x.field).join(', ')}`);
-          if (audit.summary) lines.push(`Summary: ${JSON.stringify(audit.summary)}`);
-          const phases = audit.worker_phases || audit.phase_timeline;
-          if (Array.isArray(phases) && phases.length) {
-            const lastPhase = phases[phases.length - 1];
-            lines.push(`Last phase: ${lastPhase?.phase || '-'}:${lastPhase?.status || '-'}`);
-            lines.push(`Phases (${phases.length}): ${phases.map((ph) => ph.phase).join(' -> ')}`);
-          }
-          if (audit.failed_phase) lines.push(`Failed phase: ${audit.failed_phase}`);
-          if (audit.stderr_tail) lines.push(`stderr_tail:\n${audit.stderr_tail}`);
-        } else {
-          lines.push('(nessun audit result)');
-        }
-      } catch (err) {
-        lines.push(`Errore caricamento: ${err?.message || err}`);
-      }
-    }
-    const text = `YAP BATCH LOG — ${new Date().toISOString()}\n${lines.join('\n')}`;
-    try {
-      await navigator.clipboard.writeText(text);
-      addToast(`Log copiati: ${testPractices.length} pratiche`, 'success');
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      addToast(`Log copiati: ${testPractices.length} pratiche`, 'success');
-    }
-  }, [findYapTestPractices, getAuthParams, getHeaders, addToast]);
-
   // Load dashboard on view mount
   useEffect(() => {
     if (!bootstrapped) return;
@@ -3503,6 +3403,106 @@ function App() {
       setYapSyncLoading(false);
     }
   }, [browserPreviewMode, getAuthParams, getHeaders, addToast, loadDetail, startYapActionProgress, finishYapActionProgress, updateYapActionProgress, normalizeYapOutcome, invalidatePracticeCaches, recoverPersistedSyncResult, rememberRequest, rememberResponse, rememberError]);
+
+  // Trova le pratiche test YAP batch nella dashboard (targa CN401MV + internal_notes "TEST YAP BATCH").
+  const findYapTestPractices = useCallback(() => {
+    return practices.filter((p) => {
+      const plate = String(p.plate_confirmed || p.plate_detected || '').toUpperCase();
+      const notes = String(p.internal_notes || '');
+      return plate === 'CN401MV' && /TEST YAP BATCH/i.test(notes);
+    }).sort((a, b) => {
+      const numA = Number((String(a.internal_notes || '').match(/BATCH\s*(\d+)/i) || [])[1] || 0);
+      const numB = Number((String(b.internal_notes || '').match(/BATCH\s*(\d+)/i) || [])[1] || 0);
+      return numA - numB;
+    });
+  }, [practices]);
+
+  const syncAllYapTest = useCallback(async () => {
+    if (batchSyncRunning) return;
+    const testPractices = findYapTestPractices();
+    if (testPractices.length === 0) {
+      addToast('Nessuna pratica test YAP trovata in dashboard. Crea prima le 6 pratiche.', 'warning');
+      return;
+    }
+    setBatchSyncRunning(true);
+    setBatchSyncResults([]);
+    setBatchSyncProgress({ current: 0, total: testPractices.length, label: 'Avvio sync batch...' });
+    const results = [];
+    for (let i = 0; i < testPractices.length; i++) {
+      const p = testPractices[i];
+      const label = (p.internal_notes || `#${p.id}`).replace('TEST YAP BATCH ', '#');
+      setBatchSyncProgress({ current: i + 1, total: testPractices.length, label: `Sync ${i + 1}/${testPractices.length}: ${label}` });
+      try {
+        const res = await syncToYap(p.id, { silent: true });
+        results.push({ id: p.id, label, status: res?.status || 'unknown', message: res?.message || '' });
+      } catch (err) {
+        results.push({ id: p.id, label, status: 'error', message: String(err?.message || err) });
+      }
+      setBatchSyncResults([...results]);
+    }
+    setBatchSyncProgress({ current: testPractices.length, total: testPractices.length, label: 'Batch completato' });
+    addToast(`Batch sync completato: ${results.filter((r) => ['complete_synced', 'partial_synced', 'agenda_synced', 'synced'].includes(r.status)).length}/${results.length} ok`, 'success');
+    await loadDashboard(searchQuery, activeFilters);
+    setBatchSyncRunning(false);
+  }, [batchSyncRunning, findYapTestPractices, syncToYap, addToast, loadDashboard, searchQuery, activeFilters]);
+
+  const copyAllYapLogs = useCallback(async () => {
+    const testPractices = findYapTestPractices();
+    if (testPractices.length === 0) {
+      addToast('Nessuna pratica test YAP trovata.', 'warning');
+      return;
+    }
+    addToast('Caricamento log da tutte le pratiche...', 'info');
+    const lines = [];
+    for (const p of testPractices) {
+      const label = (p.internal_notes || `#${p.id}`).replace('TEST YAP BATCH ', '#');
+      lines.push(`\n${'='.repeat(60)}`);
+      lines.push(`PRATICA ${p.id} \u2014 ${label}`);
+      lines.push(`Targa: ${p.plate_confirmed || p.plate_detected || '-'}`);
+      lines.push(`Tipo: ${p.practice_type || '-'}  Ora: ${p.appointment_time || '-'}  Data: ${(p.appointment_date || '').slice(0, 10)}`);
+      lines.push(`Sync status: ${p.management_sync_status || 'mai_syncato'}`);
+      try {
+        const res = await axios.get(`${API_BASE_URL}/api/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
+        const detail = res.data?.data || res.data;
+        const auditRaw = detail?.management_audit_result;
+        let audit = null;
+        if (typeof auditRaw === 'string') { try { audit = JSON.parse(auditRaw); } catch { audit = null; } } else if (typeof auditRaw === 'object') { audit = auditRaw; }
+        if (audit) {
+          lines.push(`Status: ${audit.status || '-'}  Verified: ${audit.verified ?? '-'}`);
+          lines.push(`Message: ${audit.message || '-'}`);
+          if (Array.isArray(audit.present)) lines.push(`Present (${audit.present.length}): ${audit.present.map((x) => x.field).join(', ')}`);
+          if (Array.isArray(audit.missing) && audit.missing.length) lines.push(`Missing (${audit.missing.length}): ${audit.missing.map((x) => x.field).join(', ')}`);
+          if (Array.isArray(audit.mismatch) && audit.mismatch.length) lines.push(`Mismatch (${audit.mismatch.length}): ${audit.mismatch.map((x) => x.field).join(', ')}`);
+          if (audit.summary) lines.push(`Summary: ${JSON.stringify(audit.summary)}`);
+          const phases = audit.worker_phases || audit.phase_timeline;
+          if (Array.isArray(phases) && phases.length) {
+            const lastPhase = phases[phases.length - 1];
+            lines.push(`Last phase: ${lastPhase?.phase || '-'}:${lastPhase?.status || '-'}`);
+            lines.push(`Phases (${phases.length}): ${phases.map((ph) => ph.phase).join(' -> ')}`);
+          }
+          if (audit.failed_phase) lines.push(`Failed phase: ${audit.failed_phase}`);
+          if (audit.stderr_tail) lines.push(`stderr_tail:\n${audit.stderr_tail}`);
+        } else {
+          lines.push('(nessun audit result)');
+        }
+      } catch (err) {
+        lines.push(`Errore caricamento: ${err?.message || err}`);
+      }
+    }
+    const text = `YAP BATCH LOG \u2014 ${new Date().toISOString()}\n${lines.join('\n')}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      addToast(`Log copiati: ${testPractices.length} pratiche`, 'success');
+    } catch {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      addToast(`Log copiati: ${testPractices.length} pratiche`, 'success');
+    }
+  }, [findYapTestPractices, getAuthParams, getHeaders, addToast]);
 
   const deleteYapAppointment = useCallback(async (id, options = {}) => {
     if (browserPreviewMode) {
