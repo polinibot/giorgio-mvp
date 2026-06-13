@@ -506,8 +506,8 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     dialog_count: dialogMessages.length,
   });
   page.off("request", onRequest);
-  page.off("response", onResponse);
   page.off("dialog", onDialog);
+  // NOTA: onResponse rimane attaccato ancora per il loop di attesa RPC qui sotto.
 
   let afterEvents = await listVisibleAgendaEvents(page).catch(() => []);
   let remainingMatches = afterEvents.filter(matchesNeedle).length;
@@ -517,31 +517,25 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
   // Se la RPC response non e' mai arrivata (response_status null), la verifica
   // basata su "appuntamento sparito dalla vista" e' inaffidabile: YAP aggiorna
   // ottimisticamente la UI rimuovendo l'evento PRIMA che il server risponda.
-  // Aspettiamo fino a 6s che la response arrivi; se non arriva, forziamo un
-  // page.reload() per ottenere lo stato vero dal server (non ottimistico).
+  // Aspettiamo fino a 6s con l'handler ancora attivo: cosi' se il server
+  // risponde in ritardo (es. YAP lento) la catturiamo correttamente.
   const rpcResponseMissing = !deleteRpcResponse;
   if (rpcResponseMissing) {
     trace?.mark("waiting_rpc_response_post_confirm", { reason: "rpc_response_null_after_loop" });
-    // Aspetta fino a 6s che onResponse catturi la response
     for (let w = 0; w < 12; w++) {
       if (deleteRpcResponse) break;
       await page.waitForTimeout(500);
     }
-    if (!deleteRpcResponse) {
-      // Ancora null: forza reload della pagina per ottenere stato server reale
-      trace?.mark("forcing_page_reload_rpc_missing", { reload_at_ms: Date.now() });
-      try {
-        await page.reload({ timeout: 15000, waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(2000); // YAP carica i dati in async dopo il DOM
-      } catch (_) {}
-    }
   }
+  // Ora stacchiamo definitivamente l'handler response
+  page.off("response", onResponse);
 
   if (!targetDeleted || rpcResponseMissing) {
     if (rpcResponseMissing) {
       trace?.mark("reopening_agenda_rpc_unconfirmed", {
         remaining_matches_before_reopen: remainingMatches,
         rpc_arrived: !!deleteRpcResponse,
+        rpc_arrived_status: deleteRpcResponse?.status ?? null,
         reason: "rpc_response_null",
       });
     } else {
