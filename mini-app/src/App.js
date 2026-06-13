@@ -2231,6 +2231,10 @@ function App() {
   const [batchDeleteRunning, setBatchDeleteRunning] = useState(false);
   const [batchDeleteProgress, setBatchDeleteProgress] = useState({ current: 0, total: 0, label: '' });
   const [batchDeleteResults, setBatchDeleteResults] = useState([]);
+  // Risultato LIVE completo (worker_phases dettagliati + diagnostica) di ogni pratica
+  // dell'ultimo batch sync, per id. Serve a "Copia log tutte" per stampare il LOG WORKER
+  // INTERO (doc_save, grid_row_cell, articolo...) e non solo il riassunto audit persistito.
+  const batchSyncDetailRef = useRef({});
   const [previewPractices, setPreviewPractices] = useState(BROWSER_PREVIEW_PRACTICES);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState({ officina: false, carrozzeria: false, revisione: false, synced: null });
@@ -3448,6 +3452,7 @@ function App() {
     }
     setBatchSyncRunning(true);
     setBatchSyncResults([]);
+    batchSyncDetailRef.current = {}; // azzera il log live del run precedente
     setBatchSyncProgress({ current: 0, total: testPractices.length, label: 'Avvio sync batch...' });
     const results = [];
     try {
@@ -3457,6 +3462,9 @@ function App() {
         setBatchSyncProgress({ current: i + 1, total: testPractices.length, label: `Sync ${i + 1}/${testPractices.length}: ${label}` });
         try {
           const res = await syncToYap(p.id, { silent: true });
+          // Conserva il risultato LIVE completo: contiene worker_phases DETTAGLIATI
+          // (doc_save/diag, grid_row_cell, articolo...) che l'audit persistito non ha.
+          batchSyncDetailRef.current[p.id] = res || null;
           results.push({ id: p.id, label, status: res?.status || 'unknown', message: res?.message || '' });
         } catch (err) {
           results.push({ id: p.id, label, status: 'error', message: String(err?.message || err) });
@@ -3491,6 +3499,9 @@ function App() {
       lines.push(`Targa: ${p.plate_confirmed || p.plate_detected || '-'}`);
       lines.push(`Tipo: ${p.practice_type || '-'}  Ora: ${p.appointment_time || '-'}  Data: ${(p.appointment_date || '').slice(0, 10)}`);
       lines.push(`Sync status: ${p.management_sync_status || 'mai_syncato'}`);
+      // Risultato LIVE dell'ultimo batch sync (se presente): ha i worker_phases DETTAGLIATI
+      // (doc_save/diag, grid_row_cell, grid_row_articolo...) che l'audit persistito non ha.
+      const live = batchSyncDetailRef.current[p.id] || null;
       try {
         const res = await axios.get(`${API_BASE_URL}/api/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
         // Il dettaglio incapsula i campi pratica in data.practice: l'audit e' in
@@ -3518,17 +3529,34 @@ function App() {
             audit.mismatch.forEach((x) => lines.push(`  - ${x.field}${x.found != null ? ` | trovato: ${x.found}` : ''}${x.expected != null ? ` | atteso: ${x.expected}` : ''}`));
           }
           if (audit.summary) lines.push(`Summary: ${JSON.stringify(audit.summary)}`);
-          const phases = audit.worker_phases || audit.phase_timeline;
-          if (Array.isArray(phases) && phases.length) {
-            const lastPhase = phases[phases.length - 1];
-            lines.push(`Last phase: ${lastPhase?.phase || '-'}:${lastPhase?.status || '-'}`);
-            lines.push(`Phases (${phases.length}): ${phases.map((ph) => ph.phase).join(' -> ')}`);
-          }
           if (audit.failed_phase) lines.push(`Failed phase: ${audit.failed_phase}`);
-          if (audit.stderr_tail) lines.push(`stderr_tail:\n${audit.stderr_tail}`);
-        } else {
+        } else if (!live) {
           lines.push('(nessun audit result)');
         }
+
+        // LOG WORKER COMPLETO: e' QUI che si debugga (doc_save diag, grid_row_cell
+        // reason, grid_row_articolo ok...). Sorgente preferita = risultato live del batch
+        // sync (fasi dettagliate); fallback = audit persistito. buildWorkerLogLines stampa
+        // TUTTI i campi extra di ogni azione, non solo i nomi delle fasi.
+        const liveTd = live ? extractYapTechnicalDiagnostics(live) : null;
+        const detailPhases =
+          (live && Array.isArray(live.worker_phases) && live.worker_phases.length && live.worker_phases)
+          || (liveTd && Array.isArray(liveTd.workerPhases) && liveTd.workerPhases.length && liveTd.workerPhases)
+          || (audit && Array.isArray(audit.worker_phases) && audit.worker_phases.length && audit.worker_phases)
+          || [];
+        if (detailPhases.length) {
+          const last = detailPhases[detailPhases.length - 1];
+          lines.push(`Last phase: ${last?.phase || '-'}:${last?.status || '-'}`);
+          lines.push(`Phases (${detailPhases.length}): ${detailPhases.map((ph) => ph.phase).join(' -> ')}`);
+          lines.push('--- worker log ---');
+          lines.push(buildWorkerLogLines(detailPhases));
+        } else {
+          lines.push('(log worker non disponibile: rilancia "Sync tutte" e poi copia)');
+        }
+        const stdoutTail = liveTd?.stdoutTail || audit?.stdout_tail;
+        const stderrTail = liveTd?.stderrTail || audit?.stderr_tail;
+        if (stdoutTail) { lines.push('--- stdout tail ---'); lines.push(stdoutTail); }
+        if (stderrTail) { lines.push('--- stderr tail ---'); lines.push(stderrTail); }
       } catch (err) {
         lines.push(`Errore caricamento: ${err?.message || err}`);
       }
