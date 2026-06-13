@@ -1275,6 +1275,10 @@ async def _notify_user_delete_result(
             icon = "⚠️"
             title = f"Appuntamento #{practice_id}: eliminazione bloccata"
             body = "Presente un preventivo. Eliminalo prima su YAP, poi riprova."
+        elif failure_status in {"not_found", "unknown"}:
+            icon = "ℹ️"
+            title = f"Appuntamento #{practice_id}: non trovato su YAP"
+            body = "L'appuntamento non e' presente su YAP (forse gia' eliminato). La pratica e' stata rimossa."
         else:
             icon = "❌"
             title = f"Appuntamento #{practice_id}: eliminazione FALLITA"

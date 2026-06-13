@@ -3542,8 +3542,12 @@ function App() {
       } else {
         const isTimeout = err?.code === 'ECONNABORTED' || String(err?.message || '').includes('timeout');
         if (isTimeout && !recovered) {
+          // Railway proxy blocca response + recovery. Server continua in background.
+          // Rimuoviamo la pratica dalla lista. TG notificher\u00e0 il risultato reale.
+          invalidatePracticeCaches(id);
+          setPractices((current) => current.filter((practiceItem) => String(practiceItem.id) !== String(id)));
           finishYapActionProgress('Richiesta inviata. Controlla Telegram per la conferma.', 'warning', 0);
-          addToast('Richiesta in elaborazione sul server. Controlla Telegram.', 'warning');
+          addToast('Eliminazione in corso sul server. Controlla Telegram.', 'warning');
         } else {
           addToast(errorResult.message, 'error');
           finishYapActionProgress(errorResult.message || 'Eliminazione YAP fallita', 'error', 0);
@@ -5091,12 +5095,19 @@ function App() {
             // non ha consegnato la risposta. Il server continua in background.
             const isTimeout = err?.code === 'ECONNABORTED' || String(err?.message || '').includes('timeout');
             if (isTimeout && !recovered) {
+              // Railway proxy blocca la response E il recovery polling.
+              // Ma lo script sul server continua e finisce (TG notifica il risultato).
+              // Rimuoviamo la pratica dalla lista per evitare che l'utente la veda ancora.
+              // Se la delete era fallita, l'utente puo' ricaricare la dashboard.
+              invalidatePracticeCaches(p.id);
+              setPractices(prev => prev.filter(pr => pr.id !== p.id));
+              setStats(prev => prev ? { ...prev, total: prev.total - 1, pending_sync: p.synced ? prev.pending_sync : prev.pending_sync - 1 } : prev);
               finishYapActionProgress(
                 'Richiesta inviata. Controlla Telegram per la conferma.',
                 'warning',
                 0,
               );
-              addToast('Richiesta in elaborazione sul server. Controlla Telegram.', 'warning');
+              addToast('Eliminazione in corso sul server. Controlla Telegram.', 'warning');
             } else {
               const msg = errorResult.message || classifyError(err);
               finishYapActionProgress(msg, 'error', 0);
