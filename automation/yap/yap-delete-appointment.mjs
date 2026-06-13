@@ -621,6 +621,19 @@ async function findAndDeleteAppointment(page, searchTerm, dryRun, dateIso, debug
     targetDeleted = false;
   }
 
+  // Se il messaggio visibile nel DOM contiene un errore bloccante (ODL/preventivo),
+  // forziamo targetDeleted=false ANCHE se la RPC non e' partita (blocco pre-RPC).
+  // YAP a volte mostra il messaggio e poi lo rimuove dal DOM: il messaggio e'
+  // preservato grazie al fix nel confirm loop.
+  const visibleMessageFailure = classifyDeleteFailure(visibleMessage);
+  if (visibleMessageFailure === "blocked_by_odl" || visibleMessageFailure === "blocked_by_preventivo") {
+    trace?.mark("visible_message_override_target_deleted", {
+      visible_message_failure: visibleMessageFailure,
+      target_deleted_was: targetDeleted,
+    });
+    targetDeleted = false;
+  }
+
   let failureStatus = !targetDeleted
     ? (rpcBodyFailure || classifyDeleteFailure(visibleMessage))
     : null;
