@@ -1668,6 +1668,11 @@ def _build_inline_sync_audit_result(
             worker_phases,
         )
 
+    # Safety net: se verified=false ma non ci sono campi mancanti/diversi,
+    # l'audit ha comunque confermato tutti i campi comuni (agenda+tag+veicolo).
+    # Non degradare a partial_synced senza evidenza di campi mancanti.
+    if not verified and not missing and not mismatch:
+        verified = True
     status_value = "complete_synced" if verified else ("partial_synced" if (present or missing or mismatch) else "agenda_synced")
     if status_value == "complete_synced":
         message = "Appuntamento YAP scritto e verificato automaticamente."

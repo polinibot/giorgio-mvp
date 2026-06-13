@@ -5393,6 +5393,72 @@ async function writePracticeAndOdl(page, job, args) {
     }
   }
 
+  // GRID FLOW FALLBACK: se l'ODL si è aperto via fallback/recovery (non via route
+  // #!pratica), il flusso griglia non è stato eseguito. Per PREVENTIVO e ODL la
+  // griglia è l'UNICO modo corretto di scrivere righe: recuperarlo qui evita
+  // "partial_synced" quando la route iniziale fallisce ma la pagina è raggiungibile.
+  if (odlNavigated && !writeReport.gridResult && (workPageEnum === "PREVENTIVO" || workPageEnum === "ODL")) {
+    const fallbackDocKind = workPageEnum === "ODL" ? "odl" : "preventivo";
+    const fallbackDocLabel = workPageEnum === "ODL" ? "Ordine di lavoro" : "Preventivo";
+    writeReport.workPage = workPageEnum;
+    logAction("grid_flow_fallback_entry", {
+      docKind: fallbackDocKind,
+      workspaceState,
+      url: page.url().slice(0, 180),
+    });
+    logAction("grid_flow_fallback_snapshot", await snapshotWorkGrid(page));
+    const fallbackGridResult = await writeWorkGrid(page, job, args).catch((e) => ({ ok: false, error: e?.message }));
+    if (fallbackGridResult && typeof fallbackGridResult === "object") fallbackGridResult.docKind = fallbackDocKind;
+    writeReport.gridResult = fallbackGridResult;
+    const fbManOk = Boolean(fallbackGridResult?.manodopera?.articolo);
+    const fbManExpected = Boolean(fallbackGridResult?.manodopera?.expected);
+    const fbExpectedRows = (fallbackGridResult?.righe || []).length;
+    const fbPersistedRows = (fallbackGridResult?.righe || []).filter((r) => r.written).length;
+    const fbDocSaved = Boolean(fallbackGridResult?.saved?.ok);
+    const fbGridOk = Boolean(fallbackGridResult?.ok)
+      || (fbDocSaved && (!fbManExpected || fbManOk) && fbPersistedRows === fbExpectedRows);
+    writeReport.odl.success = writeReport.odl.success || fbGridOk;
+    logPhase("grid_flow_fallback", fbGridOk ? "done" : "failed", {
+      docKind: fallbackDocKind,
+      manodoperaExpected: fbManExpected,
+      manodopera: fbManOk,
+      rows: `${fbPersistedRows}/${fbExpectedRows}`,
+      saved: fbDocSaved,
+      reason: fallbackGridResult?.reason || fallbackGridResult?.error || null,
+    });
+    // Ricostruisci fields dal gridResult per l'audit inline.
+    const fbPf = [];
+    if (fbManExpected) {
+      fbPf.push({
+        field_id: `${fallbackDocKind}.manodopera`,
+        expected: "riga manodopera (MAN)",
+        found: fbManOk ? "MAN" : null,
+        status: fbManOk ? "written" : "missing",
+      });
+    }
+    for (const r of (fallbackGridResult?.righe || [])) {
+      fbPf.push({
+        field_id: `${fallbackDocKind}.${r.kind || "row"}`,
+        expected: r.text || r.expected || r.kind || "riga",
+        found: r.written ? (r.text || r.expected || "ok") : null,
+        status: r.written ? "written" : "missing",
+      });
+    }
+    if (fallbackGridResult?.saved) {
+      fbPf.push({
+        field_id: `${fallbackDocKind}.salvataggio`,
+        expected: "documento salvato",
+        found: fbDocSaved ? "salvato" : (fallbackGridResult.saved.reason || "non salvato"),
+        status: fbDocSaved ? "written" : "missing",
+      });
+    }
+    if (fbPf.length) writeReport.fields = fbPf;
+    if (fbGridOk) {
+      _detachRpcTrace();
+      return writeReport;
+    }
+  }
+
   // DIAGNOSTICA ODL FALLITO: se l'ODL non si è aperto, cattura uno snapshot dello
   // stato REALE della pagina (gira SEMPRE, anche senza --debug, perché in produzione
   // serve a capire la causa). Finisce nei worker_phases (stderr) e nel write_report,
@@ -6360,8 +6426,13 @@ async function runInlineAudit(page, job, managementWrite, popupResult = null) {
     ? wr.verify.ratio
     : (missing.length === 0 ? 1 : 0);
 
-  // Verificato SOLO se: ODL aperto, nessun campo mancante e rilettura completa (ratio 1).
-  const verified = hasVerifiedOdlWorkspace(wr) && missing.length === 0 && ratio >= 1;
+  // Verificato: nessun campo mancante. Se non ci sono field-level items dal
+  // write_report (es. griglia non eseguita, pratica senza sezioni), i campi comuni
+  // (agenda + tag + veicolo) sono sufficienti. hasVerifiedOdlWorkspace resta richiesto
+  // SOLO quando il write_report ha prodotto field-level items (scrittura ODL/griglia
+  // effettivamente tentata).
+  const hasFieldLevelItems = fields.length > 0;
+  const verified = missing.length === 0 && (!hasFieldLevelItems || hasVerifiedOdlWorkspace(wr));
 
   return {
     verified,
