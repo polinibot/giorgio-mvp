@@ -3628,7 +3628,12 @@ function App() {
                 entry.status = data.status || 'deleted';
                 entry.message = data.message || '';
                 entry.reason = data.status_reason || null;
-                entry.phases = data.phase_timeline || data.worker_phases || [];
+                // Preferisci la TRACE WORKER dettagliata (data.yap.worker_phases): contiene i
+                // marker dell'auto-fix documento (blocking_doc_auto_fix_*, odl_fix_*) che
+                // servono a capire perche' un blocked_by_odl non si e' auto-risolto. Le fasi
+                // backend (phase_timeline: precheck->delete->finalize) sono solo un fallback.
+                entry.phases = (Array.isArray(data.yap?.worker_phases) && data.yap.worker_phases.length && data.yap.worker_phases)
+                  || data.worker_phases || data.phase_timeline || [];
                 // L'endpoint segnala il blocco ODL/preventivo con 200 + status
                 // blocked_by_* (NON con 409) e NON segna la pratica eliminata. Quindi NON
                 // eliminare la locale, altrimenti l'appuntamento+documento restano orfani
@@ -3719,6 +3724,14 @@ function App() {
         const last = phases[phases.length - 1];
         lines.push(`Ultima fase: ${last?.name || last?.phase || '-'}:${last?.status || '-'}`);
         lines.push(`Fasi (${phases.length}): ${phases.map((ph) => ph.name || ph.phase).join(' -> ')}`);
+        // Se sono fasi WORKER (hanno phase/status, non solo name), stampa il log
+        // completo: serve a vedere i marker auto-fix documento (blocking_doc_auto_fix_*,
+        // odl_fix_*) quando un blocked_by_odl non si e' auto-risolto.
+        const isWorkerTrace = phases.some((ph) => ph.phase || ph.status || ph.elapsed_ms != null);
+        if (isWorkerTrace) {
+          lines.push('--- worker log ---');
+          lines.push(buildWorkerLogLines(phases));
+        }
       }
     }
     const okCount = batchDeleteResults.filter((r) => ['deleted', 'not_found', 'not_needed'].includes(r.status)).length;
