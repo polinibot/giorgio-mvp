@@ -265,7 +265,13 @@ async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace
     // 2) Apri il popup appuntamento e cerca il link "Gestione pratica", con RETRY: il popup
     //    puo' tardare e un singolo tentativo a 500ms falliva (odl_fix_practice_link clicked=false).
     await page.mouse.click(event.x, event.y);
-    await page.waitForTimeout(500);
+    // ASPETTA che il popup "Dettagli appuntamento" sia renderizzato PRIMA di cercare il
+    // link "Gestione pratica" — come lo script provato yap-delete-linked-odl.mjs. Senza
+    // questa attesa i 500ms erano troppo pochi e il link non si trovava (clicked=false),
+    // bloccando tutto l'auto-fix ODL al primo passo.
+    await page.getByText("Dettagli appuntamento").first()
+      .waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
+    await page.waitForTimeout(300);
     let practiceLink = { clicked: false };
     for (let i = 0; i < 6 && !practiceLink.clicked; i += 1) {
       practiceLink = await clickPracticeLinkInPopup(page);
@@ -274,21 +280,22 @@ async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace
       await page.waitForTimeout(500);
     }
     trace?.mark(`${kind}_fix_practice_link`, { ...practiceLink, dismissed });
-    await page.waitForTimeout(2000);
+    // Tempi allineati allo script provato: la pratica e la sezione ODL tardano a caricare.
+    await page.waitForTimeout(3000);
 
     const section = await clickDocSectionTab(page, doc.tabRe.source);
     trace?.mark(`${kind}_fix_section_click`, section);
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2500);
 
     const del = await clickToolbarEliminaDoc(page);
     trace?.mark(`${kind}_fix_toolbar_elimina`, { found: Boolean(del) });
 
     // Loop conferma + attesa RPC delete documento.
     for (let i = 0; i < 8 && !docRpc.length; i += 1) {
-      await page.waitForTimeout(300);
+      await page.waitForTimeout(500);
       await clickDeleteConfirmIfPresent(page).catch(() => {});
     }
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
     const docDeleted = docRpc.length > 0;
     trace?.mark(`${kind}_fix_doc_delete_rpc`, { detected: docDeleted, rpc_count: docRpc.length });
 
