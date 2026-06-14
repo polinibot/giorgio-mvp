@@ -3629,6 +3629,13 @@ function App() {
                 entry.message = data.message || '';
                 entry.reason = data.status_reason || null;
                 entry.phases = data.phase_timeline || data.worker_phases || [];
+                // L'endpoint segnala il blocco ODL/preventivo con 200 + status
+                // blocked_by_* (NON con 409) e NON segna la pratica eliminata. Quindi NON
+                // eliminare la locale, altrimenti l'appuntamento+documento restano orfani
+                // su YAP senza piu' una pratica da cui ritentare. Va sbloccato a mano su YAP.
+                if (data.status === 'blocked_by_odl' || data.status === 'blocked_by_preventivo') {
+                  skipLocalDelete = true;
+                }
               } else {
                 entry.status = 'not_needed';
                 entry.message = 'Mai sincronizzata: nessuna delete YAP.';
@@ -6143,7 +6150,7 @@ function App() {
             {batchDeleteResults.length > 0 && (
               <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {batchDeleteResults.map((r) => (
-                  <span key={r.id} style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 3, fontSize: 11, background: ['deleted', 'not_found', 'not_needed'].includes(r.status) ? '#1b4332' : r.status === 'blocked' ? '#7c4a00' : '#5c1a1a', color: '#eee' }}>
+                  <span key={r.id} style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 3, fontSize: 11, background: ['deleted', 'not_found', 'not_needed'].includes(r.status) ? '#1b4332' : ['blocked', 'blocked_by_odl', 'blocked_by_preventivo'].includes(r.status) ? '#7c4a00' : '#5c1a1a', color: '#eee' }}>
                     {r.label}: {r.status}
                   </span>
                 ))}
@@ -6154,7 +6161,7 @@ function App() {
         {!batchDeleteRunning && batchDeleteResults.length > 0 && (
           <div style={{ fontSize: 12, marginBottom: 8, padding: '6px 8px', background: '#111', borderRadius: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {batchDeleteResults.map((r) => (
-              <span key={r.id} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 3, fontSize: 11, background: ['deleted', 'not_found', 'not_needed'].includes(r.status) ? '#1b4332' : r.status === 'blocked' ? '#7c4a00' : '#5c1a1a', color: '#eee' }}>
+              <span key={r.id} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 3, fontSize: 11, background: ['deleted', 'not_found', 'not_needed'].includes(r.status) ? '#1b4332' : ['blocked', 'blocked_by_odl', 'blocked_by_preventivo'].includes(r.status) ? '#7c4a00' : '#5c1a1a', color: '#eee' }}>
                 {r.label}: {r.status}
               </span>
             ))}
