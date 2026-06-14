@@ -207,6 +207,30 @@ async function clickToolbarEliminaDoc(page) {
   return null;
 }
 
+// Chiude un messaggio/dialog di blocco con bottone "Chiudi" (es. ODL: "...associato ad un
+// ordine di lavoro [Chiudi]"). Fallback: Escape. Senza questo l'auto-fix ODL non riusciva
+// ad aprire il popup pratica (odl_fix_practice_link clicked=false): il messaggio restava
+// in mezzo. Il preventivo non lo richiede (blocca via RPC, niente dialog residuo).
+async function dismissBlockingMessage(page) {
+  const closed = await page.evaluate(() => {
+    const isVisible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = window.getComputedStyle(el);
+      return r.width > 3 && r.height > 3 && s.display !== "none" && s.visibility !== "hidden";
+    };
+    const btn = [...document.querySelectorAll("button, .gwt-Button, a, [role='button'], span, div")]
+      .filter(isVisible)
+      .find((el) => /^chiudi$/i.test((el.textContent || "").replace(/\s+/g, " ").trim()));
+    if (btn) {
+      btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      return true;
+    }
+    return false;
+  }).catch(() => false);
+  if (!closed) await page.keyboard.press("Escape").catch(() => {});
+  return closed;
+}
+
 /**
  * Gestisce documento bloccante (ODL o preventivo): apre la pratica, naviga alla sezione
  * del documento, clicca Elimina nella toolbar, conferma, e CONFERMA via RPC che il
@@ -235,14 +259,21 @@ async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace
   page.on("dialog", onDialog);
   try {
     trace?.mark(`${kind}_fix_open_popup`, { event: event.title });
+    // 1) Chiudi il messaggio di blocco (es. ODL "[Chiudi]") che impedisce di aprire il popup.
+    const dismissed = await dismissBlockingMessage(page).catch(() => false);
+    await page.waitForTimeout(300);
+    // 2) Apri il popup appuntamento e cerca il link "Gestione pratica", con RETRY: il popup
+    //    puo' tardare e un singolo tentativo a 500ms falliva (odl_fix_practice_link clicked=false).
     await page.mouse.click(event.x, event.y);
     await page.waitForTimeout(500);
-
-    const practiceLink = await clickPracticeLinkInPopup(page);
-    trace?.mark(`${kind}_fix_practice_link`, practiceLink);
-    if (!practiceLink?.clicked) {
-      await page.mouse.dblclick(event.x, event.y).catch(() => {});
+    let practiceLink = { clicked: false };
+    for (let i = 0; i < 6 && !practiceLink.clicked; i += 1) {
+      practiceLink = await clickPracticeLinkInPopup(page);
+      if (practiceLink.clicked) break;
+      if (i === 1) await page.mouse.dblclick(event.x, event.y).catch(() => {}); // 2° giro: doppio click
+      await page.waitForTimeout(500);
     }
+    trace?.mark(`${kind}_fix_practice_link`, { ...practiceLink, dismissed });
     await page.waitForTimeout(2000);
 
     const section = await clickDocSectionTab(page, doc.tabRe.source);
