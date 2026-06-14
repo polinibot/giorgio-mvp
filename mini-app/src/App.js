@@ -1621,6 +1621,204 @@ const YAP_TEST_BATCH_PRACTICES = [
       { context: 'carrozzeria', name: 'Nastro mascheratura', quantity: '1 cf' },
     ],
   },
+  {
+    // 07 — REVISIONE: nessuna riga descrittiva ne' griglia ODL/preventivo. Verifica il
+    // percorso agenda + tag (tag atteso: "revisione") senza scrittura documento.
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T10:00:00',
+      appointment_time: '10:00',
+      practice_type: 'preventivo',
+      contexts: ['revisione'],
+      internal_notes: 'TEST YAP BATCH 07 - revisione',
+    },
+    sections: [
+      {
+        context: 'revisione',
+        description_rows: [],
+        man_hours: null,
+        mac_hours: null,
+        materials_amount: null,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Caso test revisione (solo agenda+tag)',
+      },
+    ],
+    parts: [],
+  },
+  {
+    // 08 — OFFICINA con SMALTIMENTO + MATERIALI: verifica la riga smaltimento (articolo
+    // MATT) e i materiali su un reparto NON carrozzeria. Base smaltimento = man*44 + materiali.
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T10:20:00',
+      appointment_time: '10:20',
+      practice_type: 'preventivo',
+      contexts: ['officina'],
+      internal_notes: 'TEST YAP BATCH 08 - officina smaltimento+materiali',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Tagliando completo', 'Pulizia iniettori'],
+        man_hours: 3,
+        mac_hours: null,
+        materials_amount: 45.5,
+        waste_apply: true,
+        waste_percentage: 3,
+        notes: 'Officina con smaltimento (MATT) e materiali',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Kit pulizia iniettori', quantity: '1 kit' },
+    ],
+  },
+  {
+    // 09 — OFFICINA ODL con MAN + MAC nella STESSA sezione: due righe articolo (MAN e MAC)
+    // nello stesso reparto. Verifica il caso che apriva il popup DETTAGLIO RIGA su qta/prezzo.
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T10:40:00',
+      appointment_time: '10:40',
+      practice_type: 'ordine_di_lavoro',
+      contexts: ['officina'],
+      internal_notes: 'TEST YAP BATCH 09 - officina man+mac',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Sostituzione frizione', 'Spurgo impianto'],
+        man_hours: 4,
+        mac_hours: 1.5,
+        materials_amount: null,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Officina con manodopera e macchina insieme',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Kit frizione', quantity: '1 kit' },
+      { context: 'officina', name: 'Olio cambio', quantity: '2 L' },
+    ],
+  },
+  {
+    // 10 — CARROZZERIA ODL con MATERIALI ma SENZA smaltimento: materiali presente,
+    // nessuna riga smaltimento. Verifica che senza smaltimento non venga aggiunta la riga MATT.
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T11:00:00',
+      appointment_time: '11:00',
+      practice_type: 'ordine_di_lavoro',
+      contexts: ['carrozzeria'],
+      internal_notes: 'TEST YAP BATCH 10 - carrozzeria materiali senza smaltimento',
+    },
+    sections: [
+      {
+        context: 'carrozzeria',
+        description_rows: ['Verniciatura parziale paraurti'],
+        man_hours: null,
+        mac_hours: 0.9,
+        materials_amount: 90,
+        waste_apply: false,
+        waste_percentage: 2,
+        notes: 'Carrozzeria materiali senza smaltimento',
+      },
+    ],
+    parts: [
+      { context: 'carrozzeria', name: 'Vernice base', quantity: '1 L' },
+    ],
+  },
+  {
+    // 11 — CARROZZERIA PREVENTIVO con SMALTIMENTO ma SENZA materiali: smaltimento calcolato
+    // solo su mac (38*1.0=38 -> 10% = 3,80). Verifica la riga MATT con base senza materiali.
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Singh Gurwinder',
+      customer_type: 'privato',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T11:20:00',
+      appointment_time: '11:20',
+      practice_type: 'preventivo',
+      contexts: ['carrozzeria'],
+      internal_notes: 'TEST YAP BATCH 11 - carrozzeria smaltimento senza materiali',
+    },
+    sections: [
+      {
+        context: 'carrozzeria',
+        description_rows: ['Lucidatura completa carrozzeria'],
+        man_hours: null,
+        mac_hours: 1.0,
+        materials_amount: null,
+        waste_apply: true,
+        waste_percentage: 10,
+        notes: 'Carrozzeria smaltimento senza materiali',
+      },
+    ],
+    parts: [
+      { context: 'carrozzeria', name: 'Polish', quantity: '1 cf' },
+    ],
+  },
+  {
+    // 12 — AZIENDA, MIX COMPLETO ODL: cliente azienda, 2 sezioni entrambe con materiali +
+    // smaltimento, molte righe descrittive e molti ricambi. Caso "pieno" piu' stressante.
+    practice: {
+      plate_confirmed: 'CN401MV',
+      phone: '3899885954',
+      customer_name: 'Officine Test SRL',
+      customer_type: 'azienda',
+      billing_to_complete: false,
+      appointment_date: '2026-11-24T11:40:00',
+      appointment_time: '11:40',
+      practice_type: 'ordine_di_lavoro',
+      contexts: ['officina', 'carrozzeria'],
+      internal_notes: 'TEST YAP BATCH 12 - azienda mix completo',
+    },
+    sections: [
+      {
+        context: 'officina',
+        description_rows: ['Tagliando', 'Sostituzione candele', 'Controllo emissioni'],
+        man_hours: 6,
+        mac_hours: null,
+        materials_amount: 30,
+        waste_apply: true,
+        waste_percentage: 2,
+        notes: 'Officina completa (azienda)',
+      },
+      {
+        context: 'carrozzeria',
+        description_rows: ['Riparazione portiera', 'Verniciatura', 'Lucidatura finale'],
+        man_hours: null,
+        mac_hours: 2.5,
+        materials_amount: 200,
+        waste_apply: true,
+        waste_percentage: 6,
+        notes: 'Carrozzeria completa (azienda)',
+      },
+    ],
+    parts: [
+      { context: 'officina', name: 'Candele', quantity: '4 pz' },
+      { context: 'officina', name: 'Filtro aria', quantity: '1 pz' },
+      { context: 'carrozzeria', name: 'Vernice bicomponente', quantity: '2 L' },
+      { context: 'carrozzeria', name: 'Stucco', quantity: '1 cf' },
+    ],
+  },
 ];
 
 /** Normalize sections data: ensure description_rows is always an array */
