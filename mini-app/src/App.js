@@ -3502,64 +3502,63 @@ function App() {
       // Risultato LIVE dell'ultimo batch sync (se presente): ha i worker_phases DETTAGLIATI
       // (doc_save/diag, grid_row_cell, grid_row_articolo...) che l'audit persistito non ha.
       const live = batchSyncDetailRef.current[p.id] || null;
+      // 1) Audit PERSISTITO (riassunto present/missing). Isolato nel suo try: se va in
+      //    401/timeout NON deve impedire la stampa del log worker LIVE qui sotto.
+      let audit = null;
       try {
         const res = await axios.get(`${API_BASE_URL}/api/practices/${p.id}`, { params: getAuthParams(), headers: getHeaders(), timeout: 15000 });
         // Il dettaglio incapsula i campi pratica in data.practice: l'audit e' in
         // data.practice.management_audit_result, NON in data.management_audit_result.
-        // Prima si leggeva il livello sbagliato -> auditRaw sempre undefined ->
-        // "(nessun audit result)" su TUTTE le pratiche, anche le complete_synced.
         const detail = res.data?.data?.practice || res.data?.data || res.data;
         const auditRaw = detail?.management_audit_result;
-        let audit = null;
         if (typeof auditRaw === 'string') { try { audit = JSON.parse(auditRaw); } catch { audit = null; } } else if (typeof auditRaw === 'object') { audit = auditRaw; }
-        if (audit) {
-          lines.push(`Status: ${audit.status || '-'}  Verified: ${audit.verified ?? '-'}`);
-          lines.push(`Message: ${audit.message || '-'}`);
-          if (Array.isArray(audit.present)) lines.push(`Present (${audit.present.length}): ${audit.present.map((x) => x.field).join(', ')}`);
-          // Includi anche il MOTIVO (found) e l'atteso (expected) per ogni campo: e' li'
-          // che si legge perche' un campo manca (es. odl.salvataggio -> "nothing_to_save" /
-          // "incomplete_rows_not_saved" / "rows_missing_after_reload"). Prima stampavamo solo
-          // il nome del campo, rendendo il log inutile per diagnosticare i partial_synced ODL.
-          if (Array.isArray(audit.missing) && audit.missing.length) {
-            lines.push(`Missing (${audit.missing.length}):`);
-            audit.missing.forEach((x) => lines.push(`  - ${x.field}${x.found != null ? ` | trovato: ${x.found}` : ''}${x.expected != null ? ` | atteso: ${x.expected}` : ''}`));
-          }
-          if (Array.isArray(audit.mismatch) && audit.mismatch.length) {
-            lines.push(`Mismatch (${audit.mismatch.length}):`);
-            audit.mismatch.forEach((x) => lines.push(`  - ${x.field}${x.found != null ? ` | trovato: ${x.found}` : ''}${x.expected != null ? ` | atteso: ${x.expected}` : ''}`));
-          }
-          if (audit.summary) lines.push(`Summary: ${JSON.stringify(audit.summary)}`);
-          if (audit.failed_phase) lines.push(`Failed phase: ${audit.failed_phase}`);
-        } else if (!live) {
-          lines.push('(nessun audit result)');
-        }
-
-        // LOG WORKER COMPLETO: e' QUI che si debugga (doc_save diag, grid_row_cell
-        // reason, grid_row_articolo ok...). Sorgente preferita = risultato live del batch
-        // sync (fasi dettagliate); fallback = audit persistito. buildWorkerLogLines stampa
-        // TUTTI i campi extra di ogni azione, non solo i nomi delle fasi.
-        const liveTd = live ? extractYapTechnicalDiagnostics(live) : null;
-        const detailPhases =
-          (live && Array.isArray(live.worker_phases) && live.worker_phases.length && live.worker_phases)
-          || (liveTd && Array.isArray(liveTd.workerPhases) && liveTd.workerPhases.length && liveTd.workerPhases)
-          || (audit && Array.isArray(audit.worker_phases) && audit.worker_phases.length && audit.worker_phases)
-          || [];
-        if (detailPhases.length) {
-          const last = detailPhases[detailPhases.length - 1];
-          lines.push(`Last phase: ${last?.phase || '-'}:${last?.status || '-'}`);
-          lines.push(`Phases (${detailPhases.length}): ${detailPhases.map((ph) => ph.phase).join(' -> ')}`);
-          lines.push('--- worker log ---');
-          lines.push(buildWorkerLogLines(detailPhases));
-        } else {
-          lines.push('(log worker non disponibile: rilancia "Sync tutte" e poi copia)');
-        }
-        const stdoutTail = liveTd?.stdoutTail || audit?.stdout_tail;
-        const stderrTail = liveTd?.stderrTail || audit?.stderr_tail;
-        if (stdoutTail) { lines.push('--- stdout tail ---'); lines.push(stdoutTail); }
-        if (stderrTail) { lines.push('--- stderr tail ---'); lines.push(stderrTail); }
       } catch (err) {
-        lines.push(`Errore caricamento: ${err?.message || err}`);
+        const code = err?.response?.status;
+        lines.push(code === 401
+          ? 'Audit persistito non caricato: 401 (auth Telegram scaduta — riapri il mini-app da Telegram). Uso il log live se disponibile.'
+          : `Audit persistito non caricato: ${err?.message || err}`);
       }
+      if (audit) {
+        lines.push(`Status: ${audit.status || '-'}  Verified: ${audit.verified ?? '-'}`);
+        lines.push(`Message: ${audit.message || '-'}`);
+        if (Array.isArray(audit.present)) lines.push(`Present (${audit.present.length}): ${audit.present.map((x) => x.field).join(', ')}`);
+        // Includi anche il MOTIVO (found) e l'atteso (expected) per ogni campo mancante.
+        if (Array.isArray(audit.missing) && audit.missing.length) {
+          lines.push(`Missing (${audit.missing.length}):`);
+          audit.missing.forEach((x) => lines.push(`  - ${x.field}${x.found != null ? ` | trovato: ${x.found}` : ''}${x.expected != null ? ` | atteso: ${x.expected}` : ''}`));
+        }
+        if (Array.isArray(audit.mismatch) && audit.mismatch.length) {
+          lines.push(`Mismatch (${audit.mismatch.length}):`);
+          audit.mismatch.forEach((x) => lines.push(`  - ${x.field}${x.found != null ? ` | trovato: ${x.found}` : ''}${x.expected != null ? ` | atteso: ${x.expected}` : ''}`));
+        }
+        if (audit.summary) lines.push(`Summary: ${JSON.stringify(audit.summary)}`);
+        if (audit.failed_phase) lines.push(`Failed phase: ${audit.failed_phase}`);
+      } else if (!live) {
+        lines.push('(nessun audit result)');
+      }
+
+      // 2) LOG WORKER COMPLETO — SEMPRE, anche se il fetch sopra e' fallito. E' QUI che si
+      //    debugga (doc_save diag, grid_row_cell reason, grid_row_articolo ok...). Sorgente
+      //    preferita = risultato live del batch sync; fallback = audit persistito.
+      const liveTd = live ? extractYapTechnicalDiagnostics(live) : null;
+      const detailPhases =
+        (live && Array.isArray(live.worker_phases) && live.worker_phases.length && live.worker_phases)
+        || (liveTd && Array.isArray(liveTd.workerPhases) && liveTd.workerPhases.length && liveTd.workerPhases)
+        || (audit && Array.isArray(audit.worker_phases) && audit.worker_phases.length && audit.worker_phases)
+        || [];
+      if (detailPhases.length) {
+        const last = detailPhases[detailPhases.length - 1];
+        lines.push(`Last phase: ${last?.phase || '-'}:${last?.status || '-'}`);
+        lines.push(`Phases (${detailPhases.length}): ${detailPhases.map((ph) => ph.phase).join(' -> ')}`);
+        lines.push('--- worker log ---');
+        lines.push(buildWorkerLogLines(detailPhases));
+      } else {
+        lines.push('(log worker non disponibile: rilancia "Sync tutte 6" e poi subito "Copia log tutte", senza ricaricare la pagina)');
+      }
+      const stdoutTail = liveTd?.stdoutTail || audit?.stdout_tail;
+      const stderrTail = liveTd?.stderrTail || audit?.stderr_tail;
+      if (stdoutTail) { lines.push('--- stdout tail ---'); lines.push(stdoutTail); }
+      if (stderrTail) { lines.push('--- stderr tail ---'); lines.push(stderrTail); }
     }
     const text = `YAP BATCH LOG \u2014 ${new Date().toISOString()}\n${lines.join('\n')}`;
     try {
