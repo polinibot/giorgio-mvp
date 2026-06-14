@@ -262,13 +262,23 @@ async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace
     // 1) Chiudi il messaggio di blocco (es. ODL "[Chiudi]") che impedisce di aprire il popup.
     const dismissed = await dismissBlockingMessage(page).catch(() => false);
     await page.waitForTimeout(300);
-    // 2) Apri il popup appuntamento e cerca il link "Gestione pratica", con RETRY: il popup
-    //    puo' tardare e un singolo tentativo a 500ms falliva (odl_fix_practice_link clicked=false).
-    await page.mouse.click(event.x, event.y);
-    // ASPETTA che il popup "Dettagli appuntamento" sia renderizzato PRIMA di cercare il
-    // link "Gestione pratica" — come lo script provato yap-delete-linked-odl.mjs. Senza
-    // questa attesa i 500ms erano troppo pochi e il link non si trovava (clicked=false),
-    // bloccando tutto l'auto-fix ODL al primo passo.
+    // 2) Apri il popup appuntamento VIA LOCATOR (come il flusso principale, opening_
+    //    appointment_details via_locator=true): il click a coordinate grezze (event.x,
+    //    event.y) QUI non apriva il popup -> waitFor "Dettagli appuntamento" andava in
+    //    timeout 15s e il link "Gestione pratica" non si trovava (clicked=false).
+    await page.mouse.click(300, 128); // deseleziona (area neutra)
+    await page.waitForTimeout(150);
+    const titleNeedle = String(event.title || "").trim();
+    const timeNeedle = String(event.time || "").trim();
+    const evLoc = page.locator(".fc-time-grid-event, .fc-event").filter({ hasText: titleNeedle });
+    const exactLoc = timeNeedle ? evLoc.filter({ hasText: timeNeedle }).first() : evLoc.first();
+    try {
+      await exactLoc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+      await exactLoc.click({ timeout: 8000 });
+    } catch {
+      await page.mouse.click(event.x, event.y); // fallback coordinate
+    }
+    // Aspetta che "Dettagli appuntamento" sia visibile prima di cercare il link pratica.
     await page.getByText("Dettagli appuntamento").first()
       .waitFor({ state: "visible", timeout: 15000 }).catch(() => {});
     await page.waitForTimeout(300);
