@@ -3690,6 +3690,27 @@ async function saveWorkDocument(page, args = {}) {
   await safeEvaluate(page, () => { try { document.activeElement && document.activeElement.blur(); } catch {} }).catch(() => {});
   await page.waitForTimeout(250).catch(() => {});
 
+  // 1b) Chiudi eventuali popup "DETTAGLIO RIGA"/catalogo rimasti aperti. Sulle righe
+  // articolo (MAN/MAC/MATT) il click su qta/prezzo a volte apre il dettaglio articolo
+  // invece dell'editor inline (vedi grid_row_cell reason=editor_not_opened): il dialog
+  // resta aperto al salvataggio, blocca/ritarda il click su Salva e fa risultare
+  // odl.salvataggio "mancante" (ODL officina sempre partial). Lo chiudiamo con Escape.
+  for (let i = 0; i < 4; i += 1) {
+    const hasBlockingDialog = await safeEvaluate(page, () => {
+      const isVisible = (el) => {
+        const r = el.getBoundingClientRect();
+        const s = window.getComputedStyle(el);
+        return r.width > 6 && r.height > 6 && s.display !== "none" && s.visibility !== "hidden";
+      };
+      return [...document.querySelectorAll(".gwt-DialogBox, .gwt-DecoratedPopupPanel, .gwt-PopupPanel")]
+        .filter(isVisible)
+        .some((p) => /dettaglio riga|codice articolo|aggiungi altri ricambi|rimpiazza ricambio/i.test(p.textContent || ""));
+    }).catch(() => false);
+    if (!hasBlockingDialog) break;
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(300).catch(() => {});
+  }
+
   const info = await locate();
   if (!info.found) { const s = await shot("notfound"); logAction("doc_save", { found: false, shot: s }); return { ok: false, reason: "save_btn_not_found" }; }
   if (info.disabled) { logAction("doc_save", { found: true, disabled: true, note: "niente da salvare" }); return { ok: false, reason: "nothing_to_save", disabled: true }; }
@@ -3735,10 +3756,12 @@ async function saveWorkDocument(page, args = {}) {
   // finale: se il bottone ora e' disabilitato (o sparito), il salvataggio e' riuscito.
   // Diamo anche un piccolo margine per i save lenti prima di arrenderci.
   if (!becameDisabled && !notif && !rpc) {
-    for (let i = 0; i < 10; i += 1) {
+    // 18 x 400ms = ~7s: i save ODL piu' lenti (officina, con popup articolo) si
+    // disabilitano appena dopo la finestra di polling principale.
+    for (let i = 0; i < 18; i += 1) {
       const finalState = await locate();
       if (!finalState.found || finalState.disabled) { becameDisabled = true; break; }
-      await page.waitForTimeout(300).catch(() => {});
+      await page.waitForTimeout(400).catch(() => {});
     }
   }
 
