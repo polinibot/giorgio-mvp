@@ -259,7 +259,16 @@ async function handleBlockingDocAndRetry(page, event, dateIso, searchTerm, trace
   page.on("dialog", onDialog);
   try {
     trace?.mark(`${kind}_fix_open_popup`, { event: event.title });
-    // 1) Chiudi il messaggio di blocco (es. ODL "[Chiudi]") che impedisce di aprire il popup.
+    // 0) STATO PULITO: dopo il delete fallito resta un overlay di blocco che copre l'agenda
+    //    e rende l'evento NON cliccabile (locator.click in timeout). Il flusso principale
+    //    apre via_locator solo dopo un openAgenda pulito. Forziamo un reload reale +
+    //    openAgendaWithRecovery (come lo stato fresco dello script standalone) cosi'
+    //    l'evento torna cliccabile.
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 20000 }).catch(() => {});
+    await openAgendaWithRecovery(page, { dateIso, username: process.env.YAP_USERNAME, password: process.env.YAP_PASSWORD }).catch(() => {});
+    await page.waitForTimeout(500);
+    trace?.mark(`${kind}_fix_clean_reload`);
+    // 1) Chiudi eventuale messaggio di blocco residuo (es. ODL "[Chiudi]").
     const dismissed = await dismissBlockingMessage(page).catch(() => false);
     await page.waitForTimeout(300);
     // 2) Apri il popup appuntamento VIA LOCATOR (come il flusso principale, opening_
